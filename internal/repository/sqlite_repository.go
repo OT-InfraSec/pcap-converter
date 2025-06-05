@@ -35,7 +35,32 @@ func (r *SQLiteRepository) createTables() error {
 			layers TEXT NOT NULL,
 			protocols TEXT
 		);`,
-		// Add other tables as needed (devices, flows, dns_queries)
+		`CREATE TABLE IF NOT EXISTS devices (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			address TEXT NOT NULL,
+			address_type TEXT NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL,
+			address_sub_type TEXT,
+			address_scope TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS flows (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source TEXT NOT NULL,
+			destination TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			packets INTEGER NOT NULL,
+			bytes INTEGER NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL,
+			source_device_id INTEGER,
+			destination_device_id INTEGER,
+			min_packet_size INTEGER,
+			max_packet_size INTEGER,
+			packet_refs TEXT
+		);
+		`,
+		// Add other tables as needed (dns_queries)
 	}
 	for _, q := range queries {
 		if _, err := r.db.Exec(q); err != nil {
@@ -58,6 +83,39 @@ func (r *SQLiteRepository) AddPacket(packet *model.Packet) error {
 	return err
 }
 
+func (r *SQLiteRepository) AddDevice(device *model.Device) error {
+	_, err := r.db.Exec(
+		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope) VALUES (?, ?, ?, ?, ?, ?);`,
+		device.Address,
+		device.AddressType,
+		device.FirstSeen.Format(time.RFC3339Nano),
+		device.LastSeen.Format(time.RFC3339Nano),
+		device.AddressSubType,
+		device.AddressScope,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
+	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
+	_, err := r.db.Exec(
+		`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		flow.Source,
+		flow.Destination,
+		flow.Protocol,
+		flow.Packets,
+		flow.Bytes,
+		flow.FirstSeen.Format(time.RFC3339Nano),
+		flow.LastSeen.Format(time.RFC3339Nano),
+		flow.SourceDeviceID,
+		flow.DestinationDeviceID,
+		flow.MinPacketSize,
+		flow.MaxPacketSize,
+		string(packetRefsJSON),
+	)
+	return err
+}
+
 func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 	rows, err := r.db.Query(`SELECT id, timestamp, length, layers, protocols FROM packets`)
 	if err != nil {
@@ -67,10 +125,10 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 	var packets []*model.Packet
 	for rows.Next() {
 		var (
-			id int64
-			tsStr string
-			length int
-			layersStr string
+			id           int64
+			tsStr        string
+			length       int
+			layersStr    string
 			protocolsStr string
 		)
 		if err := rows.Scan(&id, &tsStr, &length, &layersStr, &protocolsStr); err != nil {
@@ -90,16 +148,6 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 		})
 	}
 	return packets, nil
-}
-
-func (r *SQLiteRepository) AddDevice(device *model.Device) error {
-	// Stub for now
-	return nil
-}
-
-func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
-	// Stub for now
-	return nil
 }
 
 func (r *SQLiteRepository) AddDNSQuery(query *model.DNSQuery) error {
