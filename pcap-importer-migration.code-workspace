@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../pcap-importer"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}
