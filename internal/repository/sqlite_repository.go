@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"time"
 
 	"pcap-importer-golang/internal/model"
@@ -84,6 +85,11 @@ func (r *SQLiteRepository) AddPacket(packet *model.Packet) error {
 }
 
 func (r *SQLiteRepository) AddDevice(device *model.Device) error {
+	// Validiere das Device bevor es zur Datenbank hinzugefügt wird
+	if err := device.Validate(); err != nil {
+		return err
+	}
+
 	_, err := r.db.Exec(
 		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope) VALUES (?, ?, ?, ?, ?, ?);`,
 		device.Address,
@@ -97,6 +103,11 @@ func (r *SQLiteRepository) AddDevice(device *model.Device) error {
 }
 
 func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
+	// Validiere den Flow bevor er zur Datenbank hinzugefügt wird
+	if err := flow.Validate(); err != nil {
+		return err
+	}
+
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
 	_, err := r.db.Exec(
 		`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
@@ -121,7 +132,14 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			// Log the error but do not return it, as we are already returning packets
+			// This is a best-effort cleanup
+			log.Printf("Error closing rows: %v", err)
+		}
+	}(rows)
 	var packets []*model.Packet
 	for rows.Next() {
 		var (

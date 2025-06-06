@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -11,6 +12,28 @@ import (
 var macAddressRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 
 func isValidIPAddress(address string) bool {
+	// Entferne Port-Teil, falls vorhanden (z.B. 192.168.1.1:80 -> 192.168.1.1)
+	if strings.Contains(address, ":") {
+		// IPv6-Adressen haben mehrere Doppelpunkte, prüfe daher ob (...)
+		if strings.Count(address, ":") > 2 && strings.Contains(address, "]:") {
+			// IPv6 mit Port: [2001:db8::1]:80
+			parts := strings.Split(address, "]:")
+			if len(parts) == 2 {
+				ipv6 := strings.TrimPrefix(parts[0], "[")
+				return net.ParseIP(ipv6) != nil
+			}
+		} else if strings.Count(address, ":") == 1 {
+			// IPv4 mit Port: 192.168.1.1:80
+			parts := strings.Split(address, ":")
+			return net.ParseIP(parts[0]) != nil
+		}
+	}
+
+	// Entferne zusätzliche Anmerkungen in Klammern
+	if strings.Contains(address, "(") {
+		return false
+	}
+
 	ip := net.ParseIP(address)
 	return ip != nil
 }
@@ -22,16 +45,82 @@ func isValidMACAddress(address string) bool {
 func isValidAddress(address, protocol string) bool {
 	switch strings.ToUpper(protocol) {
 	case "TCP", "UDP", "ICMP", "ICMPV6":
-		return isValidIPAddress(address)
+		return isValidIPAddressPlusPort(address)
 	case "ARP", "ETHERNET":
 		return isValidMACAddress(address)
 	case "DNS":
 		// DNS kann sowohl IP als auch Hostnamen haben
 		return isValidIPAddress(address) || strings.Contains(address, ".")
+	case "IPV4", "IPV6", "IP":
+		// Bei IPv4/IPv6-Adressen nur die IP-Adresse prüfen
+		return isValidIPAddress(address)
 	default:
 		// Bei unbekannten Protokollen: true zurückgeben
 		return true
 	}
+}
+
+func isValidIPAddressPlusPort(address string) bool {
+	// Für leere Adressen
+	if address == "" {
+		return false
+	}
+
+	// Fail if annotation in parentheses is present
+	if idx := strings.Index(address, "("); idx != -1 {
+		return false
+	}
+
+	// Prüfe auf IPv6 mit Port: [IPv6]:Port
+	if strings.Contains(address, "[") && strings.Contains(address, "]:") {
+		parts := strings.Split(address, "]:")
+		if len(parts) == 2 {
+			ipv6 := strings.TrimPrefix(parts[0], "[")
+			port := parts[1]
+
+			// Validiere IPv6-Adresse
+			if net.ParseIP(ipv6) == nil {
+				return false
+			}
+
+			// Validiere Port (optional)
+			if port != "" {
+				portNum, err := strconv.Atoi(port)
+				return err == nil && portNum > 0 && portNum < 65536
+			}
+			return true
+		}
+		return false
+	}
+
+	// Prüfe auf IPv4 mit Port: IPv4:Port
+	parts := strings.Split(address, ":")
+	if len(parts) > 1 {
+		// Mehr als ein Doppelpunkt deutet auf IPv6 ohne Klammern hin
+		if len(parts) > 2 {
+			// Könnte eine IPv6-Adresse ohne Klammern sein
+			return net.ParseIP(address) != nil
+		}
+
+		// IPv4 mit Port
+		ip := parts[0]
+		port := parts[1]
+
+		// Validiere IPv4-Adresse
+		if net.ParseIP(ip) == nil {
+			return false
+		}
+
+		// Validiere Port (optional)
+		if port != "" {
+			portNum, err := strconv.Atoi(port)
+			return err == nil && portNum > 0 && portNum < 65536
+		}
+		return true
+	}
+
+	// Nur IP-Adresse ohne Port
+	return net.ParseIP(address) != nil
 }
 
 // Packet represents a network packet.

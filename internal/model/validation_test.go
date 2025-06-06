@@ -68,10 +68,10 @@ func TestFlowValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "happy path - valid TCP flow",
+			name: "happy path - valid TCP flow with IP addresses",
 			flow: Flow{
-				Source:        "192.168.1.1",
-				Destination:   "192.168.1.2",
+				Source:        "192.168.1.1:1234",
+				Destination:   "192.168.1.2:80",
 				Protocol:      "TCP",
 				Packets:       100,
 				Bytes:         1500,
@@ -83,10 +83,23 @@ func TestFlowValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "happy path - valid TCP flow with IPv6 addresses",
+			flow: Flow{
+				Source:      "[2001:db8::1]:1234",
+				Destination: "[2001:db8::2]:80",
+				Protocol:    "TCP",
+				Packets:     100,
+				Bytes:       1500,
+				FirstSeen:   now,
+				LastSeen:    later,
+			},
+			wantErr: false,
+		},
+		{
 			name: "bad path - invalid IP address for TCP",
 			flow: Flow{
 				Source:      "invalid-ip",
-				Destination: "192.168.1.2",
+				Destination: "192.168.1.2:80",
 				Protocol:    "TCP",
 				Packets:     100,
 				Bytes:       1500,
@@ -124,7 +137,7 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "happy path - valid DNS flow with hostname",
 			flow: Flow{
-				Source:      "192.168.1.1",
+				Source:      "192.168.1.1:53",
 				Destination: "dns.example.com",
 				Protocol:    "DNS",
 				Packets:     1,
@@ -135,10 +148,36 @@ func TestFlowValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "bad path - ip addresses contain additional characters",
+			name: "bad path - ip addresses contain invalid characters",
+			flow: Flow{
+				Source:      "invalid-ip-address-format",
+				Destination: "not@valid!ip",
+				Protocol:    "UDP",
+				Packets:     1,
+				Bytes:       64,
+				FirstSeen:   now,
+				LastSeen:    later,
+			},
+			wantErr: true,
+		},
+		{
+			name: "bad path - ip addresses with annotations",
 			flow: Flow{
 				Source:      "fe80::bc63:ff16:c0cd:87d5:546(dhcpv6-client)",
 				Destination: "10.60.143.255:1740(encore)",
+				Protocol:    "UDP",
+				Packets:     1,
+				Bytes:       64,
+				FirstSeen:   now,
+				LastSeen:    later,
+			},
+			wantErr: true, // Annotations are not allowed in IP addresses
+		},
+		{
+			name: "happy path - special multicast addresses",
+			flow: Flow{
+				Source:      "192.168.1.1:5353",
+				Destination: "224.0.0.251:5353(mdns)", // mDNS multicast
 				Protocol:    "UDP",
 				Packets:     1,
 				Bytes:       64,

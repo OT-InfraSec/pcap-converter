@@ -18,10 +18,18 @@ func (m *MockRepository) AddPacket(packet *model.Packet) error {
 	return nil
 }
 func (m *MockRepository) AddDevice(device *model.Device) error {
+	// Validiere das Device, bevor es hinzugefügt wird
+	if err := device.Validate(); err != nil {
+		return err
+	}
 	m.Devices = append(m.Devices, device)
 	return nil
 }
 func (m *MockRepository) AddFlow(flow *model.Flow) error {
+	// Validiere den Flow, bevor er hinzugefügt wird
+	if err := flow.Validate(); err != nil {
+		return err
+	}
 	m.Flows = append(m.Flows, flow)
 	return nil
 }
