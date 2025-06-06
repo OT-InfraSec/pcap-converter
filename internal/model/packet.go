@@ -46,12 +46,12 @@ func isValidAddress(address, protocol string) bool {
 	switch strings.ToUpper(protocol) {
 	case "TCP", "UDP", "ICMP", "ICMPV6":
 		return IsValidIPAddressPlusPort(address)
-	case "ARP", "ETHERNET":
+	case "ETHERNET":
 		return IsValidMACAddress(address)
 	case "DNS":
 		// DNS can have both IP and hostname
 		return IsValidIPAddress(address) || strings.Contains(address, ".")
-	case "IPV4", "IPV6", "IP":
+	case "ARP", "IPV4", "IPV6", "IP":
 		// For IPv4/IPv6 addresses, only check the IP address
 		return IsValidIPAddress(address)
 	default:

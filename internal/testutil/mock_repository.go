@@ -2,15 +2,18 @@ package testutil
 
 import (
 	"pcap-importer-golang/internal/model"
+	"pcap-importer-golang/internal/repository"
 )
 
 type MockRepository struct {
-	Packets      []*model.Packet
-	Devices      []*model.Device
-	Flows        []*model.Flow
-	DNSQueries   []*model.DNSQuery
-	CommitCalled bool
-	CloseCalled  bool
+	repository.Repository
+	Packets         []*model.Packet
+	Devices         []*model.Device
+	Flows           []*model.Flow
+	DNSQueries      []*model.DNSQuery
+	DeviceRelations []*model.DeviceRelation
+	CommitCalled    bool
+	CloseCalled     bool
 }
 
 func (m *MockRepository) AddPacket(packet *model.Packet) error {
@@ -43,5 +46,9 @@ func (m *MockRepository) Commit() error {
 }
 func (m *MockRepository) Close() error {
 	m.CloseCalled = true
+	return nil
+}
+func (m *MockRepository) AddDeviceRelation(relation *model.DeviceRelation) error {
+	m.DeviceRelations = append(m.DeviceRelations, relation)
 	return nil
 }
