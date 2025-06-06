@@ -166,6 +166,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	packetID := int64(0)
 
+	seenFlows := make(map[string]struct{})
+
 	for packet := range packetSource.Packets() {
 		layersMap := make(map[string]interface{})
 		protocols := []string{}
@@ -173,7 +175,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		var (
 			srcMAC, dstMAC   string
 			srcIP, dstIP     string
-			srcPort, dstPort *uint16
+			srcPort, dstPort string
 			flowProto        string
 		)
 
@@ -188,6 +190,26 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"ethernet_type": eth.EthernetType.String(),
 			}
 			protocols = append(protocols, "ethernet")
+		}
+
+		// ARP
+		if arpLayer := packet.Layer(layers.LayerTypeARP); arpLayer != nil {
+			arp := arpLayer.(*layers.ARP)
+			srcMAC = net.HardwareAddr(arp.SourceHwAddress).String()
+			dstMAC = net.HardwareAddr(arp.DstHwAddress).String()
+			srcIP = net.IP(arp.SourceProtAddress).String()
+			dstIP = net.IP(arp.DstProtAddress).String()
+			flowProto = "arp"
+			layersMap["arp"] = map[string]interface{}{
+				"src_hw_addr":    srcMAC,
+				"dst_hw_addr":    dstMAC,
+				"src_ip":         srcIP,
+				"dst_ip":         dstIP,
+				"hw_addr_size":   arp.HwAddressSize,
+				"prot_addr_size": arp.ProtAddressSize,
+				"operation":      arp.Operation,
+			}
+			protocols = append(protocols, "arp")
 		}
 
 		// IPv4
@@ -218,13 +240,35 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			protocols = append(protocols, "ipv6")
 		}
 
+		// ICMP
+		if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+			icmp := icmpLayer.(*layers.ICMPv4)
+			flowProto = "icmp"
+			layersMap["icmp"] = map[string]interface{}{
+				"type_code": icmp.TypeCode.String(),
+				"checksum":  icmp.Checksum,
+			}
+			protocols = append(protocols, "icmp")
+		}
+
+		// ICMPv6
+		if icmp6Layer := packet.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
+			icmp6 := icmp6Layer.(*layers.ICMPv6)
+			flowProto = "icmpv6"
+			layersMap["icmpv6"] = map[string]interface{}{
+				"type_code": icmp6.TypeCode.String(),
+				"checksum":  icmp6.Checksum,
+			}
+			protocols = append(protocols, "icmpv6")
+		}
+
 		// TCP
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			tcp := tcpLayer.(*layers.TCP)
 			srcPortNum := uint16(tcp.SrcPort)
 			dstPortNum := uint16(tcp.DstPort)
-			srcPort = &srcPortNum
-			dstPort = &dstPortNum
+			srcPort = fmt.Sprintf("%d", srcPortNum)
+			dstPort = fmt.Sprintf("%d", dstPortNum)
 			flowProto = "tcp"
 			layersMap["tcp"] = map[string]interface{}{
 				"src_port": tcp.SrcPort.String(),
@@ -250,8 +294,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			udp := udpLayer.(*layers.UDP)
 			srcPortNum := uint16(udp.SrcPort)
 			dstPortNum := uint16(udp.DstPort)
-			srcPort = &srcPortNum
-			dstPort = &dstPortNum
+			srcPort = fmt.Sprintf("%d", srcPortNum)
+			dstPort = fmt.Sprintf("%d", dstPortNum)
 			flowProto = "udp"
 			layersMap["udp"] = map[string]interface{}{
 				"src_port": udp.SrcPort.String(),
@@ -260,10 +304,31 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			protocols = append(protocols, "udp")
 		}
 
+		// DNS
+		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
+			dns := dnsLayer.(*layers.DNS)
+			layersMap["dns"] = map[string]interface{}{
+				"qr":          dns.QR,
+				"opcode":      dns.OpCode,
+				"aa":          dns.AA,
+				"tc":          dns.TC,
+				"rd":          dns.RD,
+				"ra":          dns.RA,
+				"z":           dns.Z,
+				"qdcount":     dns.QDCount,
+				"ancount":     dns.ANCount,
+				"nscount":     dns.NSCount,
+				"arcount":     dns.ARCount,
+				"questions":   dns.Questions,
+				"answers":     dns.Answers,
+				"authorities": dns.Authorities,
+				"additionals": dns.Additionals,
+			}
+			protocols = append(protocols, "dns")
+		}
+
 		timestamp := packet.Metadata().Timestamp
 		length := len(packet.Data())
-
-		// Create and store packet
 		modelPacket := &model.Packet{
 			ID:        packetID,
 			Timestamp: timestamp,
@@ -275,13 +340,16 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			return fmt.Errorf("failed to add packet: %w", err)
 		}
 
-		// Update devices
+		// Device extraction and storage
+		// Handle MAC addresses
 		if srcMAC != "" {
 			p.updateDevice(srcMAC, "MAC", timestamp, "")
 		}
 		if dstMAC != "" {
 			p.updateDevice(dstMAC, "MAC", timestamp, "")
 		}
+
+		// Handle IP addresses
 		if srcIP != "" {
 			addressSubType := "IPv4"
 			if strings.Count(srcIP, ":") > 1 {
@@ -297,17 +365,60 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			p.updateDevice(dstIP, "IP", timestamp, addressSubType)
 		}
 
-		// Update flows
+		// Flow extraction and storage
 		if srcIP != "" && dstIP != "" && flowProto != "" {
-			p.updateFlow(srcIP, dstIP, flowProto, timestamp, length, packetID, srcPort, dstPort)
-		}
+			var source, destination string
 
-		// Update services
-		if srcIP != "" && srcPort != nil {
-			p.updateService(srcIP, int(*srcPort), flowProto, timestamp)
-		}
-		if dstIP != "" && dstPort != nil {
-			p.updateService(dstIP, int(*dstPort), flowProto, timestamp)
+			// For protocols like TCP/UDP that have ports
+			if srcPort != "" && dstPort != "" {
+				// Format source and destination with ports
+				if strings.Count(srcIP, ":") > 1 {
+					// IPv6 with port
+					source = fmt.Sprintf("[%s]:%s", srcIP, srcPort)
+				} else {
+					// IPv4 with port
+					source = fmt.Sprintf("%s:%s", srcIP, srcPort)
+				}
+
+				if strings.Count(dstIP, ":") > 1 {
+					// IPv6 with port
+					destination = fmt.Sprintf("[%s]:%s", dstIP, dstPort)
+				} else {
+					// IPv4 with port
+					destination = fmt.Sprintf("%s:%s", dstIP, dstPort)
+				}
+			} else {
+				// For protocols like ICMP, ARP that don't have ports
+				source = srcIP
+				destination = dstIP
+			}
+
+			flowKey := fmt.Sprintf("%s-%s-%s", source, destination, flowProto)
+			if _, seen := seenFlows[flowKey]; !seen {
+				// Set minimum and maximum packet size
+				minSize := length
+				maxSize := length
+
+				flow := &model.Flow{
+					Source:        source,
+					Destination:   destination,
+					Protocol:      flowProto,
+					Packets:       1,
+					Bytes:         length,
+					FirstSeen:     timestamp,
+					LastSeen:      timestamp,
+					MinPacketSize: &minSize,
+					MaxPacketSize: &maxSize,
+					PacketRefs:    []int64{packetID},
+				}
+
+				if err := repo.AddFlow(flow); err != nil {
+					// Log the error but continue processing
+					fmt.Printf("Error adding flow %s -> %s: %v\n", source, destination, err)
+				} else {
+					seenFlows[flowKey] = struct{}{}
+				}
+			}
 		}
 
 		packetID++
