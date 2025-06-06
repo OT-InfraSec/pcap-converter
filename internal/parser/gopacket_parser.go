@@ -2,6 +2,8 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"pcap-importer-golang/internal/model"
 	"pcap-importer-golang/internal/repository"
@@ -39,7 +41,9 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			srcMAC, dstMAC   string
 			srcIP, dstIP     string
 			srcPort, dstPort string
-			flowProto        string
+			// Use uint16 to store numeric port values
+			srcPortNum, dstPortNum uint16
+			flowProto              string
 		)
 
 		// Ethernet
@@ -83,8 +87,12 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// TCP
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			tcp := tcpLayer.(*layers.TCP)
-			srcPort = tcp.SrcPort.String()
-			dstPort = tcp.DstPort.String()
+			// Get numeric port values
+			srcPortNum = uint16(tcp.SrcPort)
+			dstPortNum = uint16(tcp.DstPort)
+			// Convert to string for map storage
+			srcPort = strconv.Itoa(int(srcPortNum))
+			dstPort = strconv.Itoa(int(dstPortNum))
 			flowProto = "tcp"
 			layersMap["tcp"] = map[string]interface{}{
 				"src_port": srcPort,
@@ -107,8 +115,12 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// UDP
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			udp := udpLayer.(*layers.UDP)
-			srcPort = udp.SrcPort.String()
-			dstPort = udp.DstPort.String()
+			// Get numeric port values
+			srcPortNum = uint16(udp.SrcPort)
+			dstPortNum = uint16(udp.DstPort)
+			// Convert to string for map storage
+			srcPort = strconv.Itoa(int(srcPortNum))
+			dstPort = strconv.Itoa(int(dstPortNum))
 			flowProto = "udp"
 			layersMap["udp"] = map[string]interface{}{
 				"src_port": srcPort,
@@ -209,18 +221,50 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		if srcIP != "" && dstIP != "" && srcPort != "" && dstPort != "" && flowProto != "" {
 			flowKey := fmt.Sprintf("%s-%s-%s-%s-%s", srcIP, dstIP, srcPort, dstPort, flowProto)
 			if _, seen := seenFlows[flowKey]; !seen {
-				flow := &model.Flow{
-					Source:      fmt.Sprintf("%s:%s", srcIP, srcPort),
-					Destination: fmt.Sprintf("%s:%s", dstIP, dstPort),
-					Protocol:    flowProto,
-					Packets:     1,
-					Bytes:       length,
-					FirstSeen:   timestamp,
-					LastSeen:    timestamp,
-					PacketRefs:  []int64{packetID},
+				// Format source address correctly
+				var source, destination string
+
+				// Check if source is IPv6 and format accordingly
+				if strings.Count(srcIP, ":") > 1 {
+					// IPv6 address needs to be enclosed in square brackets
+					source = fmt.Sprintf("[%s]:%s", srcIP, srcPort)
+				} else {
+					// IPv4 address
+					source = fmt.Sprintf("%s:%s", srcIP, srcPort)
 				}
-				repo.AddFlow(flow)
-				seenFlows[flowKey] = struct{}{}
+
+				// Check if destination is IPv6 and format accordingly
+				if strings.Count(dstIP, ":") > 1 {
+					// IPv6 address needs to be enclosed in square brackets
+					destination = fmt.Sprintf("[%s]:%s", dstIP, dstPort)
+				} else {
+					// IPv4 address
+					destination = fmt.Sprintf("%s:%s", dstIP, dstPort)
+				}
+
+				// Set minimum and maximum packet size
+				minSize := length
+				maxSize := length
+
+				flow := &model.Flow{
+					Source:        source,
+					Destination:   destination,
+					Protocol:      flowProto,
+					Packets:       1,
+					Bytes:         length,
+					FirstSeen:     timestamp,
+					LastSeen:      timestamp,
+					MinPacketSize: &minSize,
+					MaxPacketSize: &maxSize,
+					PacketRefs:    []int64{packetID},
+				}
+
+				if err := repo.AddFlow(flow); err != nil {
+					// Log the error but continue processing
+					fmt.Printf("Error adding flow %s -> %s: %v\n", source, destination, err)
+				} else {
+					seenFlows[flowKey] = struct{}{}
+				}
 			}
 		}
 
