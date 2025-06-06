@@ -12,24 +12,24 @@ import (
 var macAddressRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 
 func IsValidIPAddress(address string) bool {
-	// Entferne Port-Teil, falls vorhanden (z.B. 192.168.1.1:80 -> 192.168.1.1)
+	// Remove port part if present (e.g., 192.168.1.1:80 -> 192.168.1.1)
 	if strings.Contains(address, ":") {
-		// IPv6-Adressen haben mehrere Doppelpunkte, prüfe daher ob (...)
+		// IPv6 addresses have multiple colons, check if (...)
 		if strings.Count(address, ":") > 2 && strings.Contains(address, "]:") {
-			// IPv6 mit Port: [2001:db8::1]:80
+			// IPv6 with port: [2001:db8::1]:80
 			parts := strings.Split(address, "]:")
 			if len(parts) == 2 {
 				ipv6 := strings.TrimPrefix(parts[0], "[")
 				return net.ParseIP(ipv6) != nil
 			}
 		} else if strings.Count(address, ":") == 1 {
-			// IPv4 mit Port: 192.168.1.1:80
+			// IPv4 with port: 192.168.1.1:80
 			parts := strings.Split(address, ":")
 			return net.ParseIP(parts[0]) != nil
 		}
 	}
 
-	// Entferne zusätzliche Anmerkungen in Klammern
+	// Remove additional annotations in parentheses
 	if strings.Contains(address, "(") {
 		return false
 	}
@@ -49,19 +49,19 @@ func isValidAddress(address, protocol string) bool {
 	case "ARP", "ETHERNET":
 		return IsValidMACAddress(address)
 	case "DNS":
-		// DNS kann sowohl IP als auch Hostnamen haben
+		// DNS can have both IP and hostname
 		return IsValidIPAddress(address) || strings.Contains(address, ".")
 	case "IPV4", "IPV6", "IP":
-		// Bei IPv4/IPv6-Adressen nur die IP-Adresse prüfen
+		// For IPv4/IPv6 addresses, only check the IP address
 		return IsValidIPAddress(address)
 	default:
-		// Bei unbekannten Protokollen: true zurückgeben
+		// For unknown protocols: return true
 		return true
 	}
 }
 
 func IsValidIPAddressPlusPort(address string) bool {
-	// Für leere Adressen
+	// For empty addresses
 	if address == "" {
 		return false
 	}
@@ -71,19 +71,19 @@ func IsValidIPAddressPlusPort(address string) bool {
 		return false
 	}
 
-	// Prüfe auf IPv6 mit Port: [IPv6]:Port
+	// Check for IPv6 with port: [IPv6]:Port
 	if strings.Contains(address, "[") && strings.Contains(address, "]:") {
 		parts := strings.Split(address, "]:")
 		if len(parts) == 2 {
 			ipv6 := strings.TrimPrefix(parts[0], "[")
 			port := parts[1]
 
-			// Validiere IPv6-Adresse
+			// Validate IPv6 address
 			if net.ParseIP(ipv6) == nil {
 				return false
 			}
 
-			// Validiere Port (optional)
+			// Validate port (optional)
 			if port != "" {
 				portNum, err := strconv.Atoi(port)
 				return err == nil && portNum > 0 && portNum < 65536
@@ -93,25 +93,25 @@ func IsValidIPAddressPlusPort(address string) bool {
 		return false
 	}
 
-	// Prüfe auf IPv4 mit Port: IPv4:Port
+	// Check for IPv4 with port: IPv4:Port
 	parts := strings.Split(address, ":")
 	if len(parts) > 1 {
-		// Mehr als ein Doppelpunkt deutet auf IPv6 ohne Klammern hin
+		// More than one colon indicates IPv6 without brackets
 		if len(parts) > 2 {
-			// Könnte eine IPv6-Adresse ohne Klammern sein
+			// Could be an IPv6 address without brackets
 			return net.ParseIP(address) != nil
 		}
 
-		// IPv4 mit Port
+		// IPv4 with port
 		ip := parts[0]
 		port := parts[1]
 
-		// Validiere IPv4-Adresse
+		// Validate IPv4 address
 		if net.ParseIP(ip) == nil {
 			return false
 		}
 
-		// Validiere Port (optional)
+		// Validate port (optional)
 		if port != "" {
 			portNum, err := strconv.Atoi(port)
 			return err == nil && portNum > 0 && portNum < 65536
@@ -119,7 +119,7 @@ func IsValidIPAddressPlusPort(address string) bool {
 		return true
 	}
 
-	// Nur IP-Adresse ohne Port
+	// Only IP address without port
 	return net.ParseIP(address) != nil
 }
 
@@ -143,6 +143,16 @@ type Device struct {
 	AddressScope   string
 }
 
+// Service represents a network service.
+type Service struct {
+	ID        int64
+	IP        string
+	Port      int
+	Protocol  string
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
 // Flow represents a network flow between devices or services.
 type Flow struct {
 	ID                  int64
@@ -158,6 +168,14 @@ type Flow struct {
 	PacketRefs          []int64
 	MinPacketSize       *int
 	MaxPacketSize       *int
+}
+
+// DeviceRelation represents a relationship between two devices.
+type DeviceRelation struct {
+	ID        int64
+	DeviceID1 int64
+	DeviceID2 int64
+	Comment   string
 }
 
 // DNSQuery represents a DNS transaction extracted from packets.
@@ -185,6 +203,31 @@ func (d *Device) Validate() error {
 		return errors.New("last seen time must not be zero")
 	}
 	if d.LastSeen.Before(d.FirstSeen) {
+		return errors.New("last seen time must not be before first seen time")
+	}
+	return nil
+}
+
+func (s *Service) Validate() error {
+	if s.IP == "" {
+		return errors.New("IP must not be empty")
+	}
+	if !IsValidIPAddress(s.IP) {
+		return errors.New("invalid IP address format")
+	}
+	if s.Port < 0 || s.Port > 65535 {
+		return errors.New("port must be between 0 and 65535")
+	}
+	if s.Protocol == "" {
+		return errors.New("protocol must not be empty")
+	}
+	if s.FirstSeen.IsZero() {
+		return errors.New("first seen time must not be zero")
+	}
+	if s.LastSeen.IsZero() {
+		return errors.New("last seen time must not be zero")
+	}
+	if s.LastSeen.Before(s.FirstSeen) {
 		return errors.New("last seen time must not be before first seen time")
 	}
 	return nil
@@ -229,6 +272,35 @@ func (f *Flow) Validate() error {
 	}
 	if f.MinPacketSize != nil && f.MaxPacketSize != nil && *f.MinPacketSize > *f.MaxPacketSize {
 		return errors.New("minimum packet size must not be greater than maximum packet size")
+	}
+	return nil
+}
+
+func (dr *DeviceRelation) Validate() error {
+	if dr.DeviceID1 == 0 {
+		return errors.New("device ID 1 must not be zero")
+	}
+	if dr.DeviceID2 == 0 {
+		return errors.New("device ID 2 must not be zero")
+	}
+	if dr.DeviceID1 == dr.DeviceID2 {
+		return errors.New("device IDs must be different")
+	}
+	return nil
+}
+
+func (dq *DNSQuery) Validate() error {
+	if dq.QueryingDeviceID == nil {
+		return errors.New("querying device ID must not be nil")
+	}
+	if dq.QueryName == "" {
+		return errors.New("query name must not be empty")
+	}
+	if dq.QueryType == "" {
+		return errors.New("query type must not be empty")
+	}
+	if dq.Timestamp.IsZero() {
+		return errors.New("timestamp must not be zero")
 	}
 	return nil
 }

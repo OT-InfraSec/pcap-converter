@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"pcap-importer-golang/internal/model"
@@ -45,6 +46,14 @@ func (r *SQLiteRepository) createTables() error {
 			address_sub_type TEXT,
 			address_scope TEXT
 		);`,
+		`CREATE TABLE IF NOT EXISTS services (
+			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ip TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL,
+			protocol TEXT
+		);`,
 		`CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			source TEXT NOT NULL,
@@ -58,11 +67,57 @@ func (r *SQLiteRepository) createTables() error {
 			destination_device_id INTEGER,
 			min_packet_size INTEGER,
 			max_packet_size INTEGER,
-			packet_refs TEXT
-		);
-		`,
-		// Add other tables as needed (dns_queries)
+			packet_refs TEXT,
+			FOREIGN KEY (source_device_id) REFERENCES devices (id),
+			FOREIGN KEY (destination_device_id) REFERENCES devices (id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS packet_protocols (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			packet_id INTEGER NOT NULL,
+			protocol TEXT NOT NULL,
+			FOREIGN KEY (packet_id) REFERENCES packets (id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS service_flows (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			service_id INTEGER NOT NULL,
+			flow_id INTEGER NOT NULL,
+			FOREIGN KEY (service_id) REFERENCES services (element_id),
+			FOREIGN KEY (flow_id) REFERENCES flows (id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS device_relations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			device_id_1 INTEGER NOT NULL,
+			device_id_2 INTEGER NOT NULL,
+			comment TEXT,
+			FOREIGN KEY (device_id_1) REFERENCES devices (id),
+			FOREIGN KEY (device_id_2) REFERENCES devices (id),
+			UNIQUE (device_id_1, device_id_2)
+		);`,
+		`CREATE TABLE IF NOT EXISTS dns_queries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			querying_device_id INTEGER,
+			answering_device_id INTEGER,
+			query_name TEXT NOT NULL,
+			query_type TEXT NOT NULL,
+			query_result TEXT,
+			timestamp TEXT NOT NULL,
+			UNIQUE (querying_device_id, answering_device_id, query_name, query_type, timestamp),
+			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
+			FOREIGN KEY (answering_device_id) REFERENCES devices (id)
+		);`,
+		// Create indexes for better query performance
+		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
+		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
+		`CREATE INDEX IF NOT EXISTS idx_services_ip_port ON services(ip, port);`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_protocol ON flows(protocol);`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_timestamps ON flows(first_seen, last_seen);`,
 	}
+
+	// Enable foreign key constraints
+	if _, err := r.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return err
+	}
+
 	for _, q := range queries {
 		if _, err := r.db.Exec(q); err != nil {
 			return err
@@ -168,9 +223,182 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 	return packets, nil
 }
 
+func (r *SQLiteRepository) AddService(service *model.Service) error {
+	if err := service.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`,
+		service.IP,
+		service.Port,
+		service.FirstSeen.Format(time.RFC3339Nano),
+		service.LastSeen.Format(time.RFC3339Nano),
+		service.Protocol,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) AddDeviceRelation(relation *model.DeviceRelation) error {
+	_, err := r.db.Exec(
+		`INSERT INTO device_relations (device_id_1, device_id_2, comment) VALUES (?, ?, ?);`,
+		relation.DeviceID1,
+		relation.DeviceID2,
+		relation.Comment,
+	)
+	return err
+}
+
 func (r *SQLiteRepository) AddDNSQuery(query *model.DNSQuery) error {
-	// Stub for now
-	return nil
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) 
+		VALUES (?, ?, ?, ?, ?, ?);`,
+		query.QueryingDeviceID,
+		query.AnsweringDeviceID,
+		query.QueryName,
+		query.QueryType,
+		query.QueryResult,
+		query.Timestamp.Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model.Service, error) {
+	query := "SELECT element_id, ip, port, first_seen, last_seen, protocol FROM services"
+	params := []interface{}{}
+
+	if len(filters) > 0 {
+		conditions := []string{}
+		for key, value := range filters {
+			conditions = append(conditions, key+" = ?")
+			params = append(params, value)
+		}
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	rows, err := r.db.Query(query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var services []*model.Service
+	for rows.Next() {
+		var (
+			elementID int64
+			ip        string
+			port      int
+			firstSeen string
+			lastSeen  string
+			protocol  string
+		)
+		if err := rows.Scan(&elementID, &ip, &port, &firstSeen, &lastSeen, &protocol); err != nil {
+			return nil, err
+		}
+
+		firstSeenTime, _ := time.Parse(time.RFC3339Nano, firstSeen)
+		lastSeenTime, _ := time.Parse(time.RFC3339Nano, lastSeen)
+
+		services = append(services, &model.Service{
+			ID:        elementID,
+			IP:        ip,
+			Port:      port,
+			FirstSeen: firstSeenTime,
+			LastSeen:  lastSeenTime,
+			Protocol:  protocol,
+		})
+	}
+	return services, nil
+}
+
+func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceRelation, error) {
+	query := "SELECT id, device_id_1, device_id_2, comment FROM device_relations"
+	params := []interface{}{}
+
+	if deviceID != nil {
+		query += " WHERE device_id_1 = ? OR device_id_2 = ?"
+		params = append(params, *deviceID, *deviceID)
+	}
+
+	rows, err := r.db.Query(query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var relations []*model.DeviceRelation
+	for rows.Next() {
+		var (
+			id        int64
+			deviceID1 int64
+			deviceID2 int64
+			comment   string
+		)
+		if err := rows.Scan(&id, &deviceID1, &deviceID2, &comment); err != nil {
+			return nil, err
+		}
+
+		relations = append(relations, &model.DeviceRelation{
+			ID:        id,
+			DeviceID1: deviceID1,
+			DeviceID2: deviceID2,
+			Comment:   comment,
+		})
+	}
+	return relations, nil
+}
+
+func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*model.DNSQuery, error) {
+	query := "SELECT id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp FROM dns_queries"
+	params := []interface{}{}
+
+	if len(filters) > 0 {
+		conditions := []string{}
+		for key, value := range filters {
+			conditions = append(conditions, key+" = ?")
+			params = append(params, value)
+		}
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	rows, err := r.db.Query(query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var queries []*model.DNSQuery
+	for rows.Next() {
+		var (
+			id                int64
+			queryingDeviceID  *int64
+			answeringDeviceID *int64
+			queryName         string
+			queryType         string
+			queryResult       map[string]interface{}
+			timestamp         string
+		)
+		if err := rows.Scan(&id, &queryingDeviceID, &answeringDeviceID, &queryName, &queryType, &queryResult, &timestamp); err != nil {
+			return nil, err
+		}
+
+		timestampTime, _ := time.Parse(time.RFC3339Nano, timestamp)
+
+		queries = append(queries, &model.DNSQuery{
+			ID:                id,
+			QueryingDeviceID:  queryingDeviceID,
+			AnsweringDeviceID: answeringDeviceID,
+			QueryName:         queryName,
+			QueryType:         queryType,
+			QueryResult:       queryResult,
+			Timestamp:         timestampTime,
+		})
+	}
+	return queries, nil
 }
 
 func (r *SQLiteRepository) Commit() error {
