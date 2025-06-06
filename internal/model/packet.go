@@ -11,7 +11,7 @@ import (
 
 var macAddressRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 
-func isValidIPAddress(address string) bool {
+func IsValidIPAddress(address string) bool {
 	// Entferne Port-Teil, falls vorhanden (z.B. 192.168.1.1:80 -> 192.168.1.1)
 	if strings.Contains(address, ":") {
 		// IPv6-Adressen haben mehrere Doppelpunkte, prüfe daher ob (...)
@@ -38,29 +38,29 @@ func isValidIPAddress(address string) bool {
 	return ip != nil
 }
 
-func isValidMACAddress(address string) bool {
+func IsValidMACAddress(address string) bool {
 	return macAddressRegex.MatchString(address)
 }
 
 func isValidAddress(address, protocol string) bool {
 	switch strings.ToUpper(protocol) {
 	case "TCP", "UDP", "ICMP", "ICMPV6":
-		return isValidIPAddressPlusPort(address)
+		return IsValidIPAddressPlusPort(address)
 	case "ARP", "ETHERNET":
-		return isValidMACAddress(address)
+		return IsValidMACAddress(address)
 	case "DNS":
 		// DNS kann sowohl IP als auch Hostnamen haben
-		return isValidIPAddress(address) || strings.Contains(address, ".")
+		return IsValidIPAddress(address) || strings.Contains(address, ".")
 	case "IPV4", "IPV6", "IP":
 		// Bei IPv4/IPv6-Adressen nur die IP-Adresse prüfen
-		return isValidIPAddress(address)
+		return IsValidIPAddress(address)
 	default:
 		// Bei unbekannten Protokollen: true zurückgeben
 		return true
 	}
 }
 
-func isValidIPAddressPlusPort(address string) bool {
+func IsValidIPAddressPlusPort(address string) bool {
 	// Für leere Adressen
 	if address == "" {
 		return false

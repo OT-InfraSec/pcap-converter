@@ -156,64 +156,117 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 
 		// Device extraction and storage
+		// Handle MAC addresses
 		if srcMAC != "" {
 			devKey := "MAC:" + srcMAC
 			if _, seen := seenDevices[devKey]; !seen {
-				dev := &model.Device{
-					Address:        srcMAC,
-					AddressType:    "MAC",
-					FirstSeen:      timestamp,
-					LastSeen:       timestamp,
-					AddressSubType: "",
-					AddressScope:   "",
+				// Validate MAC address format before adding
+				if model.IsValidMACAddress(srcMAC) {
+					dev := &model.Device{
+						Address:        srcMAC,
+						AddressType:    "MAC",
+						FirstSeen:      timestamp,
+						LastSeen:       timestamp,
+						AddressSubType: "",
+						AddressScope:   "",
+					}
+					if err := repo.AddDevice(dev); err != nil {
+						// Log the error but continue processing
+						fmt.Printf("Error adding device with MAC %s: %v\n", srcMAC, err)
+					} else {
+						seenDevices[devKey] = struct{}{}
+					}
+				} else {
+					fmt.Printf("Skipping invalid MAC address format: %s\n", srcMAC)
 				}
-				repo.AddDevice(dev)
-				seenDevices[devKey] = struct{}{}
 			}
 		}
+
 		if dstMAC != "" {
 			devKey := "MAC:" + dstMAC
 			if _, seen := seenDevices[devKey]; !seen {
-				dev := &model.Device{
-					Address:        dstMAC,
-					AddressType:    "MAC",
-					FirstSeen:      timestamp,
-					LastSeen:       timestamp,
-					AddressSubType: "",
-					AddressScope:   "",
+				// Validate MAC address format before adding
+				if model.IsValidMACAddress(dstMAC) {
+					dev := &model.Device{
+						Address:        dstMAC,
+						AddressType:    "MAC",
+						FirstSeen:      timestamp,
+						LastSeen:       timestamp,
+						AddressSubType: "",
+						AddressScope:   "",
+					}
+					if err := repo.AddDevice(dev); err != nil {
+						// Log the error but continue processing
+						fmt.Printf("Error adding device with MAC %s: %v\n", dstMAC, err)
+					} else {
+						seenDevices[devKey] = struct{}{}
+					}
+				} else {
+					fmt.Printf("Skipping invalid MAC address format: %s\n", dstMAC)
 				}
-				repo.AddDevice(dev)
-				seenDevices[devKey] = struct{}{}
 			}
 		}
+
+		// Handle IP addresses
 		if srcIP != "" {
 			devKey := "IP:" + srcIP
 			if _, seen := seenDevices[devKey]; !seen {
-				dev := &model.Device{
-					Address:        srcIP,
-					AddressType:    "IP",
-					FirstSeen:      timestamp,
-					LastSeen:       timestamp,
-					AddressSubType: "",
-					AddressScope:   "",
+				// Validate IP address format before adding
+				if model.IsValidIPAddress(srcIP) {
+					// Determine IPv4 vs IPv6 for address subtype
+					addressSubType := "IPv4"
+					if strings.Count(srcIP, ":") > 1 {
+						addressSubType = "IPv6"
+					}
+
+					dev := &model.Device{
+						Address:        srcIP,
+						AddressType:    "IP",
+						AddressSubType: addressSubType,
+						FirstSeen:      timestamp,
+						LastSeen:       timestamp,
+						AddressScope:   "",
+					}
+					if err := repo.AddDevice(dev); err != nil {
+						// Log the error but continue processing
+						fmt.Printf("Error adding device with IP %s: %v\n", srcIP, err)
+					} else {
+						seenDevices[devKey] = struct{}{}
+					}
+				} else {
+					fmt.Printf("Skipping invalid IP address format: %s\n", srcIP)
 				}
-				repo.AddDevice(dev)
-				seenDevices[devKey] = struct{}{}
 			}
 		}
+
 		if dstIP != "" {
 			devKey := "IP:" + dstIP
 			if _, seen := seenDevices[devKey]; !seen {
-				dev := &model.Device{
-					Address:        dstIP,
-					AddressType:    "IP",
-					FirstSeen:      timestamp,
-					LastSeen:       timestamp,
-					AddressSubType: "",
-					AddressScope:   "",
+				// Validate IP address format before adding
+				if model.IsValidIPAddress(dstIP) {
+					// Determine IPv4 vs IPv6 for address subtype
+					addressSubType := "IPv4"
+					if strings.Count(dstIP, ":") > 1 {
+						addressSubType = "IPv6"
+					}
+
+					dev := &model.Device{
+						Address:        dstIP,
+						AddressType:    "IP",
+						AddressSubType: addressSubType,
+						FirstSeen:      timestamp,
+						LastSeen:       timestamp,
+						AddressScope:   "",
+					}
+					if err := repo.AddDevice(dev); err != nil {
+						// Log the error but continue processing
+						fmt.Printf("Error adding device with IP %s: %v\n", dstIP, err)
+					} else {
+						seenDevices[devKey] = struct{}{}
+					}
+				} else {
+					fmt.Printf("Skipping invalid IP address format: %s\n", dstIP)
 				}
-				repo.AddDevice(dev)
-				seenDevices[devKey] = struct{}{}
 			}
 		}
 

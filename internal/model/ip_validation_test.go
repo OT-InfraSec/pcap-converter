@@ -97,9 +97,9 @@ func TestIsValidIPAddressPlusPort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isValidIPAddressPlusPort(tt.address)
+			got := IsValidIPAddressPlusPort(tt.address)
 			if got != tt.want {
-				t.Errorf("isValidIPAddressPlusPort(%q) = %v, want %v", tt.address, got, tt.want)
+				t.Errorf("IsValidIPAddressPlusPort(%q) = %v, want %v", tt.address, got, tt.want)
 			}
 		})
 	}
