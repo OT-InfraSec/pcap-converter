@@ -3,6 +3,7 @@ package parser
 import (
 	"bytes"
 	"os"
+	"pcap-importer-golang/internal/model"
 	"pcap-importer-golang/internal/repository"
 	"testing"
 	"time"
@@ -15,6 +16,37 @@ import (
 type mockRepo struct {
 	repository.Repository
 	Packets []*gopacket.Packet
+	Devices []*model.Device
+	Flows   []*model.Flow
+}
+
+func (m *mockRepo) AddPacket(packet *model.Packet) error {
+	// Einfache Implementation ohne Validierung
+	return nil
+}
+
+func (m *mockRepo) AddDevice(device *model.Device) error {
+	// Speichere das Device ohne Validierung für den Test
+	m.Devices = append(m.Devices, device)
+	return nil
+}
+
+func (m *mockRepo) AddFlow(flow *model.Flow) error {
+	// Speichere den Flow ohne Validierung für den Test
+	m.Flows = append(m.Flows, flow)
+	return nil
+}
+
+func (m *mockRepo) AddDNSQuery(query *model.DNSQuery) error {
+	return nil
+}
+
+func (m *mockRepo) Commit() error {
+	return nil
+}
+
+func (m *mockRepo) Close() error {
+	return nil
 }
 
 func TestGopacketParser_ParseFile_Empty(t *testing.T) {
