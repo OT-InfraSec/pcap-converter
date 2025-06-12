@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"net"
+	"pcap-importer-golang/internal/helper"
 	"strconv"
 	"strings"
 	"time"
@@ -81,10 +82,14 @@ func getAddressScope(address string, addressType string) string {
 }
 
 // updateDevice updates or creates a device
-func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string) *model.Device {
+func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string) *model.Device {
 	devKey := addressType + ":" + address
 	dev, exists := p.devices[devKey]
 	if !exists {
+		macAddressSet := helper.NewSet()
+		if macAddress != "" {
+			macAddressSet.Add(macAddress)
+		}
 		dev = &model.Device{
 			Address:        address,
 			AddressType:    addressType,
@@ -92,6 +97,7 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 			LastSeen:       timestamp,
 			AddressSubType: addressSubType,
 			AddressScope:   getAddressScope(address, addressType),
+			MACAddressSet:  macAddressSet,
 		}
 		p.devices[devKey] = dev
 	} else {
@@ -101,25 +107,33 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 }
 
 // updateFlow updates or creates a flow
-func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort *uint16) *model.Flow {
+func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model.Flow {
 	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
-	if srcPort != nil && dstPort != nil {
-		flowKey = fmt.Sprintf("%s:%d:%s:%d:%s", src, *srcPort, dst, *dstPort, protocol)
+
+	sourcePortsSet := helper.NewSet()
+	destinationPortsSet := helper.NewSet()
+
+	if srcPort != "" && dstPort != "" {
+		flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", src, srcPort, dst, dstPort, protocol)
+		sourcePortsSet.Add(srcPort)
+		destinationPortsSet.Add(dstPort)
 	}
 
 	flow, exists := p.flows[flowKey]
 	if !exists {
 		flow = &model.Flow{
-			Source:        src,
-			Destination:   dst,
-			Protocol:      protocol,
-			Packets:       1,
-			Bytes:         packetSize,
-			FirstSeen:     timestamp,
-			LastSeen:      timestamp,
-			PacketRefs:    []int64{packetID},
-			MinPacketSize: &packetSize,
-			MaxPacketSize: &packetSize,
+			Source:           src,
+			Destination:      dst,
+			Protocol:         protocol,
+			Packets:          1,
+			Bytes:            packetSize,
+			FirstSeen:        timestamp,
+			LastSeen:         timestamp,
+			PacketRefs:       []int64{packetID},
+			MinPacketSize:    &packetSize,
+			MaxPacketSize:    &packetSize,
+			SourcePorts:      sourcePortsSet,
+			DestinationPorts: destinationPortsSet,
 		}
 		p.flows[flowKey] = flow
 	} else {
@@ -132,6 +146,19 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 		}
 		if packetSize > *flow.MaxPacketSize {
 			*flow.MaxPacketSize = packetSize
+		}
+		if srcPort != "" && dstPort != "" {
+			flow.SourcePorts.Add(srcPort)
+			flow.DestinationPorts.Add(dstPort)
+		} else {
+			// If ports are not specified, we still want to keep the flow
+			// but without port information
+			if flow.SourcePorts == nil {
+				flow.SourcePorts = helper.NewSet()
+			}
+			if flow.DestinationPorts == nil {
+				flow.DestinationPorts = helper.NewSet()
+			}
 		}
 	}
 	return flow
@@ -166,11 +193,13 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	packetID := int64(0)
 
-	seenFlows := make(map[string]struct{})
-
 	for packet := range packetSource.Packets() {
 		layersMap := make(map[string]interface{})
 		protocols := []string{}
+
+		//sourceDevices := []*model.Device{}
+		//destinationDevices := []*model.Device{}
+		//otherDevices := []*model.Device
 
 		var (
 			srcMAC, dstMAC   string
@@ -287,6 +316,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				},
 			}
 			protocols = append(protocols, "tcp")
+			// Update service for TCP
+			p.updateService(srcIP, int(srcPortNum), "tcp", packet.Metadata().Timestamp)
 		}
 
 		// UDP
@@ -302,6 +333,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"dst_port": udp.DstPort.String(),
 			}
 			protocols = append(protocols, "udp")
+			// Update service for UDP
+			p.updateService(srcIP, int(srcPortNum), "udp", packet.Metadata().Timestamp)
 		}
 
 		// DNS
@@ -325,6 +358,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"additionals": dns.Additionals,
 			}
 			protocols = append(protocols, "dns")
+			// add DNS query device relation
 		}
 
 		timestamp := packet.Metadata().Timestamp
@@ -342,27 +376,19 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 		// Device extraction and storage
 		// Handle MAC addresses
-		if srcMAC != "" {
-			p.updateDevice(srcMAC, "MAC", timestamp, "")
-		}
-		if dstMAC != "" {
-			p.updateDevice(dstMAC, "MAC", timestamp, "")
-		}
-
-		// Handle IP addresses
-		if srcIP != "" {
+		if srcMAC != "" && srcIP != "" {
 			addressSubType := "IPv4"
 			if strings.Count(srcIP, ":") > 1 {
 				addressSubType = "IPv6"
 			}
-			p.updateDevice(srcIP, "IP", timestamp, addressSubType)
+			p.updateDevice(srcIP, "IP", timestamp, addressSubType, srcMAC)
 		}
-		if dstIP != "" {
+		if dstMAC != "" && dstIP != "" {
 			addressSubType := "IPv4"
 			if strings.Count(dstIP, ":") > 1 {
 				addressSubType = "IPv6"
 			}
-			p.updateDevice(dstIP, "IP", timestamp, addressSubType)
+			p.updateDevice(dstIP, "IP", timestamp, addressSubType, dstMAC)
 		}
 
 		// Flow extraction and storage
@@ -370,7 +396,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			var source, destination string
 
 			// For protocols like TCP/UDP that have ports
-			if srcPort != "" && dstPort != "" {
+			/*if srcPort != "" && dstPort != "" {
 				// Format source and destination with ports
 				if strings.Count(srcIP, ":") > 1 {
 					// IPv6 with port
@@ -387,39 +413,23 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 					// IPv4 with port
 					destination = fmt.Sprintf("%s:%s", dstIP, dstPort)
 				}
-			} else {
-				// For protocols like ICMP, ARP that don't have ports
-				source = srcIP
-				destination = dstIP
-			}
+			} else {*/
+			// For protocols like ICMP, ARP that don't have ports
+			source = srcIP
+			destination = dstIP
+			//}
 
-			flowKey := fmt.Sprintf("%s-%s-%s", source, destination, flowProto)
-			if _, seen := seenFlows[flowKey]; !seen {
-				// Set minimum and maximum packet size
-				minSize := length
-				maxSize := length
-
-				flow := &model.Flow{
-					Source:        source,
-					Destination:   destination,
-					Protocol:      flowProto,
-					Packets:       1,
-					Bytes:         length,
-					FirstSeen:     timestamp,
-					LastSeen:      timestamp,
-					MinPacketSize: &minSize,
-					MaxPacketSize: &maxSize,
-					PacketRefs:    []int64{packetID},
-				}
-
-				if err := repo.AddFlow(flow); err != nil {
-					// Log the error but continue processing
-					fmt.Printf("Error adding flow %s -> %s: %v\n", source, destination, err)
-				} else {
-					seenFlows[flowKey] = struct{}{}
-				}
-			}
+			p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
 		}
+
+		/*err = p.saveAllDeviceRelations(sourceDevices, repo, "same source")
+		if err != nil {
+			log.Fatalf("failed to save device relations: %v", err)
+		}
+		err = p.saveAllDeviceRelations(destinationDevices, repo, "same destination")
+		if err != nil {
+			log.Fatalf("failed to save device relations: %v", err)
+		}*/
 
 		packetID++
 	}
@@ -432,7 +442,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	}
 
 	for _, flow := range p.flows {
-		if err := repo.AddFlow(flow); err != nil {
+		if err = repo.AddFlow(flow); err != nil {
 			return fmt.Errorf("failed to add flow: %w", err)
 		}
 	}
@@ -443,21 +453,24 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 	}
 
-	// Create device relationships
-	for _, dev1 := range p.devices {
-		for _, dev2 := range p.devices {
-			if dev1.Address != dev2.Address {
-				relation := &model.DeviceRelation{
-					DeviceID1: dev1.ID,
-					DeviceID2: dev2.ID,
-					Comment:   "Related devices",
-				}
-				if err := repo.AddDeviceRelation(relation); err != nil {
-					return fmt.Errorf("failed to add device relation: %w", err)
-				}
+	return nil
+}
+
+func (p *GopacketParser) saveAllDeviceRelations(devices []*model.Device, repo repository.Repository, comment string) error {
+	for _, dev1 := range devices {
+		for _, dev2 := range devices {
+			if dev1.ID == dev2.ID {
+				continue // Skip self-relation
+			}
+			relation := &model.DeviceRelation{
+				DeviceID1: dev1.ID,
+				DeviceID2: dev2.ID,
+				Comment:   comment,
+			}
+			if err := repo.AddDeviceRelation(relation); err != nil {
+				return fmt.Errorf("failed to add device relation: %w", err)
 			}
 		}
 	}
-
 	return nil
 }

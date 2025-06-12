@@ -3,7 +3,9 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
+	"pcap-importer-golang/internal/helper"
 	"strings"
 	"time"
 
@@ -44,7 +46,8 @@ func (r *SQLiteRepository) createTables() error {
 			first_seen TEXT NOT NULL,
 			last_seen TEXT NOT NULL,
 			address_sub_type TEXT,
-			address_scope TEXT
+			address_scope TEXT,
+			mac_addresses TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +71,8 @@ func (r *SQLiteRepository) createTables() error {
 			min_packet_size INTEGER,
 			max_packet_size INTEGER,
 			packet_refs TEXT,
+			source_ports TEXT,
+			destination_ports TEXT,
 			FOREIGN KEY (source_device_id) REFERENCES devices (id),
 			FOREIGN KEY (destination_device_id) REFERENCES devices (id)
 		);`,
@@ -146,13 +151,14 @@ func (r *SQLiteRepository) AddDevice(device *model.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope) VALUES (?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses) VALUES (?, ?, ?, ?, ?, ?, ?);`,
 		device.Address,
 		device.AddressType,
 		device.FirstSeen.Format(time.RFC3339Nano),
 		device.LastSeen.Format(time.RFC3339Nano),
 		device.AddressSubType,
 		device.AddressScope,
+		device.MACAddressSet.ToString(),
 	)
 	return err
 }
@@ -163,9 +169,33 @@ func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
 		return err
 	}
 
+	// Get source and destination device IDs
+	srcAddress := flow.Source
+	srcAddress, err := model.ExtractIPAddress(srcAddress)
+	if srcAddress == "" || err != nil {
+		return errors.New("invalid source address")
+	}
+	destAddress := flow.Destination
+	destAddress, err = model.ExtractIPAddress(destAddress)
+	if destAddress == "" || err != nil {
+		return errors.New("invalid destination address")
+	}
+
+	srcDevice, err := r.GetDeviceForAddress(srcAddress)
+	if err != nil {
+		log.Fatalf("Error getting source device for address %s: %v", srcAddress, err)
+		return err
+	}
+
+	destDevice, err := r.GetDeviceForAddress(destAddress)
+	if err != nil {
+		log.Fatalf("Error getting destination device for address %s: %v", destAddress, err)
+		return err
+	}
+
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
-	_, err := r.db.Exec(
-		`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+	result, err := r.db.Exec(
+		`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		flow.Source,
 		flow.Destination,
 		flow.Protocol,
@@ -173,12 +203,22 @@ func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
 		flow.Bytes,
 		flow.FirstSeen.Format(time.RFC3339Nano),
 		flow.LastSeen.Format(time.RFC3339Nano),
-		flow.SourceDeviceID,
-		flow.DestinationDeviceID,
+		srcDevice.ID,
+		destDevice.ID,
 		flow.MinPacketSize,
 		flow.MaxPacketSize,
 		string(packetRefsJSON),
+		flow.SourcePorts.ToString(),
+		flow.DestinationPorts.ToString(),
 	)
+	if err != nil {
+		log.Fatalf("Error inserting flow: %v", err)
+		return err
+	}
+	flow.ID, err = result.LastInsertId()
+	if err != nil {
+		log.Fatalf("Error getting last insert ID for flow: %v", err)
+	}
 	return err
 }
 
@@ -399,6 +439,32 @@ func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*mod
 		})
 	}
 	return queries, nil
+}
+
+func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
+	row := r.db.QueryRow(query, address)
+
+	var device model.Device
+	var firstSeenStr, lastSeenStr, macAddressesStr string
+
+	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr); err != nil {
+		return nil, err
+	}
+
+	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+	device.MACAddressSet = helper.NewSet()
+
+	for _, mac := range strings.Split(macAddressesStr, ",") {
+		if mac != "" {
+			device.MACAddressSet.Add(mac)
+		}
+	}
+
+	return &device, nil
 }
 
 func (r *SQLiteRepository) Commit() error {

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"net"
+	"pcap-importer-golang/internal/helper"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,21 @@ import (
 var macAddressRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 
 func IsValidIPAddress(address string) bool {
+	// Remove additional annotations in parentheses
+	if strings.Contains(address, "(") {
+		return false
+	}
+
+	address, err := ExtractIPAddress(address)
+	if err != nil || address == "" {
+		return false
+	}
+
+	ip := net.ParseIP(address)
+	return ip != nil
+}
+
+func ExtractIPAddress(address string) (string, error) {
 	// Remove port part if present (e.g., 192.168.1.1:80 -> 192.168.1.1)
 	if strings.Contains(address, ":") {
 		// IPv6 addresses have multiple colons, check if (...)
@@ -20,22 +36,19 @@ func IsValidIPAddress(address string) bool {
 			parts := strings.Split(address, "]:")
 			if len(parts) == 2 {
 				ipv6 := strings.TrimPrefix(parts[0], "[")
-				return net.ParseIP(ipv6) != nil
+				address = ipv6
 			}
 		} else if strings.Count(address, ":") == 1 {
 			// IPv4 with port: 192.168.1.1:80
 			parts := strings.Split(address, ":")
-			return net.ParseIP(parts[0]) != nil
+			address = parts[0]
 		}
 	}
 
-	// Remove additional annotations in parentheses
-	if strings.Contains(address, "(") {
-		return false
+	if net.ParseIP(address) != nil {
+		return address, nil
 	}
-
-	ip := net.ParseIP(address)
-	return ip != nil
+	return "", errors.New("invalid address format, no valid IP found")
 }
 
 func IsValidMACAddress(address string) bool {
@@ -51,9 +64,11 @@ func isValidAddress(address, protocol string) bool {
 	case "DNS":
 		// DNS can have both IP and hostname
 		return IsValidIPAddress(address) || strings.Contains(address, ".")
-	case "ARP", "IPV4", "IPV6", "IP":
+	case "IPV4", "IPV6", "IP":
 		// For IPv4/IPv6 addresses, only check the IP address
 		return IsValidIPAddress(address)
+	case "ARP":
+		return IsValidMACAddress(address) || IsValidIPAddress(address)
 	default:
 		// For unknown protocols: return true
 		return true
@@ -141,6 +156,7 @@ type Device struct {
 	LastSeen       time.Time
 	AddressSubType string
 	AddressScope   string
+	MACAddressSet  *helper.Set
 }
 
 // Service represents a network service.
@@ -168,6 +184,8 @@ type Flow struct {
 	PacketRefs          []int64
 	MinPacketSize       *int
 	MaxPacketSize       *int
+	SourcePorts         *helper.Set
+	DestinationPorts    *helper.Set
 }
 
 // DeviceRelation represents a relationship between two devices.
