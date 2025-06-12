@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"pcap-importer-golang/internal/dns"
@@ -45,6 +46,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("failed to open database: %w", err)
 				}
+				log.Printf("Using database at %s", dbPath)
 				provider.Repository = repo
 				provider.Parser = parser.NewGopacketParser(pcapFile)
 				// TODO: Replace with real DNS processor implementation
