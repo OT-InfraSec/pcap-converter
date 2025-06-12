@@ -3,6 +3,7 @@ package helper
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -261,5 +262,52 @@ func TestSet_NilSafety(t *testing.T) {
 	diff := s.Difference(nilSet)
 	if diff.Size() != s.Size() {
 		t.Errorf("expected difference with nil set to equal original set size")
+	}
+}
+
+func TestSet_ToString(t *testing.T) {
+	s1 := NewSet()
+	s1.Add("a")
+	s1.Add("b")
+	s1.Add("c")
+	str := s1.ToString()
+	// expected to contain an 'a'
+	// expected to contain a 'b'
+	// expected to contain a 'c'
+	if !strings.Contains(str, "a") || !strings.Contains(str, "b") || !strings.Contains(str, "c") {
+		t.Errorf("expected string representation to contain 'a', 'b', and 'c', got %s", str)
+	}
+
+	s2 := NewSet()
+	s2.Add("b")
+	str2 := s2.ToString()
+	expected2 := "b"
+	if str2 != expected2 {
+		t.Errorf("expected string representation to be 'b', got %s", str2)
+	}
+
+	// Sad path: Empty set string representation
+	empty := NewSet()
+	strEmpty := empty.ToString()
+	expectedEmpty := ""
+	if strEmpty != expectedEmpty {
+		t.Errorf("expected empty set string representation to be empty, got %s", strEmpty)
+	}
+
+	// Edge case: Set with empty string
+	s1.Add("")
+	strWithEmpty := s1.ToString()
+	expectedWithEmpty := "a,b,c,"
+	if !strings.Contains(str, "a") || !strings.Contains(str, "b") || !strings.Contains(str, "c") || !(strWithEmpty[0] == ',' || strWithEmpty[len(strWithEmpty)-1] == ',' || strings.Contains(strWithEmpty, ",,")) {
+		t.Errorf("expected string representation with empty string %s got %s", expectedWithEmpty, strWithEmpty)
+	}
+
+	// Edge case: Set with only empty string
+	emptySet := NewSet()
+	emptySet.Add("")
+	strOnlyEmpty := emptySet.ToString()
+	expectedOnlyEmpty := ""
+	if strOnlyEmpty != expectedOnlyEmpty {
+		t.Errorf("expected string representation of set with only empty string to be empty, got %s", strOnlyEmpty)
 	}
 }

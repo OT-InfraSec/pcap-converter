@@ -1,5 +1,7 @@
 package helper
 
+import "strings"
+
 // Set is a collection of unique elements
 type Set struct {
 	elements map[string]struct{}
@@ -71,4 +73,8 @@ func (s *Set) Difference(other *Set) *Set {
 		}
 	}
 	return result
+}
+
+func (s *Set) ToString() string {
+	return strings.Join(s.List(), ",")
 }
