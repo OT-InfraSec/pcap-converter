@@ -14,6 +14,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	liblayers "pcap-importer-golang/lib/layers"
 )
 
 type GopacketParser struct {
@@ -359,6 +360,85 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			}
 			protocols = append(protocols, "dns")
 			// add DNS query device relation
+		}
+
+		// CISCO EIGRP
+		if eigrpLayer := packet.Layer(liblayers.LayerTypeEIGRP); eigrpLayer != nil {
+			eigrp := eigrpLayer.(*liblayers.EIGRP)
+			layersMap["eigrp"] = map[string]interface{}{
+				"version":           eigrp.Version,
+				"opcode":            eigrp.Opcode,
+				"as":                eigrp.AS,
+				"seq":               eigrp.Sequence,
+				"ack":               eigrp.Ack,
+				"virtual_router_id": eigrp.VirtualRouterID,
+				"parameters":        eigrp.Parameters,
+			}
+			protocols = append(protocols, "eigrp")
+		}
+
+		// LLC
+		if llcLayer := packet.Layer(layers.LayerTypeLLC); llcLayer != nil {
+			llc := llcLayer.(*layers.LLC)
+			layersMap["llc"] = map[string]interface{}{
+				"dsap":    llc.DSAP,
+				"ssap":    llc.SSAP,
+				"control": llc.Control,
+			}
+			protocols = append(protocols, "llc")
+		}
+
+		// SNAP
+		if snapLayer := packet.Layer(layers.LayerTypeSNAP); snapLayer != nil {
+			snap := snapLayer.(*layers.SNAP)
+			layersMap["snap"] = map[string]interface{}{
+				"oui":  snap.OrganizationalCode,
+				"type": snap.Type,
+			}
+			protocols = append(protocols, "snap")
+		}
+
+		// DHCPv4
+		if dhcpv4Layer := packet.Layer(layers.LayerTypeDHCPv4); dhcpv4Layer != nil {
+			dhcpv4 := dhcpv4Layer.(*layers.DHCPv4)
+			layersMap["dhcpv4"] = map[string]interface{}{
+				"operations":     dhcpv4.Operation.String(),
+				"type":           dhcpv4.HardwareType.String(),
+				"server_name":    dhcpv4.ServerName,
+				"client_hw_addr": dhcpv4.ClientHWAddr.String(),
+				"client_ip":      dhcpv4.ClientIP.String(),
+				"your_ip":        dhcpv4.YourClientIP.String(),
+				"server_ip":      dhcpv4.NextServerIP.String(),
+				"relay_ip":       dhcpv4.RelayAgentIP.String(),
+				"options":        dhcpv4.Options,
+			}
+			protocols = append(protocols, "dhcpv4")
+		}
+
+		// DHCPv6
+		if dhcpv6Layer := packet.Layer(layers.LayerTypeDHCPv6); dhcpv6Layer != nil {
+			dhcpv6 := dhcpv6Layer.(*layers.DHCPv6)
+			layersMap["dhcpv6"] = map[string]interface{}{
+				"message_type":   dhcpv6.MsgType.String(),
+				"hop_count":      dhcpv6.HopCount,
+				"link_address":   dhcpv6.LinkAddr.String(),
+				"peer_address":   dhcpv6.PeerAddr.String(),
+				"transaction_id": fmt.Sprintf("%x", dhcpv6.TransactionID),
+				"options":        dhcpv6.Options,
+			}
+			protocols = append(protocols, "dhcpv6")
+		}
+
+		// LLD
+		if lldLayer := packet.Layer(liblayers.LayerTypeLinkLayerDiscovery); lldLayer != nil {
+			lld := lldLayer.(*liblayers.LinkLayerDiscovery)
+			layersMap["lld"] = map[string]interface{}{
+				"chassis_id": lld.ChassisID,
+				"port_id":    lld.PortID,
+				"ttl":        lld.TTL,
+				"values":     lld.Values,
+			}
+			protocols = append(protocols, "lld")
 		}
 
 		timestamp := packet.Metadata().Timestamp

@@ -1621,3 +1621,14 @@ func checkLLDPOrgSpecificLen(o LLDPOrgSpecificTLV, l int) (err error) {
 	}
 	return
 }
+
+var LayerTypeLinkLayerDiscovery = gopacket.OverrideLayerType(58, gopacket.LayerTypeMetadata{Name: "LinkLayerDiscovery", Decoder: gopacket.DecodeFunc(decodeLinkLayerDiscovery)})
+
+const LinkTypeLLDP layers.LinkType = 255
+
+func init() {
+	layers.LinkTypeMetadata[LinkTypeLLDP] = layers.EnumMetadata{
+		DecodeWith: gopacket.DecodeFunc(decodeLinkLayerDiscovery),
+		Name:       "Link Layer Discovery Protocol",
+	}
+}
