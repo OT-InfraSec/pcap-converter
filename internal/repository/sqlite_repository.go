@@ -110,6 +110,18 @@ func (r *SQLiteRepository) createTables() error {
 			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
 			FOREIGN KEY (answering_device_id) REFERENCES devices (id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS dns_query_results (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			querying_device_id INTEGER NOT NULL,
+			answering_device_id INTEGER NOT NULL,
+			query_name TEXT NOT NULL,
+			query_type TEXT NOT NULL,
+			query_result TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
+			FOREIGN KEY (answering_device_id) REFERENCES devices (id),
+			UNIQUE (querying_device_id, answering_device_id, query_name, query_type, timestamp)
+		);`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
@@ -474,4 +486,234 @@ func (r *SQLiteRepository) Commit() error {
 
 func (r *SQLiteRepository) Close() error {
 	return r.db.Close()
+}
+
+// AddPackets inserts multiple packets in a single transaction.
+func (r *SQLiteRepository) AddPackets(packets []*model.Packet) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO packets (timestamp, length, layers, protocols) VALUES (?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, packet := range packets {
+		layersJSON, err := json.Marshal(packet.Layers)
+		if err != nil {
+			return err
+		}
+		protocolsJSON, err := json.Marshal(packet.Protocols)
+		if err != nil {
+			return err
+		}
+		_, err = stmt.Exec(
+			packet.Timestamp.Format(time.RFC3339Nano),
+			packet.Length,
+			string(layersJSON),
+			string(protocolsJSON),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AddDevices inserts multiple devices in a single transaction.
+func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses) VALUES (?, ?, ?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, device := range devices {
+		macs := ""
+		if device.MACAddressSet != nil {
+			macs = device.MACAddressSet.ToString()
+		}
+		_, err := stmt.Exec(
+			device.Address,
+			device.AddressType,
+			device.FirstSeen.Format(time.RFC3339Nano),
+			device.LastSeen.Format(time.RFC3339Nano),
+			device.AddressSubType,
+			device.AddressScope,
+			macs,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AddFlows inserts multiple flows in a single transaction.
+func (r *SQLiteRepository) AddFlows(flows []*model.Flow) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, flow := range flows {
+		packetRefsJSON, err := json.Marshal(flow.PacketRefs)
+		if err != nil {
+			return err
+		}
+		sourcePorts := ""
+		destinationPorts := ""
+		if flow.SourcePorts != nil {
+			sourcePorts = flow.SourcePorts.ToString()
+		}
+		if flow.DestinationPorts != nil {
+			destinationPorts = flow.DestinationPorts.ToString()
+		}
+		var srcDevID, dstDevID interface{}
+		if flow.SourceDeviceID != nil {
+			srcDevID = *flow.SourceDeviceID
+		} else {
+			srcDevID = nil
+		}
+		if flow.DestinationDeviceID != nil {
+			dstDevID = *flow.DestinationDeviceID
+		} else {
+			dstDevID = nil
+		}
+		var minPkt, maxPkt interface{}
+		if flow.MinPacketSize != nil {
+			minPkt = *flow.MinPacketSize
+		} else {
+			minPkt = nil
+		}
+		if flow.MaxPacketSize != nil {
+			maxPkt = *flow.MaxPacketSize
+		} else {
+			maxPkt = nil
+		}
+		_, err = stmt.Exec(
+			flow.Source,
+			flow.Destination,
+			flow.Protocol,
+			flow.Packets,
+			flow.Bytes,
+			flow.FirstSeen.Format(time.RFC3339Nano),
+			flow.LastSeen.Format(time.RFC3339Nano),
+			srcDevID,
+			dstDevID,
+			minPkt,
+			maxPkt,
+			string(packetRefsJSON),
+			sourcePorts,
+			destinationPorts,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AddServices inserts multiple services in a single transaction.
+func (r *SQLiteRepository) AddServices(services []*model.Service) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, service := range services {
+		if err := service.Validate(); err != nil {
+			return err
+		}
+
+		_, err := stmt.Exec(
+			service.IP,
+			service.Port,
+			service.FirstSeen.Format(time.RFC3339Nano),
+			service.LastSeen.Format(time.RFC3339Nano),
+			service.Protocol,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// AddDNSQueries inserts multiple DNS queries in a single transaction.
+func (r *SQLiteRepository) AddDNSQueries(queries []*model.DNSQuery) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, query := range queries {
+		_, err := stmt.Exec(
+			query.QueryingDeviceID,
+			query.AnsweringDeviceID,
+			query.QueryName,
+			query.QueryType,
+			query.QueryResult,
+			query.Timestamp.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AddDeviceRelations inserts multiple device relations in a single transaction.
+func (r *SQLiteRepository) AddDeviceRelations(relations []*model.DeviceRelation) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO device_relations (device_id_1, device_id_2, comment) VALUES (?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, rel := range relations {
+		_, err := stmt.Exec(rel.DeviceID1, rel.DeviceID2, rel.Comment)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

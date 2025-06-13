@@ -184,6 +184,7 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 	return service
 }
 
+// ParseFile processes a PCAP file and extracts network information.
 func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	handle, err := pcap.OpenOffline(p.PcapFile)
 	if err != nil {
@@ -192,15 +193,55 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	defer handle.Close()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	// Set DecodeOptions for better performance
+	packetSource.DecodeOptions.Lazy = true
+	packetSource.DecodeOptions.NoCopy = true
+	packetSource.DecodeOptions.SkipDecodeRecovery = true
+
 	packetID := int64(0)
 
-	for packet := range packetSource.Packets() {
-		layersMap := make(map[string]interface{})
-		protocols := []string{}
+	// Pre-allocate for better performance
+	const batchSize = 1000
+	//packetBatch := make([]*model.Packet, 0, batchSize)
 
-		//sourceDevices := []*model.Device{}
-		//destinationDevices := []*model.Device{}
-		//otherDevices := []*model.Device
+	// Reusable buffers for string formatting
+	var sb strings.Builder
+
+	// Create a buffer channel for batching
+	packetChan := make(chan *model.Packet, batchSize)
+	errChan := make(chan error, 1)
+	doneChan := make(chan struct{})
+
+	// Start a worker goroutine to process packets in batches
+	go func() {
+		defer close(doneChan)
+		var batch []*model.Packet
+
+		for packet := range packetChan {
+			batch = append(batch, packet)
+
+			if len(batch) >= batchSize {
+				if err := repo.AddPackets(batch); err != nil {
+					errChan <- fmt.Errorf("failed to add packet batch: %w", err)
+					return
+				}
+				// Clear the batch but keep the allocated memory
+				batch = batch[:0]
+			}
+		}
+
+		// Process any remaining packets
+		if len(batch) > 0 {
+			if err := repo.AddPackets(batch); err != nil {
+				errChan <- fmt.Errorf("failed to add final packet batch: %w", err)
+			}
+		}
+	}()
+
+	for packet := range packetSource.Packets() {
+		// Pre-allocate maps with capacity hints
+		layersMap := make(map[string]interface{}, 10) // Assume average 10 layers
+		protocols := make([]string, 0, 5)             // Assume average 5 protocols
 
 		var (
 			srcMAC, dstMAC   string
@@ -297,8 +338,16 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			tcp := tcpLayer.(*layers.TCP)
 			srcPortNum := uint16(tcp.SrcPort)
 			dstPortNum := uint16(tcp.DstPort)
-			srcPort = fmt.Sprintf("%d", srcPortNum)
-			dstPort = fmt.Sprintf("%d", dstPortNum)
+
+			// Use pre-allocated buffer for string conversion instead of fmt.Sprintf
+			sb.Reset()
+			sb.WriteString(strconv.FormatUint(uint64(srcPortNum), 10))
+			srcPort = sb.String()
+
+			sb.Reset()
+			sb.WriteString(strconv.FormatUint(uint64(dstPortNum), 10))
+			dstPort = sb.String()
+
 			flowProto = "tcp"
 			layersMap["tcp"] = map[string]interface{}{
 				"src_port": tcp.SrcPort.String(),
@@ -317,8 +366,9 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				},
 			}
 			protocols = append(protocols, "tcp")
-			// Update service for TCP
-			p.updateService(srcIP, int(srcPortNum), "tcp", packet.Metadata().Timestamp)
+			// Update service for TCP - use a direct call to avoid string concatenation
+			timestamp := packet.Metadata().Timestamp
+			p.updateService(srcIP, int(srcPortNum), "tcp", timestamp)
 		}
 
 		// UDP
@@ -326,8 +376,16 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			udp := udpLayer.(*layers.UDP)
 			srcPortNum := uint16(udp.SrcPort)
 			dstPortNum := uint16(udp.DstPort)
-			srcPort = fmt.Sprintf("%d", srcPortNum)
-			dstPort = fmt.Sprintf("%d", dstPortNum)
+
+			// Use pre-allocated buffer for string conversion
+			sb.Reset()
+			sb.WriteString(strconv.FormatUint(uint64(srcPortNum), 10))
+			srcPort = sb.String()
+
+			sb.Reset()
+			sb.WriteString(strconv.FormatUint(uint64(dstPortNum), 10))
+			dstPort = sb.String()
+
 			flowProto = "udp"
 			layersMap["udp"] = map[string]interface{}{
 				"src_port": udp.SrcPort.String(),
@@ -335,7 +393,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			}
 			protocols = append(protocols, "udp")
 			// Update service for UDP
-			p.updateService(srcIP, int(srcPortNum), "udp", packet.Metadata().Timestamp)
+			timestamp := packet.Metadata().Timestamp
+			p.updateService(srcIP, int(srcPortNum), "udp", timestamp)
 		}
 
 		// DNS
@@ -430,8 +489,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 
 		// LLD
-		if lldLayer := packet.Layer(liblayers.LayerTypeLinkLayerDiscovery); lldLayer != nil {
-			lld := lldLayer.(*liblayers.LinkLayerDiscovery)
+		if lldLayer := packet.Layer(layers.LayerTypeLinkLayerDiscovery); lldLayer != nil {
+			lld := lldLayer.(*layers.LinkLayerDiscovery)
 			layersMap["lld"] = map[string]interface{}{
 				"chassis_id": lld.ChassisID,
 				"port_id":    lld.PortID,
@@ -450,11 +509,11 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			Layers:    layersMap,
 			Protocols: protocols,
 		}
-		if err := repo.AddPacket(modelPacket); err != nil {
-			return fmt.Errorf("failed to add packet: %w", err)
-		}
 
-		// Device extraction and storage
+		// Send the packet to the batch processing goroutine
+		packetChan <- modelPacket
+
+		// Device extraction and storage - optimized with cached values
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" {
 			addressSubType := "IPv4"
@@ -502,34 +561,91 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
 		}
 
-		/*err = p.saveAllDeviceRelations(sourceDevices, repo, "same source")
-		if err != nil {
-			log.Fatalf("failed to save device relations: %v", err)
-		}
-		err = p.saveAllDeviceRelations(destinationDevices, repo, "same destination")
-		if err != nil {
-			log.Fatalf("failed to save device relations: %v", err)
-		}*/
-
 		packetID++
 	}
 
+	// Close the channel to signal no more packets
+	close(packetChan)
+
+	// Wait for the batch processing to complete
+	select {
+	case err := <-errChan:
+		return err
+	case <-doneChan:
+		// Processing completed successfully
+	}
+
 	// Save all collected data to the repository
+	// We can batch these operations too
+	const maxBatchSize = 1000
+	deviceBatch := make([]*model.Device, 0, maxBatchSize)
+	deviceCount := 0
+
 	for _, dev := range p.devices {
-		if err := repo.AddDevice(dev); err != nil {
-			return fmt.Errorf("failed to add device: %w", err)
+		deviceBatch = append(deviceBatch, dev)
+		deviceCount++
+
+		if deviceCount >= maxBatchSize {
+			if err := repo.AddDevices(deviceBatch); err != nil {
+				return fmt.Errorf("failed to add device batch: %w", err)
+			}
+			deviceBatch = deviceBatch[:0]
+			deviceCount = 0
 		}
 	}
+
+	// Add remaining devices
+	if deviceCount > 0 {
+		if err := repo.AddDevices(deviceBatch); err != nil {
+			return fmt.Errorf("failed to add devices: %w", err)
+		}
+	}
+
+	// Batch process flows
+	flowBatch := make([]*model.Flow, 0, maxBatchSize)
+	flowCount := 0
 
 	for _, flow := range p.flows {
-		if err = repo.AddFlow(flow); err != nil {
-			return fmt.Errorf("failed to add flow: %w", err)
+		flowBatch = append(flowBatch, flow)
+		flowCount++
+
+		if flowCount >= maxBatchSize {
+			if err := repo.AddFlows(flowBatch); err != nil {
+				return fmt.Errorf("failed to add flow batch: %w", err)
+			}
+			flowBatch = flowBatch[:0]
+			flowCount = 0
 		}
 	}
 
+	// Add remaining flows
+	if flowCount > 0 {
+		if err := repo.AddFlows(flowBatch); err != nil {
+			return fmt.Errorf("failed to add flows: %w", err)
+		}
+	}
+
+	// Batch process services
+	serviceBatch := make([]*model.Service, 0, maxBatchSize)
+	serviceCount := 0
+
 	for _, service := range p.services {
-		if err := repo.AddService(service); err != nil {
-			return fmt.Errorf("failed to add service: %w", err)
+		serviceBatch = append(serviceBatch, service)
+		serviceCount++
+
+		if serviceCount >= maxBatchSize {
+			if err := repo.AddServices(serviceBatch); err != nil {
+				return fmt.Errorf("failed to add service batch: %w", err)
+			}
+			serviceBatch = serviceBatch[:0]
+			serviceCount = 0
+		}
+	}
+
+	// Add remaining services
+	if serviceCount > 0 {
+		if err := repo.AddServices(serviceBatch); err != nil {
+			return fmt.Errorf("failed to add services: %w", err)
 		}
 	}
 
