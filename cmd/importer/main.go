@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"pcap-importer-golang/internal/dns"
 	"pcap-importer-golang/internal/parser"
@@ -25,7 +26,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 	var (
 		dbPath    string
 		batchSize int
-		clear     bool
+		clearDB   bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -53,6 +54,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 				provider.DNSProcessor = &dns.NoopDNSProcessor{}
 			}
 
+			startTime := time.Now()
 			if err := provider.Parser.ParseFile(provider.Repository); err != nil {
 				return err
 			}
@@ -65,12 +67,14 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 			if err := provider.Repository.Close(); err != nil {
 				return err
 			}
+			duration := time.Since(startTime)
+			log.Printf("Imported packets from %s in %s", pcapFile, duration)
 			return nil
 		},
 	}
 	importCmd.Flags().StringVar(&dbPath, "db-path", "database.sqlite", "Path to the SQLite database file")
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 1000, "Number of packets to import in each batch")
-	importCmd.Flags().BoolVar(&clear, "clear", false, "Clear the database before importing")
+	importCmd.Flags().BoolVar(&clearDB, "clear", false, "Clear the database before importing")
 
 	rootCmd.AddCommand(importCmd)
 	return rootCmd
@@ -79,8 +83,17 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 func main() {
 	provider := &DependencyProvider{}
 	rootCmd := newRootCmd(provider)
+	// Set up logging to file
+	logFile, err := os.OpenFile("importer.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
+		os.Exit(2)
+	}
+	log.SetOutput(logFile)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Fatalf("Error executing command: %v", err)
 		os.Exit(1)
 	}
 }
