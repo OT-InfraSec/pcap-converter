@@ -110,18 +110,6 @@ func (r *SQLiteRepository) createTables() error {
 			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
 			FOREIGN KEY (answering_device_id) REFERENCES devices (id)
 		);`,
-		`CREATE TABLE IF NOT EXISTS dns_query_results (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			querying_device_id INTEGER NOT NULL,
-			answering_device_id INTEGER NOT NULL,
-			query_name TEXT NOT NULL,
-			query_type TEXT NOT NULL,
-			query_result TEXT NOT NULL,
-			timestamp TEXT NOT NULL,
-			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
-			FOREIGN KEY (answering_device_id) REFERENCES devices (id),
-			UNIQUE (querying_device_id, answering_device_id, query_name, query_type, timestamp)
-		);`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
@@ -173,6 +161,32 @@ func (r *SQLiteRepository) AddDevice(device *model.Device) error {
 		device.MACAddressSet.ToString(),
 	)
 	return err
+}
+
+func (r *SQLiteRepository) GetDevice(address string) (*model.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
+	row := r.db.QueryRow(query, address)
+
+	var device model.Device
+	var firstSeenStr, lastSeenStr, macAddressesStr string
+
+	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr); err != nil {
+		return nil, err
+	}
+
+	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+	device.MACAddressSet = helper.NewSet()
+
+	for _, mac := range strings.Split(macAddressesStr, ",") {
+		if mac != "" {
+			device.MACAddressSet.Add(mac)
+		}
+	}
+
+	return &device, nil
 }
 
 func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
@@ -427,8 +441,8 @@ func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*mod
 	for rows.Next() {
 		var (
 			id                int64
-			queryingDeviceID  *int64
-			answeringDeviceID *int64
+			queryingDeviceID  int64
+			answeringDeviceID int64
 			queryName         string
 			queryType         string
 			queryResult       map[string]interface{}
@@ -567,7 +581,14 @@ func (r *SQLiteRepository) AddFlows(flows []*model.Flow) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, min_packet_size, max_packet_size, packet_refs, source_ports,
+                   destination_ports, source_device_id,
+                   destination_device_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+    SELECT id FROM devices WHERE address = ?
+    ), (
+    SELECT id FROM devices WHERE address = ?
+    ));`)
 	if err != nil {
 		return err
 	}
@@ -585,17 +606,6 @@ func (r *SQLiteRepository) AddFlows(flows []*model.Flow) error {
 		}
 		if flow.DestinationPorts != nil {
 			destinationPorts = flow.DestinationPorts.ToString()
-		}
-		var srcDevID, dstDevID interface{}
-		if flow.SourceDeviceID != nil {
-			srcDevID = *flow.SourceDeviceID
-		} else {
-			srcDevID = nil
-		}
-		if flow.DestinationDeviceID != nil {
-			dstDevID = *flow.DestinationDeviceID
-		} else {
-			dstDevID = nil
 		}
 		var minPkt, maxPkt interface{}
 		if flow.MinPacketSize != nil {
@@ -616,13 +626,13 @@ func (r *SQLiteRepository) AddFlows(flows []*model.Flow) error {
 			flow.Bytes,
 			flow.FirstSeen.Format(time.RFC3339Nano),
 			flow.LastSeen.Format(time.RFC3339Nano),
-			srcDevID,
-			dstDevID,
 			minPkt,
 			maxPkt,
 			string(packetRefsJSON),
 			sourcePorts,
 			destinationPorts,
+			flow.Source,
+			flow.Destination,
 		)
 		if err != nil {
 			return err

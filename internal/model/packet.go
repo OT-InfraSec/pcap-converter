@@ -199,8 +199,8 @@ type DeviceRelation struct {
 // DNSQuery represents a DNS transaction extracted from packets.
 type DNSQuery struct {
 	ID                int64
-	QueryingDeviceID  *int64
-	AnsweringDeviceID *int64
+	QueryingDeviceID  int64
+	AnsweringDeviceID int64
 	QueryName         string
 	QueryType         string
 	QueryResult       map[string]interface{}
@@ -308,8 +308,8 @@ func (dr *DeviceRelation) Validate() error {
 }
 
 func (dq *DNSQuery) Validate() error {
-	if dq.QueryingDeviceID == nil {
-		return errors.New("querying device ID must not be nil")
+	if dq.QueryingDeviceID == 0 {
+		return errors.New("querying device ID must not be zero")
 	}
 	if dq.QueryName == "" {
 		return errors.New("query name must not be empty")
