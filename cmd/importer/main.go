@@ -41,6 +41,17 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pcapFile := args[0]
 
+			if clearDB {
+				log.Printf("Clearing database at %s before import", dbPath)
+				err := os.Remove(dbPath) // Remove the database file if it exists
+				if err != nil {
+					log.Printf("Failed to clear database: %v", err)
+					return err
+				}
+			} else {
+				log.Printf("Using existing database at %s", dbPath)
+			}
+
 			// If not injected, use real implementations
 			if provider.Parser == nil || provider.Repository == nil || provider.DNSProcessor == nil {
 				repo, err := repository.NewSQLiteRepository(dbPath)
