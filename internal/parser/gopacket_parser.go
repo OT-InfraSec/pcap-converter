@@ -17,6 +17,15 @@ import (
 	liblayers "pcap-importer-golang/lib/layers"
 )
 
+type DNSQuery struct {
+	QueryingDeviceIP  string
+	AnsweringDeviceIP string
+	QueryName         string
+	QueryType         string
+	QueryResult       map[string]interface{}
+	Timestamp         time.Time
+}
+
 type GopacketParser struct {
 	PcapFile string
 	// Track devices and their relationships
@@ -25,14 +34,18 @@ type GopacketParser struct {
 	flows map[string]*model.Flow
 	// Track services
 	services map[string]*model.Service
+	// DNS queries
+	dnsQueries    map[string]*DNSQuery
+	deviceCounter int64
 }
 
 func NewGopacketParser(pcapFile string) *GopacketParser {
 	return &GopacketParser{
-		PcapFile: pcapFile,
-		devices:  make(map[string]*model.Device),
-		flows:    make(map[string]*model.Flow),
-		services: make(map[string]*model.Service),
+		PcapFile:   pcapFile,
+		devices:    make(map[string]*model.Device),
+		flows:      make(map[string]*model.Flow),
+		services:   make(map[string]*model.Service),
+		dnsQueries: make(map[string]*DNSQuery),
 	}
 }
 
@@ -87,11 +100,12 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 	devKey := addressType + ":" + address
 	dev, exists := p.devices[devKey]
 	if !exists {
-		macAddressSet := helper.NewSet()
+		macAddressSet := model.NewMACAddressSet()
 		if macAddress != "" {
 			macAddressSet.Add(macAddress)
 		}
 		dev = &model.Device{
+			ID:             p.deviceCounter,
 			Address:        address,
 			AddressType:    addressType,
 			FirstSeen:      timestamp,
@@ -101,7 +115,11 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 			MACAddressSet:  macAddressSet,
 		}
 		p.devices[devKey] = dev
+		p.deviceCounter++
 	} else {
+		if macAddress != "" {
+			dev.MACAddressSet.Add(macAddress)
+		}
 		dev.LastSeen = timestamp
 	}
 	return dev
@@ -184,6 +202,48 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 	return service
 }
 
+func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
+	queryingDevice := p.devices["IP"+dnsQuery.QueryingDeviceIP]
+	answeringDevice := p.devices["IP"+dnsQuery.AnsweringDeviceIP]
+	if queryingDevice == nil {
+		// create new device
+		queryingDevice = p.updateDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, "", "")
+	}
+	if answeringDevice == nil {
+		answeringDevice = p.updateDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, "", "")
+	}
+	// Create a unique key for the DNS query
+	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
+	if existingQuery, exists := p.dnsQueries[queryKey]; exists {
+		// Update existing query
+		if dnsQuery.QueryResult != nil {
+			if existingQuery.QueryResult != nil {
+				for key, value := range dnsQuery.QueryResult {
+					if existingQuery.QueryResult[key] == nil {
+						existingQuery.QueryResult[key] = value
+					} else {
+						// If the key already exists, we can merge or update as needed
+						switch v := existingQuery.QueryResult[key].(type) {
+						case []string:
+							if newValue, ok := value.([]string); ok {
+								existingQuery.QueryResult[key] = append(v, newValue...)
+							}
+						default:
+							existingQuery.QueryResult[key] = value // Overwrite with new value
+						}
+					}
+				}
+			} else {
+				existingQuery.QueryResult = dnsQuery.QueryResult
+			}
+		}
+		existingQuery.Timestamp = dnsQuery.Timestamp
+	} else {
+		// Add new query
+		p.dnsQueries[queryKey] = &dnsQuery
+	}
+}
+
 // ParseFile processes a PCAP file and extracts network information.
 func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	handle, err := pcap.OpenOffline(p.PcapFile)
@@ -191,6 +251,9 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		return fmt.Errorf("failed to open pcap: %w", err)
 	}
 	defer handle.Close()
+
+	liblayers.InitLayerLLDP()
+	liblayers.InitLayerEIGRP()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	// Set DecodeOptions for better performance
@@ -315,10 +378,16 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
 			icmp := icmpLayer.(*layers.ICMPv4)
 			flowProto = "icmp"
+			type_code := icmp.TypeCode.String()
 			layersMap["icmp"] = map[string]interface{}{
-				"type_code": icmp.TypeCode.String(),
+				"type_code": type_code,
 				"checksum":  icmp.Checksum,
 			}
+			if strings.Contains(type_code, "DestinationUnreachable") {
+				// Skip packets that are ICMP Destination Unreachable
+				continue
+			}
+
 			protocols = append(protocols, "icmp")
 		}
 
@@ -418,7 +487,23 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"additionals": dns.Additionals,
 			}
 			protocols = append(protocols, "dns")
-			// add DNS query device relation
+			// Update service for DNS
+			dnsQuery := DNSQuery{
+				QueryingDeviceIP:  srcIP,
+				AnsweringDeviceIP: dstIP,
+				QueryResult:       make(map[string]interface{}),
+				Timestamp:         packet.Metadata().Timestamp,
+			}
+			for _, question := range dns.Questions {
+				dnsQuery.QueryName = string(question.Name)
+				dnsQuery.QueryType = question.Type.String()
+				// Store the query result in a map
+				dnsQuery.QueryResult[string(question.Name)] = map[string]interface{}{
+					"type":  question.Type.String(),
+					"class": question.Class.String(),
+				}
+			}
+			p.updateDNSQuery(dnsQuery)
 		}
 
 		// CISCO EIGRP
@@ -509,6 +594,17 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			Layers:    layersMap,
 			Protocols: protocols,
 		}
+
+		// Filter packets with no meaningful connections
+		// example: ICMP reply with DestinationUnreachable
+		/*if icmpData, ok := layersMap["icmp"].(map[string]interface{}); ok {
+			if typeCode, ok := icmpData["type_code"].(string); ok {
+				if strings.Contains(typeCode, "DestinationUnreachable") {
+					// Skip packets that are ICMP Destination Unreachable
+					continue
+				}
+			}
+		}*/
 
 		// Send the packet to the batch processing goroutine
 		packetChan <- modelPacket
@@ -646,6 +742,60 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	if serviceCount > 0 {
 		if err := repo.AddServices(serviceBatch); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
+		}
+	}
+
+	// Save DNS queries
+	for _, dnsQuery := range p.dnsQueries {
+		queryingDevice := p.devices["IP"+dnsQuery.QueryingDeviceIP]
+		answeringDevice := p.devices["IP"+dnsQuery.AnsweringDeviceIP]
+		if queryingDevice == nil {
+			err = repo.AddDevice(&model.Device{
+				Address:        dnsQuery.QueryingDeviceIP,
+				AddressType:    "IP",
+				FirstSeen:      dnsQuery.Timestamp,
+				LastSeen:       dnsQuery.Timestamp,
+				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
+				AddressScope:   getAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
+				MACAddressSet:  model.NewMACAddressSet(),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to add querying device: %w", err)
+			}
+			queryingDevice, err = repo.GetDevice(dnsQuery.QueryingDeviceIP)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve querying device: %w", err)
+			}
+		}
+		if answeringDevice == nil {
+			err = repo.AddDevice(&model.Device{
+				Address:        dnsQuery.AnsweringDeviceIP,
+				AddressType:    "IP",
+				FirstSeen:      dnsQuery.Timestamp,
+				LastSeen:       dnsQuery.Timestamp,
+				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
+				AddressScope:   getAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
+				MACAddressSet:  model.NewMACAddressSet(),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to add answering device: %w", err)
+			}
+			answeringDevice, err = repo.GetDevice(dnsQuery.AnsweringDeviceIP)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve answering device: %w", err)
+			}
+		}
+
+		dnsRecord := &model.DNSQuery{
+			QueryingDeviceID:  queryingDevice.ID,
+			AnsweringDeviceID: answeringDevice.ID,
+			QueryName:         dnsQuery.QueryName,
+			QueryType:         dnsQuery.QueryType,
+			QueryResult:       dnsQuery.QueryResult,
+			Timestamp:         dnsQuery.Timestamp,
+		}
+		if err = repo.AddDNSQuery(dnsRecord); err != nil {
+			return fmt.Errorf("failed to add DNS record: %w", err)
 		}
 	}
 

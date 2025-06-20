@@ -156,7 +156,7 @@ type Device struct {
 	LastSeen       time.Time
 	AddressSubType string
 	AddressScope   string
-	MACAddressSet  *helper.Set
+	MACAddressSet  *MACAddressSet
 }
 
 // Service represents a network service.

@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/mattn/go-sqlite3"
 	"log"
-	"pcap-importer-golang/internal/helper"
 	"strings"
 	"time"
 
@@ -106,7 +106,7 @@ func (r *SQLiteRepository) createTables() error {
 			query_type TEXT NOT NULL,
 			query_result TEXT,
 			timestamp TEXT NOT NULL,
-			UNIQUE (querying_device_id, answering_device_id, query_name, query_type, timestamp),
+			UNIQUE (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp),
 			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
 			FOREIGN KEY (answering_device_id) REFERENCES devices (id)
 		);`,
@@ -178,7 +178,7 @@ func (r *SQLiteRepository) GetDevice(address string) (*model.Device, error) {
 	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
-	device.MACAddressSet = helper.NewSet()
+	device.MACAddressSet = model.NewMACAddressSet()
 
 	for _, mac := range strings.Split(macAddressesStr, ",") {
 		if mac != "" {
@@ -320,16 +320,26 @@ func (r *SQLiteRepository) AddDNSQuery(query *model.DNSQuery) error {
 		return err
 	}
 
-	_, err := r.db.Exec(
+	jsonQueryResult, err := json.Marshal(query.QueryResult)
+	if err != nil {
+		log.Printf("Error marshaling query result: %v", err)
+	}
+	_, err = r.db.Exec(
 		`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) 
 		VALUES (?, ?, ?, ?, ?, ?);`,
 		query.QueryingDeviceID,
 		query.AnsweringDeviceID,
 		query.QueryName,
 		query.QueryType,
-		query.QueryResult,
+		string(jsonQueryResult),
 		query.Timestamp.Format(time.RFC3339Nano),
 	)
+	if err != nil {
+		log.Printf("Error inserting DNS query: %v", err)
+		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
+			return nil // Ignore unique constraint violations
+		}
+	}
 	return err
 }
 
@@ -482,7 +492,7 @@ func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model.Device, e
 	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
-	device.MACAddressSet = helper.NewSet()
+	device.MACAddressSet = model.NewMACAddressSet()
 
 	for _, mac := range strings.Split(macAddressesStr, ",") {
 		if mac != "" {
@@ -557,7 +567,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
 		if device.MACAddressSet != nil {
 			macs = device.MACAddressSet.ToString()
 		}
-		_, err := stmt.Exec(
+		_, err = stmt.Exec(
 			device.Address,
 			device.AddressType,
 			device.FirstSeen.Format(time.RFC3339Nano),

@@ -2,6 +2,18 @@ package helper
 
 import "strings"
 
+type SetInterface interface {
+	Add(value string)
+	Remove(value string)
+	Contains(value string) bool
+	Size() int
+	List() []string
+	Union(other *Set) *Set
+	Intersection(other *Set) *Set
+	Difference(other *Set) *Set
+	ToString() string
+}
+
 // Set is a collection of unique elements
 type Set struct {
 	elements map[string]struct{}
