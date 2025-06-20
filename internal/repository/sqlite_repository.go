@@ -567,7 +567,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
 		if device.MACAddressSet != nil {
 			macs = device.MACAddressSet.ToString()
 		}
-		_, err = stmt.Exec(
+		result, err := stmt.Exec(
 			device.Address,
 			device.AddressType,
 			device.FirstSeen.Format(time.RFC3339Nano),
@@ -579,6 +579,11 @@ func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
 		if err != nil {
 			return err
 		}
+		lastInsertID, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		device.ID = lastInsertID
 	}
 	return tx.Commit()
 }

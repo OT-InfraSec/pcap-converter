@@ -343,6 +343,11 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"prot_addr_size": arp.ProtAddressSize,
 				"operation":      arp.Operation,
 			}
+
+			if arp.Operation == layers.ARPRequest {
+				continue // Skip ARP requests
+			}
+
 			protocols = append(protocols, "arp")
 		}
 
@@ -595,17 +600,6 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			Protocols: protocols,
 		}
 
-		// Filter packets with no meaningful connections
-		// example: ICMP reply with DestinationUnreachable
-		/*if icmpData, ok := layersMap["icmp"].(map[string]interface{}); ok {
-			if typeCode, ok := icmpData["type_code"].(string); ok {
-				if strings.Contains(typeCode, "DestinationUnreachable") {
-					// Skip packets that are ICMP Destination Unreachable
-					continue
-				}
-			}
-		}*/
-
 		// Send the packet to the batch processing goroutine
 		packetChan <- modelPacket
 
@@ -747,8 +741,10 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 	// Save DNS queries
 	for _, dnsQuery := range p.dnsQueries {
-		queryingDevice := p.devices["IP"+dnsQuery.QueryingDeviceIP]
-		answeringDevice := p.devices["IP"+dnsQuery.AnsweringDeviceIP]
+		queryingDeviceKey := "IP:" + dnsQuery.QueryingDeviceIP
+		queryingDevice := p.devices[queryingDeviceKey]
+		answeringDeviceKey := "IP:" + dnsQuery.AnsweringDeviceIP
+		answeringDevice := p.devices[answeringDeviceKey]
 		if queryingDevice == nil {
 			err = repo.AddDevice(&model.Device{
 				Address:        dnsQuery.QueryingDeviceIP,
