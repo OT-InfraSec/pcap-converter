@@ -22,7 +22,8 @@ type DNSQuery struct {
 	AnsweringDeviceIP string
 	QueryName         string
 	QueryType         string
-	QueryResult       map[string]interface{}
+	Questions         map[string]interface{}
+	Answers           map[string]interface{}
 	Timestamp         time.Time
 }
 
@@ -203,8 +204,8 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 }
 
 func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
-	queryingDevice := p.devices["IP"+dnsQuery.QueryingDeviceIP]
-	answeringDevice := p.devices["IP"+dnsQuery.AnsweringDeviceIP]
+	queryingDevice := p.devices["IP:"+dnsQuery.QueryingDeviceIP]
+	answeringDevice := p.devices["IP:"+dnsQuery.AnsweringDeviceIP]
 	if queryingDevice == nil {
 		// create new device
 		queryingDevice = p.updateDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, "", "")
@@ -216,25 +217,76 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
 	if existingQuery, exists := p.dnsQueries[queryKey]; exists {
 		// Update existing query
-		if dnsQuery.QueryResult != nil {
-			if existingQuery.QueryResult != nil {
-				for key, value := range dnsQuery.QueryResult {
-					if existingQuery.QueryResult[key] == nil {
-						existingQuery.QueryResult[key] = value
+		if dnsQuery.Questions != nil {
+			if existingQuery.Questions != nil {
+				for key, value := range dnsQuery.Questions {
+					if existingQuery.Questions[key] == nil {
+						existingQuery.Questions[key] = value
 					} else {
 						// If the key already exists, we can merge or update as needed
-						switch v := existingQuery.QueryResult[key].(type) {
+						switch v := existingQuery.Questions[key].(type) {
 						case []string:
 							if newValue, ok := value.([]string); ok {
-								existingQuery.QueryResult[key] = append(v, newValue...)
+								existingQuery.Questions[key] = append(v, newValue...)
 							}
 						default:
-							existingQuery.QueryResult[key] = value // Overwrite with new value
+							existingQuery.Questions[key] = value // Overwrite with new value
 						}
 					}
 				}
 			} else {
-				existingQuery.QueryResult = dnsQuery.QueryResult
+				existingQuery.Questions = dnsQuery.Questions
+			}
+		}
+
+		if len(dnsQuery.Answers) > 0 {
+			if len(existingQuery.Answers) > 0 {
+				for key, value := range dnsQuery.Answers {
+					if existingQuery.Answers[key] == nil {
+						existingQuery.Answers[key] = value
+					} else {
+						// If the key already exists, we can merge or update as needed
+						switch v := existingQuery.Answers[key].(type) {
+						case []string:
+							if newValue, ok := value.([]string); ok {
+								existingQuery.Answers[key] = append(v, newValue...)
+							}
+						case map[string]interface{}:
+							if newValue, ok := value.(map[string]interface{}); ok {
+								// Merge maps
+								for subKey, subValue := range newValue {
+									if existingSubValue, exists := v[subKey]; !exists {
+										v[subKey] = subValue // Add new key
+									} else {
+										// If the subkey already exists, we can overwrite or merge as needed
+										switch subV := existingSubValue.(type) {
+										case []string:
+											if newSubValue, ok := subValue.([]string); ok {
+												v[subKey] = append(subV, newSubValue...)
+											}
+										case []uint8:
+											v[subKey] = subValue
+										default:
+											// Append the value if it's not a slice
+											if subV.(string) != subValue.(string) && subV.(string) != "" && subValue.(string) != "" {
+												v[subKey] = subValue.(string) + "," + subV.(string) // Concatenate
+											} else {
+												// If they are equal, do nothing
+											}
+										}
+									}
+								}
+								existingQuery.Answers[key] = v // Update with merged map
+							} else {
+								existingQuery.Answers[key] = value // Overwrite with new value
+							}
+						default:
+							existingQuery.Answers[key] = value // Overwrite with new value
+						}
+					}
+				}
+			} else {
+				existingQuery.Answers = dnsQuery.Answers
 			}
 		}
 		existingQuery.Timestamp = dnsQuery.Timestamp
@@ -474,6 +526,12 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// DNS
 		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
 			dns := dnsLayer.(*layers.DNS)
+
+			if dns.ResponseCode != layers.DNSResponseCodeNoErr || len(dns.Answers) == 0 {
+				// Skip DNS packets with errors
+				continue
+			}
+
 			layersMap["dns"] = map[string]interface{}{
 				"qr":          dns.QR,
 				"opcode":      dns.OpCode,
@@ -496,16 +554,59 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			dnsQuery := DNSQuery{
 				QueryingDeviceIP:  srcIP,
 				AnsweringDeviceIP: dstIP,
-				QueryResult:       make(map[string]interface{}),
+				Questions:         make(map[string]interface{}),
+				Answers:           make(map[string]interface{}),
 				Timestamp:         packet.Metadata().Timestamp,
 			}
 			for _, question := range dns.Questions {
 				dnsQuery.QueryName = string(question.Name)
 				dnsQuery.QueryType = question.Type.String()
 				// Store the query result in a map
-				dnsQuery.QueryResult[string(question.Name)] = map[string]interface{}{
+				dnsQuery.Questions[string(question.Name)] = map[string]interface{}{
 					"type":  question.Type.String(),
 					"class": question.Class.String(),
+				}
+			}
+
+			for _, answer := range dns.Answers {
+				switch answer.Type {
+				case layers.DNSTypeA:
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":  answer.Type.String(),
+						"class": answer.Class.String(),
+						"ip":    answer.IP.String(),
+					}
+				case layers.DNSTypeAAAA:
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":  answer.Type.String(),
+						"class": answer.Class.String(),
+						"ip":    answer.IP.String(),
+					}
+				case layers.DNSTypeCNAME:
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":  answer.Type.String(),
+						"class": answer.Class.String(),
+						"cname": string(answer.CNAME),
+					}
+				case layers.DNSTypeMX:
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":       answer.Type.String(),
+						"class":      answer.Class.String(),
+						"preference": answer.MX.Preference,
+					}
+				case layers.DNSTypeTXT:
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":  answer.Type.String(),
+						"class": answer.Class.String(),
+						"txt":   answer.TXT,
+					}
+				default:
+					// Handle other types as needed
+					dnsQuery.Answers[string(answer.Name)] = map[string]interface{}{
+						"type":  answer.Type.String(),
+						"class": answer.Class.String(),
+						"data":  answer.Data,
+					}
 				}
 			}
 			p.updateDNSQuery(dnsQuery)
@@ -787,7 +888,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			AnsweringDeviceID: answeringDevice.ID,
 			QueryName:         dnsQuery.QueryName,
 			QueryType:         dnsQuery.QueryType,
-			QueryResult:       dnsQuery.QueryResult,
+			QueryResult:       dnsQuery.Answers,
 			Timestamp:         dnsQuery.Timestamp,
 		}
 		if err = repo.AddDNSQuery(dnsRecord); err != nil {
