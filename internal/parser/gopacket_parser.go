@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
+	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"net"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 			FirstSeen:      timestamp,
 			LastSeen:       timestamp,
 			AddressSubType: addressSubType,
-			AddressScope:   helper.GetAddressScope(address, addressType),
+			AddressScope:   helper2.GetAddressScope(address, addressType),
 			MACAddressSet:  macAddressSet,
 		}
 		p.devices[devKey] = dev
@@ -820,7 +821,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   helper.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
+				AddressScope:   helper2.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
 				MACAddressSet:  model.NewMACAddressSet(),
 			})
 			if err != nil {
@@ -838,7 +839,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   helper.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
+				AddressScope:   helper2.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
 				MACAddressSet:  model.NewMACAddressSet(),
 			})
 			if err != nil {
