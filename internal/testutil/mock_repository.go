@@ -1,8 +1,8 @@
 package testutil
 
 import (
-	"pcap-importer-golang/internal/model"
-	"pcap-importer-golang/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 )
 
 type MockRepository struct {

@@ -64,14 +64,14 @@ func TestDNSQueryStruct(t *testing.T) {
 	id := int64(4)
 	q := &DNSQuery{
 		ID:                4,
-		QueryingDeviceID:  &id,
-		AnsweringDeviceID: &id,
+		QueryingDeviceID:  id,
+		AnsweringDeviceID: id,
 		QueryName:         "example.com",
 		QueryType:         "A",
 		QueryResult:       map[string]interface{}{"a": "1.2.3.4"},
 		Timestamp:         ts,
 	}
-	if q.ID != 4 || q.QueryName != "example.com" || *q.QueryingDeviceID != 4 {
+	if q.ID != 4 || q.QueryName != "example.com" || q.QueryingDeviceID != 4 {
 		t.Errorf("DNSQuery struct fields not set correctly")
 	}
 }

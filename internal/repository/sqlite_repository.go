@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"pcap-importer-golang/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 
 	_ "github.com/mattn/go-sqlite3"
 )

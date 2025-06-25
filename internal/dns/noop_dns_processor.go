@@ -1,6 +1,6 @@
 package dns
 
-import "pcap-importer-golang/internal/repository"
+import "github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
 type NoopDNSProcessor struct{}
 

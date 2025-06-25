@@ -2,19 +2,19 @@ package parser
 
 import (
 	"fmt"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	"net"
-	"pcap-importer-golang/internal/helper"
 	"strconv"
 	"strings"
 	"time"
 
-	"pcap-importer-golang/internal/model"
-	"pcap-importer-golang/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
+	liblayers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	liblayers "pcap-importer-golang/lib/layers"
 )
 
 type DNSQuery struct {
@@ -50,52 +50,6 @@ func NewGopacketParser(pcapFile string) *GopacketParser {
 	}
 }
 
-// getAddressScope determines if an address is unicast, multicast, or broadcast
-func getAddressScope(address string, addressType string) string {
-	if addressType == "MAC" {
-		if address == "ff:ff:ff:ff:ff:ff" {
-			return "broadcast"
-		}
-		// Check if MAC is multicast (first byte's least significant bit is 1)
-		parts := strings.Split(address, ":")
-		if len(parts) > 0 {
-			firstByte, err := strconv.ParseInt(parts[0], 16, 8)
-			if err == nil && firstByte&0x01 == 1 {
-				return "multicast"
-			}
-		}
-		return "unicast"
-	} else if addressType == "IP" {
-		ip := net.ParseIP(address)
-		if ip == nil {
-			return ""
-		}
-		if ip.IsMulticast() {
-			return "multicast"
-		}
-		if ip.IsLoopback() {
-			return "unicast"
-		}
-		if ip.IsLinkLocalMulticast() {
-			return "multicast"
-		}
-		if ip.IsInterfaceLocalMulticast() {
-			return "multicast"
-		}
-		if ip.IsGlobalUnicast() {
-			return "unicast"
-		}
-		if ip.IsPrivate() {
-			return "unicast"
-		}
-		if ip.Equal(net.IPv4bcast) {
-			return "broadcast"
-		}
-		return "unicast"
-	}
-	return ""
-}
-
 // updateDevice updates or creates a device
 func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string) *model.Device {
 	devKey := addressType + ":" + address
@@ -112,7 +66,7 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 			FirstSeen:      timestamp,
 			LastSeen:       timestamp,
 			AddressSubType: addressSubType,
-			AddressScope:   getAddressScope(address, addressType),
+			AddressScope:   helper.GetAddressScope(address, addressType),
 			MACAddressSet:  macAddressSet,
 		}
 		p.devices[devKey] = dev
@@ -532,6 +486,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				continue
 			}
 
+			flowProto = "dns"
 			layersMap["dns"] = map[string]interface{}{
 				"qr":          dns.QR,
 				"opcode":      dns.OpCode,
@@ -615,6 +570,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// CISCO EIGRP
 		if eigrpLayer := packet.Layer(liblayers.LayerTypeEIGRP); eigrpLayer != nil {
 			eigrp := eigrpLayer.(*liblayers.EIGRP)
+
+			flowProto = "eigrp"
 			layersMap["eigrp"] = map[string]interface{}{
 				"version":           eigrp.Version,
 				"opcode":            eigrp.Opcode,
@@ -630,6 +587,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// LLC
 		if llcLayer := packet.Layer(layers.LayerTypeLLC); llcLayer != nil {
 			llc := llcLayer.(*layers.LLC)
+
+			flowProto = "llc"
 			layersMap["llc"] = map[string]interface{}{
 				"dsap":    llc.DSAP,
 				"ssap":    llc.SSAP,
@@ -641,6 +600,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// SNAP
 		if snapLayer := packet.Layer(layers.LayerTypeSNAP); snapLayer != nil {
 			snap := snapLayer.(*layers.SNAP)
+
+			flowProto = "snap"
 			layersMap["snap"] = map[string]interface{}{
 				"oui":  snap.OrganizationalCode,
 				"type": snap.Type,
@@ -651,6 +612,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// DHCPv4
 		if dhcpv4Layer := packet.Layer(layers.LayerTypeDHCPv4); dhcpv4Layer != nil {
 			dhcpv4 := dhcpv4Layer.(*layers.DHCPv4)
+
+			flowProto = "dhcpv4"
 			layersMap["dhcpv4"] = map[string]interface{}{
 				"operations":     dhcpv4.Operation.String(),
 				"type":           dhcpv4.HardwareType.String(),
@@ -668,6 +631,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// DHCPv6
 		if dhcpv6Layer := packet.Layer(layers.LayerTypeDHCPv6); dhcpv6Layer != nil {
 			dhcpv6 := dhcpv6Layer.(*layers.DHCPv6)
+
+			flowProto = "dhcpv6"
 			layersMap["dhcpv6"] = map[string]interface{}{
 				"message_type":   dhcpv6.MsgType.String(),
 				"hop_count":      dhcpv6.HopCount,
@@ -682,6 +647,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// LLD
 		if lldLayer := packet.Layer(layers.LayerTypeLinkLayerDiscovery); lldLayer != nil {
 			lld := lldLayer.(*layers.LinkLayerDiscovery)
+
+			flowProto = "lld"
 			layersMap["lld"] = map[string]interface{}{
 				"chassis_id": lld.ChassisID,
 				"port_id":    lld.PortID,
@@ -853,7 +820,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   getAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
+				AddressScope:   helper.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
 				MACAddressSet:  model.NewMACAddressSet(),
 			})
 			if err != nil {
@@ -871,7 +838,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   getAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
+				AddressScope:   helper.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
 				MACAddressSet:  model.NewMACAddressSet(),
 			})
 			if err != nil {

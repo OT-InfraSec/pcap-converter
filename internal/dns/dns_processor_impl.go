@@ -3,8 +3,8 @@ package dns
 import (
 	"fmt"
 
-	"pcap-importer-golang/internal/model"
-	"pcap-importer-golang/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 )
 
 type DefaultDNSProcessor struct{}

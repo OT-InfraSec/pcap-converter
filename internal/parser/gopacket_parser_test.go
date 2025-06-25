@@ -2,8 +2,8 @@ package parser
 
 import (
 	"bytes"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
 	"os"
-	"pcap-importer-golang/internal/testutil"
 	"testing"
 	"time"
 

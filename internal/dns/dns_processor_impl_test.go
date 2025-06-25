@@ -4,12 +4,67 @@ import (
 	"testing"
 	"time"
 
-	"pcap-importer-golang/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 )
 
 type mockRepo struct {
 	dnsQueries []*model.DNSQuery
 	packets    []*model.Packet
+}
+
+func (m *mockRepo) AddPackets(packets []*model.Packet) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetDevice(address string) (*model.Device, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddDeviceRelation(relation *model.DeviceRelation) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetDeviceRelations(deviceID *int64) ([]*model.DeviceRelation, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddDevices(devices []*model.Device) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddService(service *model.Service) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetServices(filters map[string]interface{}) ([]*model.Service, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddServices(services []*model.Service) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddFlows(flows []*model.Flow) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetDNSQueries(filters map[string]interface{}) ([]*model.DNSQuery, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) AddDNSQueries(queries []*model.DNSQuery) error {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *mockRepo) AddPacket(_ *model.Packet) error { return nil }

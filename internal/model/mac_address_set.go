@@ -1,7 +1,7 @@
 package model
 
 import (
-	"pcap-importer-golang/internal/helper"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	"strings"
 )
 

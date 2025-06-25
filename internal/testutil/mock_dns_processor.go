@@ -1,7 +1,7 @@
 package testutil
 
 import (
-	"pcap-importer-golang/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 )
 
 type MockDNSProcessor struct {

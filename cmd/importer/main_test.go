@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"pcap-importer-golang/internal/testutil"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
 
 	"github.com/spf13/cobra"
 )
@@ -67,7 +67,7 @@ func makeTestRootCmd(provider *DependencyProvider) *cobra.Command {
 	var (
 		dbPath    string
 		batchSize int
-		clear     bool
+		clearFlag bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -97,13 +97,13 @@ func makeTestRootCmd(provider *DependencyProvider) *cobra.Command {
 			_ = pcapFile
 			_ = dbPath
 			_ = batchSize
-			_ = clear
+			_ = clearFlag
 			return nil
 		},
 	}
 	importCmd.Flags().StringVar(&dbPath, "db-path", "database.sqlite", "Path to the SQLite database file")
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 1000, "Number of packets to import in each batch")
-	importCmd.Flags().BoolVar(&clear, "clear", false, "Clear the database before importing")
+	importCmd.Flags().BoolVar(&clearFlag, "clear", false, "Clear the database before importing")
 
 	rootCmd.AddCommand(importCmd)
 	// Silence output for tests

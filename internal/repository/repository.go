@@ -1,6 +1,6 @@
 package repository
 
-import "pcap-importer-golang/internal/model"
+import "github.com/InfraSecConsult/pcap-importer-go/internal/model"
 
 // Repository defines the contract for storing and retrieving packets, devices, flows, and DNS queries.
 type Repository interface {

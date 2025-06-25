@@ -2,8 +2,8 @@ package model
 
 import (
 	"errors"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	"net"
-	"pcap-importer-golang/internal/helper"
 	"regexp"
 	"strconv"
 	"strings"

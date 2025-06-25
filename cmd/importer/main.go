@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"pcap-importer-golang/internal/dns"
-	"pcap-importer-golang/internal/parser"
-	"pcap-importer-golang/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/dns"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/parser"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
 	"github.com/spf13/cobra"
 )
