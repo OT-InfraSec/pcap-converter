@@ -225,7 +225,7 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 											v[subKey] = subValue
 										default:
 											// Append the value if it's not a slice
-											if subV.(string) != subValue.(string) && subV.(string) != "" && subValue.(string) != "" {
+											if subV.(string) != subValue.(string) && subV.(string) != "" && subValue.(string) != "" && strings.Contains(subV.(string), subValue.(string)) == false {
 												v[subKey] = subValue.(string) + "," + subV.(string) // Concatenate
 											} else {
 												// If they are equal, do nothing
@@ -804,6 +804,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 	}
 
+	dnsQueriesToSave := make([]*model.DNSQuery, 0, len(p.dnsQueries))
+
 	// Save DNS queries
 	for _, dnsQuery := range p.dnsQueries {
 		queryingDeviceKey := "IP:" + dnsQuery.QueryingDeviceIP
@@ -855,8 +857,13 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			QueryResult:       dnsQuery.Answers,
 			Timestamp:         dnsQuery.Timestamp,
 		}
-		if err = repo.AddDNSQuery(dnsRecord); err != nil {
-			return fmt.Errorf("failed to add DNS record: %w", err)
+		dnsQueriesToSave = append(dnsQueriesToSave, dnsRecord)
+	}
+
+	if len(dnsQueriesToSave) > 0 {
+		err = repo.AddDNSQueries(dnsQueriesToSave)
+		if err != nil {
+			return fmt.Errorf("failed to add DNS queries: %w", err)
 		}
 	}
 

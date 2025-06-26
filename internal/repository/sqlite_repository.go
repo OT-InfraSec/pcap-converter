@@ -705,12 +705,23 @@ func (r *SQLiteRepository) AddDNSQueries(queries []*model.DNSQuery) error {
 	defer stmt.Close()
 
 	for _, query := range queries {
-		_, err := stmt.Exec(
+		err = query.Validate()
+		if err != nil {
+			log.Printf("Error validating DNS query: %v", err)
+			continue // Skip this query if validation fails
+		}
+
+		jsonQueryResult, err := json.Marshal(query.QueryResult)
+		if err != nil {
+			log.Printf("Error marshaling query result: %v", err)
+		}
+
+		_, err = stmt.Exec(
 			query.QueryingDeviceID,
 			query.AnsweringDeviceID,
 			query.QueryName,
 			query.QueryType,
-			query.QueryResult,
+			string(jsonQueryResult),
 			query.Timestamp.Format(time.RFC3339Nano),
 		)
 		if err != nil {
