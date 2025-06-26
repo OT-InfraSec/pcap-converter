@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
+	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
 	liblayers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
@@ -31,11 +31,11 @@ type DNSQuery struct {
 type GopacketParser struct {
 	PcapFile string
 	// Track devices and their relationships
-	devices map[string]*model.Device
+	devices map[string]*model2.Device
 	// Track flows
-	flows map[string]*model.Flow
+	flows map[string]*model2.Flow
 	// Track services
-	services map[string]*model.Service
+	services map[string]*model2.Service
 	// DNS queries
 	dnsQueries    map[string]*DNSQuery
 	deviceCounter int64
@@ -44,23 +44,23 @@ type GopacketParser struct {
 func NewGopacketParser(pcapFile string) *GopacketParser {
 	return &GopacketParser{
 		PcapFile:   pcapFile,
-		devices:    make(map[string]*model.Device),
-		flows:      make(map[string]*model.Flow),
-		services:   make(map[string]*model.Service),
+		devices:    make(map[string]*model2.Device),
+		flows:      make(map[string]*model2.Flow),
+		services:   make(map[string]*model2.Service),
 		dnsQueries: make(map[string]*DNSQuery),
 	}
 }
 
 // updateDevice updates or creates a device
-func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string) *model.Device {
+func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string) *model2.Device {
 	devKey := addressType + ":" + address
 	dev, exists := p.devices[devKey]
 	if !exists {
-		macAddressSet := model.NewMACAddressSet()
+		macAddressSet := model2.NewMACAddressSet()
 		if macAddress != "" {
 			macAddressSet.Add(macAddress)
 		}
-		dev = &model.Device{
+		dev = &model2.Device{
 			ID:             p.deviceCounter,
 			Address:        address,
 			AddressType:    addressType,
@@ -82,7 +82,7 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 }
 
 // updateFlow updates or creates a flow
-func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model.Flow {
+func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
 	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
 
 	sourcePortsSet := helper.NewSet()
@@ -96,7 +96,7 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 
 	flow, exists := p.flows[flowKey]
 	if !exists {
-		flow = &model.Flow{
+		flow = &model2.Flow{
 			Source:           src,
 			Destination:      dst,
 			Protocol:         protocol,
@@ -140,11 +140,11 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 }
 
 // updateService updates or creates a service
-func (p *GopacketParser) updateService(ip string, port int, protocol string, timestamp time.Time) *model.Service {
+func (p *GopacketParser) updateService(ip string, port int, protocol string, timestamp time.Time) *model2.Service {
 	serviceKey := fmt.Sprintf("%s:%d:%s", ip, port, protocol)
 	service, exists := p.services[serviceKey]
 	if !exists {
-		service = &model.Service{
+		service = &model2.Service{
 			IP:        ip,
 			Port:      port,
 			Protocol:  protocol,
@@ -280,14 +280,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	var sb strings.Builder
 
 	// Create a buffer channel for batching
-	packetChan := make(chan *model.Packet, batchSize)
+	packetChan := make(chan *model2.Packet, batchSize)
 	errChan := make(chan error, 1)
 	doneChan := make(chan struct{})
 
 	// Start a worker goroutine to process packets in batches
 	go func() {
 		defer close(doneChan)
-		var batch []*model.Packet
+		var batch []*model2.Packet
 
 		for packet := range packetChan {
 			batch = append(batch, packet)
@@ -663,7 +663,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 		timestamp := packet.Metadata().Timestamp
 		length := len(packet.Data())
-		modelPacket := &model.Packet{
+		modelPacket := &model2.Packet{
 			ID:        packetID,
 			Timestamp: timestamp,
 			Length:    length,
@@ -733,7 +733,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	// Save all collected data to the repository
 	// We can batch these operations too
 	const maxBatchSize = 1000
-	deviceBatch := make([]*model.Device, 0, maxBatchSize)
+	deviceBatch := make([]*model2.Device, 0, maxBatchSize)
 	deviceCount := 0
 
 	for _, dev := range p.devices {
@@ -757,7 +757,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	}
 
 	// Batch process flows
-	flowBatch := make([]*model.Flow, 0, maxBatchSize)
+	flowBatch := make([]*model2.Flow, 0, maxBatchSize)
 	flowCount := 0
 
 	for _, flow := range p.flows {
@@ -781,7 +781,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	}
 
 	// Batch process services
-	serviceBatch := make([]*model.Service, 0, maxBatchSize)
+	serviceBatch := make([]*model2.Service, 0, maxBatchSize)
 	serviceCount := 0
 
 	for _, service := range p.services {
@@ -804,7 +804,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 	}
 
-	dnsQueriesToSave := make([]*model.DNSQuery, 0, len(p.dnsQueries))
+	dnsQueriesToSave := make([]*model2.DNSQuery, 0, len(p.dnsQueries))
 
 	// Save DNS queries
 	for _, dnsQuery := range p.dnsQueries {
@@ -813,14 +813,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		answeringDeviceKey := "IP:" + dnsQuery.AnsweringDeviceIP
 		answeringDevice := p.devices[answeringDeviceKey]
 		if queryingDevice == nil {
-			err = repo.AddDevice(&model.Device{
+			err = repo.AddDevice(&model2.Device{
 				Address:        dnsQuery.QueryingDeviceIP,
 				AddressType:    "IP",
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
 				AddressScope:   helper2.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
-				MACAddressSet:  model.NewMACAddressSet(),
+				MACAddressSet:  model2.NewMACAddressSet(),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to add querying device: %w", err)
@@ -831,14 +831,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			}
 		}
 		if answeringDevice == nil {
-			err = repo.AddDevice(&model.Device{
+			err = repo.AddDevice(&model2.Device{
 				Address:        dnsQuery.AnsweringDeviceIP,
 				AddressType:    "IP",
 				FirstSeen:      dnsQuery.Timestamp,
 				LastSeen:       dnsQuery.Timestamp,
 				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
 				AddressScope:   helper2.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
-				MACAddressSet:  model.NewMACAddressSet(),
+				MACAddressSet:  model2.NewMACAddressSet(),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to add answering device: %w", err)
@@ -849,7 +849,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			}
 		}
 
-		dnsRecord := &model.DNSQuery{
+		dnsRecord := &model2.DNSQuery{
 			QueryingDeviceID:  queryingDevice.ID,
 			AnsweringDeviceID: answeringDevice.ID,
 			QueryName:         dnsQuery.QueryName,
@@ -878,13 +878,13 @@ func GetAddressSubTypeForIP(ip string) string {
 	return addressSubType
 }
 
-func (p *GopacketParser) saveAllDeviceRelations(devices []*model.Device, repo repository.Repository, comment string) error {
+func (p *GopacketParser) saveAllDeviceRelations(devices []*model2.Device, repo repository.Repository, comment string) error {
 	for _, dev1 := range devices {
 		for _, dev2 := range devices {
 			if dev1.ID == dev2.ID {
 				continue // Skip self-relation
 			}
-			relation := &model.DeviceRelation{
+			relation := &model2.DeviceRelation{
 				DeviceID1: dev1.ID,
 				DeviceID2: dev2.ID,
 				Comment:   comment,

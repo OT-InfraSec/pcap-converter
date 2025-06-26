@@ -1,6 +1,8 @@
 package repository
 
-import "github.com/InfraSecConsult/pcap-importer-go/internal/model"
+import (
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
+)
 
 // Repository defines the contract for storing and retrieving packets, devices, flows, and DNS queries.
 type Repository interface {
@@ -31,7 +33,7 @@ type Repository interface {
 
 	// DNS operations
 	AddDNSQuery(query *model.DNSQuery) error
-	GetDNSQueries(filters map[string]interface{}) ([]*model.DNSQuery, error)
+	GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error)
 	// Batch DNS operations for performance
 	AddDNSQueries(queries []*model.DNSQuery) error
 

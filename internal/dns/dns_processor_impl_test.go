@@ -1,10 +1,9 @@
 package dns
 
 import (
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"testing"
 	"time"
-
-	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 )
 
 type mockRepo struct {
@@ -57,7 +56,7 @@ func (m *mockRepo) AddFlows(flows []*model.Flow) error {
 	panic("implement me")
 }
 
-func (m *mockRepo) GetDNSQueries(filters map[string]interface{}) ([]*model.DNSQuery, error) {
+func (m *mockRepo) GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error) {
 	//TODO implement me
 	panic("implement me")
 }

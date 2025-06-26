@@ -4,12 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/mattn/go-sqlite3"
 	"log"
 	"strings"
 	"time"
-
-	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -131,7 +130,7 @@ func (r *SQLiteRepository) createTables() error {
 	return nil
 }
 
-func (r *SQLiteRepository) AddPacket(packet *model.Packet) error {
+func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 	layersJSON, _ := json.Marshal(packet.Layers)
 	protocolsJSON, _ := json.Marshal(packet.Protocols)
 	_, err := r.db.Exec(
@@ -144,7 +143,7 @@ func (r *SQLiteRepository) AddPacket(packet *model.Packet) error {
 	return err
 }
 
-func (r *SQLiteRepository) AddDevice(device *model.Device) error {
+func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	// Validiere das Device bevor es zur Datenbank hinzugefügt wird
 	if err := device.Validate(); err != nil {
 		return err
@@ -163,11 +162,11 @@ func (r *SQLiteRepository) AddDevice(device *model.Device) error {
 	return err
 }
 
-func (r *SQLiteRepository) GetDevice(address string) (*model.Device, error) {
+func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
 	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
-	var device model.Device
+	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
@@ -178,7 +177,7 @@ func (r *SQLiteRepository) GetDevice(address string) (*model.Device, error) {
 	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
-	device.MACAddressSet = model.NewMACAddressSet()
+	device.MACAddressSet = model2.NewMACAddressSet()
 
 	for _, mac := range strings.Split(macAddressesStr, ",") {
 		if mac != "" {
@@ -189,7 +188,7 @@ func (r *SQLiteRepository) GetDevice(address string) (*model.Device, error) {
 	return &device, nil
 }
 
-func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
+func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	// Validiere den Flow bevor er zur Datenbank hinzugefügt wird
 	if err := flow.Validate(); err != nil {
 		return err
@@ -197,12 +196,12 @@ func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
 
 	// Get source and destination device IDs
 	srcAddress := flow.Source
-	srcAddress, err := model.ExtractIPAddress(srcAddress)
+	srcAddress, err := model2.ExtractIPAddress(srcAddress)
 	if srcAddress == "" || err != nil {
 		return errors.New("invalid source address")
 	}
 	destAddress := flow.Destination
-	destAddress, err = model.ExtractIPAddress(destAddress)
+	destAddress, err = model2.ExtractIPAddress(destAddress)
 	if destAddress == "" || err != nil {
 		return errors.New("invalid destination address")
 	}
@@ -248,7 +247,7 @@ func (r *SQLiteRepository) AddFlow(flow *model.Flow) error {
 	return err
 }
 
-func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
+func (r *SQLiteRepository) AllPackets() ([]*model2.Packet, error) {
 	rows, err := r.db.Query(`SELECT id, timestamp, length, layers, protocols FROM packets`)
 	if err != nil {
 		return nil, err
@@ -261,7 +260,7 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 			log.Printf("Error closing rows: %v", err)
 		}
 	}(rows)
-	var packets []*model.Packet
+	var packets []*model2.Packet
 	for rows.Next() {
 		var (
 			id           int64
@@ -278,7 +277,7 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 		_ = json.Unmarshal([]byte(layersStr), &layers)
 		var protocols []string
 		_ = json.Unmarshal([]byte(protocolsStr), &protocols)
-		packets = append(packets, &model.Packet{
+		packets = append(packets, &model2.Packet{
 			ID:        id,
 			Timestamp: ts,
 			Length:    length,
@@ -289,7 +288,7 @@ func (r *SQLiteRepository) AllPackets() ([]*model.Packet, error) {
 	return packets, nil
 }
 
-func (r *SQLiteRepository) AddService(service *model.Service) error {
+func (r *SQLiteRepository) AddService(service *model2.Service) error {
 	if err := service.Validate(); err != nil {
 		return err
 	}
@@ -305,7 +304,7 @@ func (r *SQLiteRepository) AddService(service *model.Service) error {
 	return err
 }
 
-func (r *SQLiteRepository) AddDeviceRelation(relation *model.DeviceRelation) error {
+func (r *SQLiteRepository) AddDeviceRelation(relation *model2.DeviceRelation) error {
 	_, err := r.db.Exec(
 		`INSERT INTO device_relations (device_id_1, device_id_2, comment) VALUES (?, ?, ?);`,
 		relation.DeviceID1,
@@ -315,7 +314,7 @@ func (r *SQLiteRepository) AddDeviceRelation(relation *model.DeviceRelation) err
 	return err
 }
 
-func (r *SQLiteRepository) AddDNSQuery(query *model.DNSQuery) error {
+func (r *SQLiteRepository) AddDNSQuery(query *model2.DNSQuery) error {
 	if err := query.Validate(); err != nil {
 		return err
 	}
@@ -343,7 +342,7 @@ func (r *SQLiteRepository) AddDNSQuery(query *model.DNSQuery) error {
 	return err
 }
 
-func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model.Service, error) {
+func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model2.Service, error) {
 	query := "SELECT element_id, ip, port, first_seen, last_seen, protocol FROM services"
 	params := []interface{}{}
 
@@ -362,7 +361,7 @@ func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model
 	}
 	defer rows.Close()
 
-	var services []*model.Service
+	var services []*model2.Service
 	for rows.Next() {
 		var (
 			elementID int64
@@ -379,7 +378,7 @@ func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model
 		firstSeenTime, _ := time.Parse(time.RFC3339Nano, firstSeen)
 		lastSeenTime, _ := time.Parse(time.RFC3339Nano, lastSeen)
 
-		services = append(services, &model.Service{
+		services = append(services, &model2.Service{
 			ID:        elementID,
 			IP:        ip,
 			Port:      port,
@@ -391,7 +390,7 @@ func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model
 	return services, nil
 }
 
-func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceRelation, error) {
+func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model2.DeviceRelation, error) {
 	query := "SELECT id, device_id_1, device_id_2, comment FROM device_relations"
 	params := []interface{}{}
 
@@ -406,7 +405,7 @@ func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceR
 	}
 	defer rows.Close()
 
-	var relations []*model.DeviceRelation
+	var relations []*model2.DeviceRelation
 	for rows.Next() {
 		var (
 			id        int64
@@ -418,7 +417,7 @@ func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceR
 			return nil, err
 		}
 
-		relations = append(relations, &model.DeviceRelation{
+		relations = append(relations, &model2.DeviceRelation{
 			ID:        id,
 			DeviceID1: deviceID1,
 			DeviceID2: deviceID2,
@@ -428,15 +427,23 @@ func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceR
 	return relations, nil
 }
 
-func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*model.DNSQuery, error) {
+func (r *SQLiteRepository) GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model2.DNSQuery, error) {
 	query := "SELECT id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp FROM dns_queries"
 	params := []interface{}{}
 
-	if len(filters) > 0 {
+	if len(eqFilters) > 0 || len(likeFilters) > 0 {
 		conditions := []string{}
-		for key, value := range filters {
-			conditions = append(conditions, key+" = ?")
-			params = append(params, value)
+		if len(eqFilters) > 0 {
+			for key, value := range eqFilters {
+				conditions = append(conditions, key+" = ?")
+				params = append(params, value)
+			}
+		}
+		if len(likeFilters) > 0 {
+			for key, value := range likeFilters {
+				conditions = append(conditions, key+" LIKE ?")
+				params = append(params, value.(string))
+			}
 		}
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -447,7 +454,7 @@ func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*mod
 	}
 	defer rows.Close()
 
-	var queries []*model.DNSQuery
+	var queries []*model2.DNSQuery
 	for rows.Next() {
 		var (
 			id                int64
@@ -464,7 +471,7 @@ func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*mod
 
 		timestampTime, _ := time.Parse(time.RFC3339Nano, timestamp)
 
-		queries = append(queries, &model.DNSQuery{
+		queries = append(queries, &model2.DNSQuery{
 			ID:                id,
 			QueryingDeviceID:  queryingDeviceID,
 			AnsweringDeviceID: answeringDeviceID,
@@ -477,11 +484,11 @@ func (r *SQLiteRepository) GetDNSQueries(filters map[string]interface{}) ([]*mod
 	return queries, nil
 }
 
-func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model.Device, error) {
+func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model2.Device, error) {
 	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
-	var device model.Device
+	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
@@ -492,7 +499,7 @@ func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model.Device, e
 	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
-	device.MACAddressSet = model.NewMACAddressSet()
+	device.MACAddressSet = model2.NewMACAddressSet()
 
 	for _, mac := range strings.Split(macAddressesStr, ",") {
 		if mac != "" {
@@ -513,7 +520,7 @@ func (r *SQLiteRepository) Close() error {
 }
 
 // AddPackets inserts multiple packets in a single transaction.
-func (r *SQLiteRepository) AddPackets(packets []*model.Packet) error {
+func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -549,7 +556,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model.Packet) error {
 }
 
 // AddDevices inserts multiple devices in a single transaction.
-func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
+func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -589,7 +596,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model.Device) error {
 }
 
 // AddFlows inserts multiple flows in a single transaction.
-func (r *SQLiteRepository) AddFlows(flows []*model.Flow) error {
+func (r *SQLiteRepository) AddFlows(flows []*model2.Flow) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -657,7 +664,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 }
 
 // AddServices inserts multiple services in a single transaction.
-func (r *SQLiteRepository) AddServices(services []*model.Service) error {
+func (r *SQLiteRepository) AddServices(services []*model2.Service) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -691,7 +698,7 @@ func (r *SQLiteRepository) AddServices(services []*model.Service) error {
 }
 
 // AddDNSQueries inserts multiple DNS queries in a single transaction.
-func (r *SQLiteRepository) AddDNSQueries(queries []*model.DNSQuery) error {
+func (r *SQLiteRepository) AddDNSQueries(queries []*model2.DNSQuery) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -732,7 +739,7 @@ func (r *SQLiteRepository) AddDNSQueries(queries []*model.DNSQuery) error {
 }
 
 // AddDeviceRelations inserts multiple device relations in a single transaction.
-func (r *SQLiteRepository) AddDeviceRelations(relations []*model.DeviceRelation) error {
+func (r *SQLiteRepository) AddDeviceRelations(relations []*model2.DeviceRelation) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err

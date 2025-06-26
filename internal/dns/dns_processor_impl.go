@@ -2,8 +2,8 @@ package dns
 
 import (
 	"fmt"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 
-	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 )
 

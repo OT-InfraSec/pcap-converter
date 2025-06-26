@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/internal/model"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"testing"
 	"time"
 )
