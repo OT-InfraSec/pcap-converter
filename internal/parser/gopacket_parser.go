@@ -163,10 +163,12 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 	answeringDevice := p.devices["IP:"+dnsQuery.AnsweringDeviceIP]
 	if queryingDevice == nil {
 		// create new device
-		queryingDevice = p.updateDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, "", "")
+		addressSubType := GetAddressSubTypeForIP(dnsQuery.QueryingDeviceIP)
+		queryingDevice = p.updateDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "")
 	}
 	if answeringDevice == nil {
-		answeringDevice = p.updateDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, "", "")
+		addressSubType := GetAddressSubTypeForIP(dnsQuery.AnsweringDeviceIP)
+		answeringDevice = p.updateDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "")
 	}
 	// Create a unique key for the DNS query
 	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
@@ -675,17 +677,11 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// Device extraction and storage - optimized with cached values
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" {
-			addressSubType := "IPv4"
-			if strings.Count(srcIP, ":") > 1 {
-				addressSubType = "IPv6"
-			}
+			addressSubType := GetAddressSubTypeForIP(srcIP)
 			p.updateDevice(srcIP, "IP", timestamp, addressSubType, srcMAC)
 		}
 		if dstMAC != "" && dstIP != "" {
-			addressSubType := "IPv4"
-			if strings.Count(dstIP, ":") > 1 {
-				addressSubType = "IPv6"
-			}
+			addressSubType := GetAddressSubTypeForIP(dstIP)
 			p.updateDevice(dstIP, "IP", timestamp, addressSubType, dstMAC)
 		}
 
@@ -865,6 +861,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	}
 
 	return nil
+}
+
+func GetAddressSubTypeForIP(ip string) string {
+	addressSubType := "IPv4"
+	if strings.Count(ip, ":") > 1 {
+		addressSubType = "IPv6"
+	}
+	return addressSubType
 }
 
 func (p *GopacketParser) saveAllDeviceRelations(devices []*model.Device, repo repository.Repository, comment string) error {
