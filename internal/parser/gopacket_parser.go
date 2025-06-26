@@ -263,6 +263,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 	liblayers.InitLayerLLDP()
 	liblayers.InitLayerEIGRP()
+	liblayers.InitLayerSSDP()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	// Set DecodeOptions for better performance
@@ -659,6 +660,57 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"values":     lld.Values,
 			}
 			protocols = append(protocols, "lld")
+		}
+
+		// SSDP
+		if ssdpLayer := packet.Layer(liblayers.LayerTypeSSDP); ssdpLayer != nil {
+			ssdp := ssdpLayer.(*liblayers.SSDP)
+
+			flowProto = "ssdp"
+			ssdpData := map[string]interface{}{
+				"method":      ssdp.Method,
+				"request_uri": ssdp.RequestURI,
+				"version":     ssdp.Version,
+				"is_response": ssdp.IsResponse,
+				"headers":     ssdp.Headers,
+			}
+
+			if ssdp.IsResponse {
+				ssdpData["status_code"] = ssdp.StatusCode
+				ssdpData["status_msg"] = ssdp.StatusMsg
+			}
+
+			// Add specific SSDP attributes for better analysis
+			if location, exists := ssdp.GetHeader("LOCATION"); exists {
+				ssdpData["location"] = location
+			}
+			if nt, exists := ssdp.GetHeader("NT"); exists {
+				ssdpData["notification_type"] = nt
+			}
+			if nts, exists := ssdp.GetHeader("NTS"); exists {
+				ssdpData["notification_subtype"] = nts
+				ssdpData["is_alive"] = ssdp.IsAlive()
+				ssdpData["is_byebye"] = ssdp.IsByeBye()
+			}
+			if usn, exists := ssdp.GetHeader("USN"); exists {
+				ssdpData["unique_service_name"] = usn
+			}
+			if server, exists := ssdp.GetHeader("SERVER"); exists {
+				ssdpData["server"] = server
+			}
+			if cacheControl, exists := ssdp.GetHeader("CACHE-CONTROL"); exists {
+				ssdpData["cache_control"] = cacheControl
+			}
+
+			ssdpData["is_search"] = ssdp.IsSearch()
+			ssdpData["is_notify"] = ssdp.IsNotify()
+
+			layersMap["ssdp"] = ssdpData
+			protocols = append(protocols, "ssdp")
+
+			// Update service for SSDP (typically port 1900)
+			timestamp := packet.Metadata().Timestamp
+			p.updateService(srcIP, 1900, "ssdp", timestamp)
 		}
 
 		timestamp := packet.Metadata().Timestamp
