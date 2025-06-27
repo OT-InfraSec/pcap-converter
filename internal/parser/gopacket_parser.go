@@ -630,6 +630,44 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				"options":        dhcpv4.Options,
 			}
 			protocols = append(protocols, "dhcpv4")
+
+			// If request is a Reply, we can extract more information about the network and its servers
+			if dhcpv4.Operation == layers.DHCPOpReply {
+				serverInfo := make(map[string]interface{})
+				for _, option := range dhcpv4.Options {
+					switch option.Type {
+					case layers.DHCPOptServerID:
+						// DHCP server IP
+						if len(option.Data) == 4 {
+							serverInfo["server_ip"] = net.IP(option.Data).String()
+						}
+					case layers.DHCPOptSubnetMask:
+						// Subnet mask
+						if len(option.Data) == 4 {
+							serverInfo["subnet_mask"] = net.IP(option.Data).String()
+						}
+					case layers.DHCPOptRouter:
+						// Routers (can be multiple)
+						var routers []string
+						for i := 0; i+3 < len(option.Data); i += 4 {
+							routers = append(routers, net.IP(option.Data[i:i+4]).String())
+						}
+						serverInfo["routers"] = routers
+					case layers.DHCPOptDNS:
+						// DNS servers (can be multiple)
+						var dnsServers []string
+						for i := 0; i+3 < len(option.Data); i += 4 {
+							dnsServers = append(dnsServers, net.IP(option.Data[i:i+4]).String())
+						}
+						serverInfo["dns_servers"] = dnsServers
+					case layers.DHCPOptDomainName:
+						// Domain name
+						serverInfo["domain_name"] = strings.TrimRight(string(option.Data), "\x00")
+					}
+				}
+				layersMap["dhcpv4_server_info"] = serverInfo
+			}
+
 		}
 
 		// DHCPv6
