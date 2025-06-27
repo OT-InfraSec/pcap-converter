@@ -46,7 +46,8 @@ func (r *SQLiteRepository) createTables() error {
 			last_seen TEXT NOT NULL,
 			address_sub_type TEXT,
 			address_scope TEXT,
-			mac_addresses TEXT
+			mac_addresses TEXT,
+			additional_data TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,7 +151,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
 		device.Address,
 		device.AddressType,
 		device.FirstSeen.Format(time.RFC3339Nano),
@@ -158,19 +159,20 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.AddressSubType,
 		device.AddressScope,
 		device.MACAddressSet.ToString(),
+		device.AdditionalData,
 	)
 	return err
 }
 
 func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
 	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr); err != nil {
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData); err != nil {
 		return nil, err
 	}
 
@@ -485,14 +487,14 @@ func (r *SQLiteRepository) GetDNSQueries(eqFilters map[string]interface{}, likeF
 }
 
 func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses FROM devices WHERE address = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
 	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr); err != nil {
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData); err != nil {
 		return nil, err
 	}
 
@@ -563,7 +565,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses) VALUES (?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -582,6 +584,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 			device.AddressSubType,
 			device.AddressScope,
 			macs,
+			device.AdditionalData,
 		)
 		if err != nil {
 			return err
@@ -759,4 +762,23 @@ func (r *SQLiteRepository) AddDeviceRelations(relations []*model2.DeviceRelation
 		}
 	}
 	return tx.Commit()
+}
+
+func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
+	if device.ID == 0 {
+		return errors.New("device ID must not be zero")
+	}
+	_, err := r.db.Exec(
+		`UPDATE devices SET address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ? WHERE id = ?;`,
+		device.Address,
+		device.AddressType,
+		device.FirstSeen.Format(time.RFC3339Nano),
+		device.LastSeen.Format(time.RFC3339Nano),
+		device.AddressSubType,
+		device.AddressScope,
+		device.MACAddressSet.ToString(),
+		device.AdditionalData,
+		device.ID,
+	)
+	return err
 }

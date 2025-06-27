@@ -15,6 +15,7 @@ type Repository interface {
 	// Device operations
 	AddDevice(device *model.Device) error
 	GetDevice(address string) (*model.Device, error)
+	UpdateDevice(device *model.Device) error
 	AddDeviceRelation(relation *model.DeviceRelation) error
 	GetDeviceRelations(deviceID *int64) ([]*model.DeviceRelation, error)
 	// Batch device operations for performance

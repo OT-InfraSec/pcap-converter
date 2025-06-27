@@ -157,6 +157,7 @@ type Device struct {
 	AddressSubType string
 	AddressScope   string
 	MACAddressSet  *MACAddressSet
+	AdditionalData string // JSON string for additional data
 }
 
 // Service represents a network service.

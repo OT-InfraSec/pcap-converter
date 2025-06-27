@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
@@ -51,8 +52,8 @@ func NewGopacketParser(pcapFile string) *GopacketParser {
 	}
 }
 
-// updateDevice updates or creates a device
-func (p *GopacketParser) updateDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string) *model2.Device {
+// upsertDevice updates or creates a device
+func (p *GopacketParser) upsertDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string, additionalData string) *model2.Device {
 	devKey := addressType + ":" + address
 	dev, exists := p.devices[devKey]
 	if !exists {
@@ -69,6 +70,7 @@ func (p *GopacketParser) updateDevice(address string, addressType string, timest
 			AddressSubType: addressSubType,
 			AddressScope:   helper2.GetAddressScope(address, addressType),
 			MACAddressSet:  macAddressSet,
+			AdditionalData: additionalData,
 		}
 		p.devices[devKey] = dev
 		p.deviceCounter++
@@ -164,11 +166,11 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 	if queryingDevice == nil {
 		// create new device
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.QueryingDeviceIP)
-		queryingDevice = p.updateDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "")
+		queryingDevice = p.upsertDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "")
 	}
 	if answeringDevice == nil {
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.AnsweringDeviceIP)
-		answeringDevice = p.updateDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "")
+		answeringDevice = p.upsertDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "")
 	}
 	// Create a unique key for the DNS query
 	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
@@ -811,10 +813,18 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				case layers.DNSTypeA:
 					if answer.IP != nil {
 						answerData["ip"] = answer.IP.String()
+						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
+						if err != nil {
+							fmt.Errorf("Failed to associate ip with DNS name")
+						}
 					}
 				case layers.DNSTypeAAAA:
 					if answer.IP != nil {
 						answerData["ip"] = answer.IP.String()
+						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
+						if err != nil {
+							fmt.Errorf("Failed to associate ip with DNS name")
+						}
 					}
 				case layers.DNSTypePTR:
 					if answer.PTR != nil {
@@ -927,11 +937,11 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" {
 			addressSubType := GetAddressSubTypeForIP(srcIP)
-			p.updateDevice(srcIP, "IP", timestamp, addressSubType, srcMAC)
+			p.upsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "")
 		}
 		if dstMAC != "" && dstIP != "" {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
-			p.updateDevice(dstIP, "IP", timestamp, addressSubType, dstMAC)
+			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "")
 		}
 
 		// Flow extraction and storage
@@ -1115,6 +1125,44 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			return fmt.Errorf("failed to add DNS queries: %w", err)
 		}
 	}
+
+	return nil
+}
+
+func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
+	device, ok := p.devices["IP:"+ip]
+	if !ok {
+		return fmt.Errorf("failed to get device for IP %s", ip)
+	}
+	if device == nil {
+		return fmt.Errorf("device not found for IP %s", ip)
+	}
+
+	additionalDataMap := make(map[string]interface{}, 0)
+	if len(device.AdditionalData) > 0 {
+		err := json.Unmarshal([]byte(device.AdditionalData), &additionalDataMap)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal additional data for device %s: %w", device.ID, err)
+		}
+	}
+
+	// Associate DNS name with the device
+	dnsNameMap, ok := additionalDataMap["dnsNames"]
+	dnsNameSet := helper.NewSet()
+	if !ok {
+		dnsNameSet.Add(dnsName)
+	} else {
+		for _, existingDNSName := range dnsNameMap.([]interface{}) {
+			dnsNameSet.Add(existingDNSName.(string))
+		}
+		dnsNameSet.Add(dnsName)
+	}
+	additionalDataMap["dnsNames"] = dnsNameSet.List()
+	additionalDataJSON, err := json.Marshal(additionalDataMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal additional data for device %s: %w", device.ID, err)
+	}
+	device.AdditionalData = string(additionalDataJSON)
 
 	return nil
 }
