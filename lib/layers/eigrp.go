@@ -275,7 +275,7 @@ func decodeEIGRP(data []byte, p gopacket.PacketBuilder) error {
 }
 
 // Register EIGRP for appropriate port and protocol
-func init() {
+func InitLayerEIGRP() {
 	// EIGRP uses IP protocol 88
 	RegisterIPProtocol(EIGRPProtocolNumber, layers.EnumMetadata{
 		DecodeWith: gopacket.DecodeFunc(decodeEIGRP),

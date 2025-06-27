@@ -1626,7 +1626,7 @@ var LayerTypeLinkLayerDiscovery = gopacket.OverrideLayerType(58, gopacket.LayerT
 
 const LinkTypeLLDP layers.LinkType = 255
 
-func init() {
+func InitLayerLLDP() {
 	layers.LinkTypeMetadata[LinkTypeLLDP] = layers.EnumMetadata{
 		DecodeWith: gopacket.DecodeFunc(decodeLinkLayerDiscovery),
 		Name:       "Link Layer Discovery Protocol",
