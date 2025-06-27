@@ -264,6 +264,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	liblayers.InitLayerLLDP()
 	liblayers.InitLayerEIGRP()
 	liblayers.InitLayerSSDP()
+	liblayers.InitLayerMDNS()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	// Set DecodeOptions for better performance
@@ -749,6 +750,164 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			// Update service for SSDP (typically port 1900)
 			timestamp := packet.Metadata().Timestamp
 			p.updateService(srcIP, 1900, "ssdp", timestamp)
+		}
+
+		// MDNS
+		if mdnsLayer := packet.Layer(liblayers.LayerTypeMDNS); mdnsLayer != nil {
+			mdns := mdnsLayer.(*liblayers.MDNS)
+
+			flowProto = "mdns"
+			mdnsData := map[string]interface{}{
+				"id":            mdns.ID,
+				"qr":            mdns.QR,
+				"opcode":        mdns.OpCode,
+				"aa":            mdns.AA,
+				"tc":            mdns.TC,
+				"rd":            mdns.RD,
+				"ra":            mdns.RA,
+				"z":             mdns.Z,
+				"response_code": mdns.ResponseCode,
+				"qd_count":      mdns.QDCount,
+				"an_count":      mdns.ANCount,
+				"ns_count":      mdns.NSCount,
+				"ar_count":      mdns.ARCount,
+				"is_query":      mdns.IsQuery(),
+				"is_response":   mdns.IsResponse(),
+			}
+
+			// Parse questions
+			var questions []map[string]interface{}
+			for _, question := range mdns.Questions {
+				questionData := map[string]interface{}{
+					"name":             string(question.Name),
+					"type":             question.Type.String(),
+					"class":            question.Class.String(),
+					"unicast_response": question.UnicastResponse,
+				}
+
+				// Extract service type for service discovery analysis
+				if serviceType := question.GetServiceType(); serviceType != "" {
+					questionData["service_type"] = serviceType
+				}
+
+				questions = append(questions, questionData)
+			}
+			mdnsData["questions"] = questions
+
+			// Parse answers
+			var answers []map[string]interface{}
+			for _, answer := range mdns.Answers {
+				answerData := map[string]interface{}{
+					"name":        string(answer.Name),
+					"type":        answer.Type.String(),
+					"class":       answer.Class.String(),
+					"cache_flush": answer.CacheFlush,
+					"ttl":         answer.TTL,
+					"data_length": answer.DataLength,
+				}
+
+				// Parse specific record types
+				switch answer.Type {
+				case layers.DNSTypeA:
+					if answer.IP != nil {
+						answerData["ip"] = answer.IP.String()
+					}
+				case layers.DNSTypeAAAA:
+					if answer.IP != nil {
+						answerData["ip"] = answer.IP.String()
+					}
+				case layers.DNSTypePTR:
+					if answer.PTR != nil {
+						answerData["ptr"] = string(answer.PTR)
+					}
+				case layers.DNSTypeTXT:
+					if answer.TXT != nil {
+						var txtRecords []string
+						for _, txt := range answer.TXT {
+							txtRecords = append(txtRecords, string(txt))
+						}
+						answerData["txt"] = txtRecords
+					}
+				case layers.DNSTypeSRV:
+					answerData["srv"] = map[string]interface{}{
+						"priority": answer.SRV.Priority,
+						"weight":   answer.SRV.Weight,
+						"port":     answer.SRV.Port,
+						"target":   string(answer.SRV.Name),
+					}
+				case layers.DNSTypeCNAME:
+					if answer.CNAME != nil {
+						answerData["cname"] = string(answer.CNAME)
+					}
+				case layers.DNSTypeMX:
+					answerData["mx"] = map[string]interface{}{
+						"preference": answer.MX.Preference,
+						"name":       string(answer.MX.Name),
+					}
+				default:
+					if answer.Data != nil {
+						answerData["data"] = answer.Data
+					}
+				}
+
+				answers = append(answers, answerData)
+			}
+			mdnsData["answers"] = answers
+
+			// Parse authorities
+			var authorities []map[string]interface{}
+			for _, auth := range mdns.Authorities {
+				authData := map[string]interface{}{
+					"name":        string(auth.Name),
+					"type":        auth.Type.String(),
+					"class":       auth.Class.String(),
+					"cache_flush": auth.CacheFlush,
+					"ttl":         auth.TTL,
+					"data_length": auth.DataLength,
+				}
+				if auth.Data != nil {
+					authData["data"] = auth.Data
+				}
+				authorities = append(authorities, authData)
+			}
+			mdnsData["authorities"] = authorities
+
+			// Parse additionals
+			var additionals []map[string]interface{}
+			for _, add := range mdns.Additionals {
+				addData := map[string]interface{}{
+					"name":        string(add.Name),
+					"type":        add.Type.String(),
+					"class":       add.Class.String(),
+					"cache_flush": add.CacheFlush,
+					"ttl":         add.TTL,
+					"data_length": add.DataLength,
+				}
+				if add.Data != nil {
+					addData["data"] = add.Data
+				}
+				additionals = append(additionals, addData)
+			}
+			mdnsData["additionals"] = additionals
+
+			layersMap["mdns"] = mdnsData
+			protocols = append(protocols, "mdns")
+
+			// Update service for mDNS (port 5353)
+			timestamp := packet.Metadata().Timestamp
+			p.updateService(srcIP, 5353, "mdns", timestamp)
+
+			// Process mDNS for service discovery
+			if mdns.IsResponse() {
+				for _, answer := range mdns.Answers {
+					if answer.Type == layers.DNSTypeSRV {
+						// Register discovered service
+						if answer.SRV.Port > 0 {
+							p.updateService(srcIP, int(answer.SRV.Port), "discovered", timestamp)
+						}
+					}
+				}
+			}
 		}
 
 		timestamp := packet.Metadata().Timestamp
