@@ -267,6 +267,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	liblayers.InitLayerEIGRP()
 	liblayers.InitLayerSSDP()
 	liblayers.InitLayerMDNS()
+	liblayers.InitLayerHTTP()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	// Set DecodeOptions for better performance
@@ -453,6 +454,58 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 				},
 			}
 			protocols = append(protocols, "tcp")
+
+			// Try to detect HTTP on any TCP port if not already detected
+			if packet.Layer(liblayers.LayerTypeHTTP) == nil && len(tcp.Payload) > 0 {
+				httpLayer := &liblayers.HTTP{}
+				if err = httpLayer.DecodeFromBytes(tcp.Payload, nil); err == nil {
+					// Successfully decoded as HTTP, add to packet layers
+					flowProto = "http"
+					httpData := map[string]interface{}{
+						"is_request":    httpLayer.IsRequest,
+						"version":       string(httpLayer.Version),
+						"headers":       httpLayer.Headers,
+						"body":          string(httpLayer.Body),
+						"content_type":  httpLayer.ContentType,
+						"user_agent":    httpLayer.UserAgent,
+						"host":          httpLayer.Host,
+						"connection":    httpLayer.Connection,
+						"cookies":       httpLayer.Cookies,
+						"is_keep_alive": httpLayer.IsKeepAlive(),
+						"is_chunked":    httpLayer.IsChunked(),
+					}
+
+					if httpLayer.IsRequest {
+						httpData["method"] = string(httpLayer.Method)
+						httpData["request_uri"] = httpLayer.RequestURI
+						httpData["query_params"] = httpLayer.QueryParams
+						if httpLayer.URL != nil {
+							httpData["parsed_url"] = map[string]interface{}{
+								"scheme":   httpLayer.URL.Scheme,
+								"host":     httpLayer.URL.Host,
+								"path":     httpLayer.URL.Path,
+								"query":    httpLayer.URL.RawQuery,
+								"fragment": httpLayer.URL.Fragment,
+							}
+						}
+					} else {
+						httpData["status_code"] = httpLayer.StatusCode
+						httpData["status_msg"] = httpLayer.StatusMsg
+					}
+
+					if httpLayer.ContentLength > 0 {
+						httpData["content_length"] = httpLayer.ContentLength
+					}
+
+					if len(httpLayer.TransferEncoding) > 0 {
+						httpData["transfer_encoding"] = httpLayer.TransferEncoding
+					}
+
+					layersMap["http"] = httpData
+					protocols = append(protocols, "http")
+				}
+			}
+
 			// Update service for TCP - use a direct call to avoid string concatenation
 			timestamp := packet.Metadata().Timestamp
 			p.updateService(srcIP, int(srcPortNum), "tcp", timestamp)
@@ -916,6 +969,68 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							p.updateService(srcIP, int(answer.SRV.Port), "discovered", timestamp)
 						}
 					}
+				}
+			}
+		}
+
+		// HTTP
+		if httpLayer := packet.Layer(liblayers.LayerTypeHTTP); httpLayer != nil {
+			http := httpLayer.(*liblayers.HTTP)
+
+			flowProto = "http"
+			httpData := map[string]interface{}{
+				"is_request":    http.IsRequest,
+				"version":       string(http.Version),
+				"headers":       http.Headers,
+				"body":          string(http.Body),
+				"content_type":  http.ContentType,
+				"user_agent":    http.UserAgent,
+				"host":          http.Host,
+				"connection":    http.Connection,
+				"cookies":       http.Cookies,
+				"is_keep_alive": http.IsKeepAlive(),
+				"is_chunked":    http.IsChunked(),
+			}
+
+			if http.IsRequest {
+				httpData["method"] = string(http.Method)
+				httpData["request_uri"] = http.RequestURI
+				httpData["query_params"] = http.QueryParams
+				if http.URL != nil {
+					httpData["parsed_url"] = map[string]interface{}{
+						"scheme":   http.URL.Scheme,
+						"host":     http.URL.Host,
+						"path":     http.URL.Path,
+						"query":    http.URL.RawQuery,
+						"fragment": http.URL.Fragment,
+					}
+				}
+			} else {
+				httpData["status_code"] = http.StatusCode
+				httpData["status_msg"] = http.StatusMsg
+			}
+
+			if http.ContentLength > 0 {
+				httpData["content_length"] = http.ContentLength
+			}
+
+			if len(http.TransferEncoding) > 0 {
+				httpData["transfer_encoding"] = http.TransferEncoding
+			}
+
+			layersMap["http"] = httpData
+			protocols = append(protocols, "http")
+
+			// Update service for HTTP - determine port from source/destination
+			timestamp := packet.Metadata().Timestamp
+			if srcPort != "" {
+				if port, err := strconv.Atoi(srcPort); err == nil {
+					p.updateService(srcIP, port, "http", timestamp)
+				}
+			}
+			if dstPort != "" {
+				if port, err := strconv.Atoi(dstPort); err == nil {
+					p.updateService(dstIP, port, "http", timestamp)
 				}
 			}
 		}
