@@ -23,15 +23,16 @@ import (
 type HTTPMethod string
 
 const (
-	HTTPMethodGET     HTTPMethod = "GET"
-	HTTPMethodPOST    HTTPMethod = "POST"
-	HTTPMethodPUT     HTTPMethod = "PUT"
-	HTTPMethodDELETE  HTTPMethod = "DELETE"
-	HTTPMethodHEAD    HTTPMethod = "HEAD"
-	HTTPMethodOPTIONS HTTPMethod = "OPTIONS"
-	HTTPMethodPATCH   HTTPMethod = "PATCH"
-	HTTPMethodTRACE   HTTPMethod = "TRACE"
-	HTTPMethodCONNECT HTTPMethod = "CONNECT"
+	HTTPMethodGET      HTTPMethod = "GET"
+	HTTPMethodPOST     HTTPMethod = "POST"
+	HTTPMethodPUT      HTTPMethod = "PUT"
+	HTTPMethodDELETE   HTTPMethod = "DELETE"
+	HTTPMethodHEAD     HTTPMethod = "HEAD"
+	HTTPMethodOPTIONS  HTTPMethod = "OPTIONS"
+	HTTPMethodPATCH    HTTPMethod = "PATCH"
+	HTTPMethodTRACE    HTTPMethod = "TRACE"
+	HTTPMethodCONNECT  HTTPMethod = "CONNECT"
+	HTTPMethodCCM_POST HTTPMethod = "CCM_POST"
 )
 
 // HTTPVersion represents HTTP versions
@@ -72,6 +73,9 @@ type HTTP struct {
 	Host             string            // Host header value
 	Cookies          map[string]string // Parsed cookies
 	QueryParams      map[string]string // Parsed query parameters (for requests)
+	Accept           []string          // Accept header values
+
+	Identifier string // Unique identifier for the HTTP request/response used for response matching
 }
 
 // LayerType returns the layer type for HTTP
@@ -315,6 +319,14 @@ func (h *HTTP) parseAdditionalFields() {
 	if setCookie, exists := h.Headers["set-cookie"]; exists {
 		h.parseSetCookies(setCookie)
 	}
+
+	// Parse Accept header
+	if accept, exists := h.Headers["accept"]; exists {
+		h.Accept = strings.Split(accept, ",")
+		for i := range h.Accept {
+			h.Accept[i] = strings.TrimSpace(h.Accept[i])
+		}
+	}
 }
 
 // parseCookies parses the Cookie header
@@ -385,6 +397,48 @@ func (h *HTTP) IsChunked() bool {
 		if strings.ToLower(encoding) == "chunked" {
 			return true
 		}
+	}
+	return false
+}
+
+func (h *HTTP) IsProxyRequest() bool {
+	// Check if the request is a CONNECT method, which is used for proxying
+	return h.IsRequest && h.Method == HTTPMethodCONNECT
+}
+
+func (h *HTTP) IsProxyDiscoveryResponse(request *HTTP) bool {
+	// Check if the response is a proxy discovery response
+	if !h.IsResponse() {
+		return false
+	}
+	if request != nil && request.URL != nil && request.URL.Path != "" && (strings.Contains(request.URL.Path, "/proxy.pac") || strings.Contains(request.URL.Path, "/wpad.dat")) {
+		return true
+	}
+	return false
+}
+
+// IsMSCCMPost Is a Microsoft System Center Configuration Manager (CCM) POST request
+func (h *HTTP) IsMSCCMPost() bool {
+	// Check if the request is a POST to the CCM endpoint
+	if !h.IsRequest || h.Method != HTTPMethodCCM_POST {
+		return false
+	}
+	if strings.Contains(h.RequestURI, "/ccm_system") || strings.Contains(h.RequestURI, "/ccm_client") {
+		return true
+	}
+	return false
+}
+
+func (h *HTTP) IsWebSocketUpgrade() bool {
+	// Check if the request is an upgrade to WebSocket
+	if !h.IsRequest {
+		return false
+	}
+	if upgrade, exists := h.Headers["upgrade"]; exists && strings.ToLower(upgrade) == "websocket" {
+		return true
+	}
+	if connection, exists := h.Headers["connection"]; exists && strings.Contains(strings.ToLower(connection), "upgrade") {
+		return true
 	}
 	return false
 }

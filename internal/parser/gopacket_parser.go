@@ -40,15 +40,18 @@ type GopacketParser struct {
 	// DNS queries
 	dnsQueries    map[string]*DNSQuery
 	deviceCounter int64
+
+	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 }
 
 func NewGopacketParser(pcapFile string) *GopacketParser {
 	return &GopacketParser{
-		PcapFile:   pcapFile,
-		devices:    make(map[string]*model2.Device),
-		flows:      make(map[string]*model2.Flow),
-		services:   make(map[string]*model2.Service),
-		dnsQueries: make(map[string]*DNSQuery),
+		PcapFile:       pcapFile,
+		devices:        make(map[string]*model2.Device),
+		flows:          make(map[string]*model2.Flow),
+		services:       make(map[string]*model2.Service),
+		dnsQueries:     make(map[string]*DNSQuery),
+		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](10), // Adjust size as needed
 	}
 }
 
@@ -488,9 +491,24 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 								"fragment": httpLayer.URL.Fragment,
 							}
 						}
+						httpData["is_proxy_req"] = httpLayer.IsProxyRequest()
+						httpData["is_msccm_req"] = httpLayer.IsMSCCMPost()
+
+						httpLayer.Identifier = srcIP + ":" + srcPort + " -> " + dstIP + ":" + dstPort
+						p.httpRingBuffer.Add(httpLayer) // Add to HTTP ring buffer
 					} else {
+						var request *liblayers.HTTP
+						for _, httpL := range p.httpRingBuffer.Get() {
+							if httpL.Identifier == dstIP+":"+dstPort+" -> "+srcIP+":"+srcPort {
+								httpData["request"] = httpL // Link to the request if available
+								request = httpL
+								break
+							}
+						}
+
 						httpData["status_code"] = httpLayer.StatusCode
 						httpData["status_msg"] = httpLayer.StatusMsg
+						httpData["is_proxy_discovery_resp"] = httpLayer.IsProxyDiscoveryResponse(request)
 					}
 
 					if httpLayer.ContentLength > 0 {
