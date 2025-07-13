@@ -186,7 +186,7 @@ func (h *HTTP) looksLikeHTTP(content string) bool {
 	}
 
 	// Check for HTTP request methods at the beginning
-	httpMethods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "TRACE ", "CONNECT "}
+	httpMethods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "TRACE ", "CONNECT ", "CCM_POST "}
 	for _, method := range httpMethods {
 		if strings.HasPrefix(content, method) {
 			return true
@@ -476,4 +476,62 @@ func RegisterHTTP() {
 // InitLayerHTTP initializes the HTTP layer for gopacket
 func InitLayerHTTP() {
 	RegisterHTTP()
+}
+
+func IsEqualDeep(a *HTTP, b *HTTP) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.IsRequest != b.IsRequest ||
+		a.Method != b.Method ||
+		a.RequestURI != b.RequestURI ||
+		a.Version != b.Version ||
+		a.StatusCode != b.StatusCode ||
+		a.StatusMsg != b.StatusMsg ||
+		a.ContentLength != b.ContentLength ||
+		a.ContentType != b.ContentType ||
+		a.Connection != b.Connection ||
+		a.UserAgent != b.UserAgent ||
+		a.Host != b.Host ||
+		len(a.TransferEncoding) != len(b.TransferEncoding) {
+		return false
+	}
+	for i, v := range a.TransferEncoding {
+		if v != b.TransferEncoding[i] {
+			return false
+		}
+	}
+	if len(a.Headers) != len(b.Headers) {
+		return false
+	}
+	for k, v := range a.Headers {
+		if bv, exists := b.Headers[k]; !exists || v != bv {
+			return false
+		}
+	}
+	if len(a.Cookies) != len(b.Cookies) {
+		return false
+	}
+	for k, v := range a.Cookies {
+		if bv, exists := b.Cookies[k]; !exists || v != bv {
+			return false
+		}
+	}
+	if len(a.QueryParams) != len(b.QueryParams) {
+		return false
+	}
+	for k, v := range a.QueryParams {
+		if bv, exists := b.QueryParams[k]; !exists || v != bv {
+			return false
+		}
+	}
+	if len(a.Accept) != len(b.Accept) {
+		return false
+	}
+	for i, v := range a.Accept {
+		if v != b.Accept[i] {
+			return false
+		}
+	}
+	return true
 }

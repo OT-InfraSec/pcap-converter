@@ -51,7 +51,7 @@ func NewGopacketParser(pcapFile string) *GopacketParser {
 		flows:          make(map[string]*model2.Flow),
 		services:       make(map[string]*model2.Service),
 		dnsQueries:     make(map[string]*DNSQuery),
-		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](10), // Adjust size as needed
+		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
 	}
 }
 
@@ -80,6 +80,25 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 	} else {
 		if macAddress != "" {
 			dev.MACAddressSet.Add(macAddress)
+		}
+		if additionalData != "" {
+			// Merge additional data if it exists
+			if dev.AdditionalData != "" {
+				var existingData map[string]interface{}
+				if err := json.Unmarshal([]byte(dev.AdditionalData), &existingData); err != nil {
+					existingData = make(map[string]interface{})
+				}
+				var newData map[string]interface{}
+				if err := json.Unmarshal([]byte(additionalData), &newData); err == nil {
+					for k, v := range newData {
+						existingData[k] = v
+					}
+				}
+				mergedData, _ := json.Marshal(existingData)
+				dev.AdditionalData = string(mergedData)
+			} else {
+				dev.AdditionalData = additionalData
+			}
 		}
 		dev.LastSeen = timestamp
 	}
@@ -495,16 +514,35 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 						httpData["is_msccm_req"] = httpLayer.IsMSCCMPost()
 
 						httpLayer.Identifier = srcIP + ":" + srcPort + " -> " + dstIP + ":" + dstPort
-						p.httpRingBuffer.Add(httpLayer) // Add to HTTP ring buffer
+						p.httpRingBuffer.AddNonDuplicate(httpLayer, liblayers.IsEqualDeep) // Add to HTTP ring buffer
+
+						// if method is CCM_POST, the destination is the MSCCM server
+						if httpLayer.IsMSCCMPost() {
+							// Set the device as a MSCCM server
+							additionalDataMap := make(map[string]string)
+							additionalDataMap["is_msccm_server"] = "true"
+							additionalDataJSON, err := json.Marshal(additionalDataMap)
+							if err != nil {
+								return fmt.Errorf("failed to marshal additional data: %w", err)
+							}
+							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+						}
+
+						// Update the service for HTTP request
+						timestamp := packet.Metadata().Timestamp
+						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
 					} else {
 						var request *liblayers.HTTP
-						for _, httpL := range p.httpRingBuffer.Get() {
+						var index int
+						for _, httpL := range p.httpRingBuffer.GetAllLIFO() {
 							if httpL.Identifier == dstIP+":"+dstPort+" -> "+srcIP+":"+srcPort {
 								httpData["request"] = httpL // Link to the request if available
 								request = httpL
 								break
 							}
+							index++
 						}
+						//fmt.Printf("found at index %d\n", index) TODO: refactor to log debug output
 
 						httpData["status_code"] = httpLayer.StatusCode
 						httpData["status_msg"] = httpLayer.StatusMsg
