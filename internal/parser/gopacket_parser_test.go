@@ -113,7 +113,7 @@ func TestGopacketParser_ParseFile_TCP_UDP(t *testing.T) {
 		SrcPort: 12345,
 		DstPort: 80,
 		Seq:     1,
-		ACK:     0,
+		ACK:     false,
 		SYN:     true,
 	}
 	buf1 := gopacket.NewSerializeBuffer()

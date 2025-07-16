@@ -361,6 +361,9 @@ type TLSHandshakeRecord struct {
 	Type   uint8
 	Length int
 	Body   []byte
+
+	ClientHello *TLSClientHello
+	ServerHello *TLSServerHello
 }
 
 // DecodeFromBytes decodes the slice into the TLSHandshakeRecord struct according to the TLS Handshake Protocol.
@@ -370,10 +373,6 @@ func (t *TLSHandshakeRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df 
 	t.Version = h.Version
 	t.Length = int(h.Length)
 
-	// According to the TLS Handshake Protocol, the handshake message starts with:
-	// 1 byte: Handshake Type
-	// 3 bytes: Length
-	// The rest: Handshake message body
 	if len(data) < 4 {
 		return errors.New("TLS Handshake record too short")
 	}
@@ -382,7 +381,190 @@ func (t *TLSHandshakeRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df 
 	t.Length = int(data[1])<<16 | int(data[2])<<8 | int(data[3])
 	t.Body = data[4:]
 
+	// Parse ClientHello
+	if t.Type == TLSHandshakeTypeClientHello {
+		if len(t.Body) < 34 {
+			return errors.New("TLS ClientHello too short")
+		}
+		ch := &TLSClientHello{}
+		ch.Version = TLSVersion(binary.BigEndian.Uint16(t.Body[:2]))
+		copy(ch.Random[:], t.Body[2:34])
+		sidLen := int(t.Body[34])
+		if len(t.Body) < 35+sidLen+2 {
+			return errors.New("TLS ClientHello session id too short")
+		}
+		ch.SessionID = t.Body[35 : 35+sidLen]
+		pos := 35 + sidLen
+		csLen := int(binary.BigEndian.Uint16(t.Body[pos : pos+2]))
+		pos += 2
+		if len(t.Body) < pos+csLen+1 {
+			return errors.New("TLS ClientHello cipher suites too short")
+		}
+		ch.CipherSuites = make([]uint16, csLen/2)
+		for i := 0; i < csLen; i += 2 {
+			ch.CipherSuites[i/2] = binary.BigEndian.Uint16(t.Body[pos+i : pos+i+2])
+		}
+		pos += csLen
+		cmLen := int(t.Body[pos])
+		pos++
+		if len(t.Body) < pos+cmLen {
+			return errors.New("TLS ClientHello compression methods too short")
+		}
+		ch.CompressionMethods = t.Body[pos : pos+cmLen]
+		pos += cmLen
+		if len(t.Body) > pos+1 {
+			exts, sni, alpn := parseTLSExtensions(t.Body[pos:])
+			ch.Extensions = exts
+			ch.SNI = sni
+			ch.ALPN = alpn
+		}
+		t.ClientHello = ch
+	}
+	// Parse ServerHello
+	if t.Type == TLSHandshakeTypeServerHello {
+		if len(t.Body) < 34 {
+			return errors.New("TLS ServerHello too short")
+		}
+		sh := &TLSServerHello{}
+		sh.Version = TLSVersion(binary.BigEndian.Uint16(t.Body[:2]))
+		copy(sh.Random[:], t.Body[2:34])
+		sidLen := int(t.Body[34])
+		if len(t.Body) < 35+sidLen+3 {
+			return errors.New("TLS ServerHello session id too short")
+		}
+		sh.SessionID = t.Body[35 : 35+sidLen]
+		pos := 35 + sidLen
+		sh.CipherSuite = binary.BigEndian.Uint16(t.Body[pos : pos+2])
+		pos += 2
+		sh.CompressionMethod = t.Body[pos]
+		pos++
+		if len(t.Body) > pos+1 {
+			exts, sni, alpn := parseTLSExtensions(t.Body[pos:])
+			sh.Extensions = exts
+			sh.SNI = sni
+			sh.ALPN = alpn
+		}
+		t.ServerHello = sh
+	}
 	return nil
+}
+
+// TLSClientHello is the structure of a Client Hello message in the TLS handshake
+type TLSClientHello struct {
+	Version            TLSVersion
+	Random             [32]byte
+	SessionID          []byte
+	CipherSuites       []uint16
+	CompressionMethods []uint8
+	Extensions         []TLSExtension
+	SNI                *TLSExtensionSNI
+	ALPN               *TLSExtensionALPN
+}
+
+// TLSServerHello is the structure of a Server Hello message in the TLS handshake
+type TLSServerHello struct {
+	Version           TLSVersion
+	Random            [32]byte
+	SessionID         []byte
+	CipherSuite       uint16
+	CompressionMethod uint8
+	Extensions        []TLSExtension
+	SNI               *TLSExtensionSNI
+	ALPN              *TLSExtensionALPN
+}
+
+// TLSExtension represents a generic TLS extension
+type TLSExtension struct {
+	Type uint16
+	Data []byte
+}
+
+// TLSExtensionSNI represents the Server Name Indication (SNI) extension
+type TLSExtensionSNI struct {
+	ServerNames []string
+}
+
+// TLSExtensionALPN represents the Application-Layer Protocol Negotiation (ALPN) extension
+type TLSExtensionALPN struct {
+	Protocols []string
+}
+
+// TLSExtensionSupportedCiphers represents a custom extension for supported ciphers
+type TLSExtensionSupportedCiphers struct {
+	CipherSuites []uint16
+}
+
+// --- Extension Types ---
+const (
+	TLSExtensionTypeServerName       uint16 = 0
+	TLSExtensionTypeALPN             uint16 = 16
+	TLSExtensionTypeSupportedGroups  uint16 = 10
+	TLSExtensionTypeSupportedCiphers uint16 = 0x000a // not a real extension, for internal use
+)
+
+// --- Extension Parsing Helpers ---
+func parseTLSExtensions(data []byte) (exts []TLSExtension, sni *TLSExtensionSNI, alpn *TLSExtensionALPN) {
+	exts = []TLSExtension{}
+	var sniExt *TLSExtensionSNI
+	var alpnExt *TLSExtensionALPN
+	if len(data) < 2 {
+		return
+	}
+	extLen := int(binary.BigEndian.Uint16(data[:2]))
+	if len(data) < 2+extLen {
+		return
+	}
+	pos := 2
+	for pos+4 <= 2+extLen {
+		typeVal := binary.BigEndian.Uint16(data[pos : pos+2])
+		length := int(binary.BigEndian.Uint16(data[pos+2 : pos+4]))
+		if pos+4+length > 2+extLen {
+			break
+		}
+		body := data[pos+4 : pos+4+length]
+		exts = append(exts, TLSExtension{Type: typeVal, Data: body})
+		// SNI
+		if typeVal == TLSExtensionTypeServerName {
+			if len(body) >= 5 {
+				sniListLen := int(binary.BigEndian.Uint16(body[:2]))
+				if len(body) >= 2+sniListLen {
+					var names []string
+					off := 2
+					for off+3 <= 2+sniListLen {
+						typeName := body[off]
+						nameLen := int(binary.BigEndian.Uint16(body[off+1 : off+3]))
+						if typeName == 0 && off+3+nameLen <= 2+sniListLen {
+							name := string(body[off+3 : off+3+nameLen])
+							names = append(names, name)
+						}
+						off += 3 + nameLen
+					}
+					sniExt = &TLSExtensionSNI{ServerNames: names}
+				}
+			}
+		}
+		// ALPN
+		if typeVal == TLSExtensionTypeALPN {
+			if len(body) >= 2 {
+				alpnLen := int(binary.BigEndian.Uint16(body[:2]))
+				if len(body) >= 2+alpnLen {
+					var protos []string
+					off := 2
+					for off < 2+alpnLen {
+						llen := int(body[off])
+						off++
+						if off+llen <= 2+alpnLen {
+							protos = append(protos, string(body[off:off+llen]))
+						}
+						off += llen
+					}
+					alpnExt = &TLSExtensionALPN{Protocols: protos}
+				}
+			}
+		}
+		pos += 4 + length
+	}
+	return exts, sniExt, alpnExt
 }
 
 // TLSAppDataRecord contains all the information that each AppData Record types should have

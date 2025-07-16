@@ -560,6 +560,48 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 					layersMap["http"] = httpData
 					protocols = append(protocols, "http")
 				}
+
+				// Analyze TLS layer
+				if tlsLayer := packet.Layer(liblayers.LayerTypeTLS); tlsLayer != nil {
+					fmt.Printf("TLS Layer found: %+v\n", tlsLayer)
+				} else if tlsLayer == nil && len(tcp.Payload) > 5 && httpLayer.Version == "" {
+					tls := &liblayers.TLS{}
+					if err = tls.DecodeFromBytes(tcp.Payload, nil); err == nil {
+						for _, handshake := range tls.Handshake {
+							if handshake.Type == liblayers.TLSHandshakeTypeClientHello && handshake.ClientHello != nil {
+								servernames := ""
+								alpnProtocols := ""
+								if handshake.ClientHello.SNI != nil && handshake.ClientHello.SNI.ServerNames != nil {
+									for _, serverName := range handshake.ClientHello.SNI.ServerNames {
+										servernames += serverName + ","
+									}
+									if len(servernames) > 0 {
+										servernames = strings.TrimSuffix(servernames, ",")
+									}
+								}
+								if handshake.ClientHello.ALPN != nil && len(handshake.ClientHello.ALPN.Protocols) > 0 {
+									for _, protocol := range handshake.ClientHello.ALPN.Protocols {
+										alpnProtocols += protocol + ","
+									}
+									if len(alpnProtocols) > 0 {
+										alpnProtocols = strings.TrimSuffix(alpnProtocols, ",")
+									}
+								}
+								layersMap["tls"] = map[string]interface{}{
+									"version":        handshake.ClientHello.Version.String(),
+									"ciphersuites":   handshake.ClientHello.CipherSuites,
+									"extensions":     handshake.ClientHello.Extensions,
+									"servername":     servernames,
+									"alpn_protocols": alpnProtocols,
+									"session_id":     handshake.ClientHello.SessionID,
+									"compression":    handshake.ClientHello.CompressionMethods,
+									"random":         handshake.ClientHello.Random,
+								}
+								protocols = append(protocols, "tls")
+							}
+						}
+					}
+				}
 			}
 
 			// Update service for TCP - use a direct call to avoid string concatenation
@@ -1313,7 +1355,7 @@ func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
 	if len(device.AdditionalData) > 0 {
 		err := json.Unmarshal([]byte(device.AdditionalData), &additionalDataMap)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal additional data for device %s: %w", device.ID, err)
+			return fmt.Errorf("failed to unmarshal additional data for device %d: %w", device.ID, err)
 		}
 	}
 
@@ -1331,7 +1373,7 @@ func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
 	additionalDataMap["dnsNames"] = dnsNameSet.List()
 	additionalDataJSON, err := json.Marshal(additionalDataMap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal additional data for device %s: %w", device.ID, err)
+		return fmt.Errorf("failed to marshal additional data for device %d: %w", device.ID, err)
 	}
 	device.AdditionalData = string(additionalDataJSON)
 
