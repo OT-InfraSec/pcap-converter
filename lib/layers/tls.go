@@ -10,405 +10,517 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-
 	"github.com/google/gopacket"
 )
 
-// TLS record types
+// TLSType defines the type of data after the TLS Record
+type TLSType uint8
+
+// TLSType known values.
 const (
-	TLSRecordTypeChangeCipherSpec = 20
-	TLSRecordTypeAlert            = 21
-	TLSRecordTypeHandshake        = 22
-	TLSRecordTypeApplicationData  = 23
+	TLSChangeCipherSpec TLSType = 20
+	TLSAlert            TLSType = 21
+	TLSHandshake        TLSType = 22
+	TLSApplicationData  TLSType = 23
+	TLSUnknown          TLSType = 255
 )
 
-// TLS handshake message types
-const (
-	TLSHandshakeTypeClientHello        = 1
-	TLSHandshakeTypeServerHello        = 2
-	TLSHandshakeTypeCertificate        = 11
-	TLSHandshakeTypeServerKeyExchange  = 12
-	TLSHandshakeTypeCertificateRequest = 13
-	TLSHandshakeTypeServerHelloDone    = 14
-	TLSHandshakeTypeCertificateVerify  = 15
-	TLSHandshakeTypeClientKeyExchange  = 16
-	TLSHandshakeTypeFinished           = 20
-)
+// String shows the register type nicely formatted
+func (tt TLSType) String() string {
+	switch tt {
+	default:
+		return "Unknown"
+	case TLSChangeCipherSpec:
+		return "Change Cipher Spec"
+	case TLSAlert:
+		return "Alert"
+	case TLSHandshake:
+		return "Handshake"
+	case TLSApplicationData:
+		return "Application Data"
+	}
+}
 
-// TLS versions
-const (
-	TLSVersion10 = 0x0301
-	TLSVersion11 = 0x0302
-	TLSVersion12 = 0x0303
-	TLSVersion13 = 0x0304
-)
-
-// TLS extension types
-const (
-	TLSExtensionServerName = 0
-	TLSExtensionALPN       = 16
-)
-
-// TLSVersion represents TLS protocol versions
+// TLSVersion represents the TLS version in numeric format
 type TLSVersion uint16
 
-func (v TLSVersion) String() string {
-	switch v {
-	case TLSVersion10:
-		return "TLS 1.0"
-	case TLSVersion11:
-		return "TLS 1.1"
-	case TLSVersion12:
-		return "TLS 1.2"
-	case TLSVersion13:
-		return "TLS 1.3"
+// Strings shows the TLS version nicely formatted
+func (tv TLSVersion) String() string {
+	switch tv {
 	default:
-		return fmt.Sprintf("Unknown TLS Version (0x%04x)", uint16(v))
+		return "Unknown"
+	case 0x0200:
+		return "SSL 2.0"
+	case 0x0300:
+		return "SSL 3.0"
+	case 0x0301:
+		return "TLS 1.0"
+	case 0x0302:
+		return "TLS 1.1"
+	case 0x0303:
+		return "TLS 1.2"
+	case 0x0304:
+		return "TLS 1.3"
 	}
 }
 
-// TLSCipherSuite represents TLS cipher suites
-type TLSCipherSuite uint16
+// TLS is specified in RFC 5246
+//
+//  TLS Record Protocol
+//  0  1  2  3  4  5  6  7  8
+//  +--+--+--+--+--+--+--+--+
+//  |     Content Type      |
+//  +--+--+--+--+--+--+--+--+
+//  |    Version (major)    |
+//  +--+--+--+--+--+--+--+--+
+//  |    Version (minor)    |
+//  +--+--+--+--+--+--+--+--+
+//  |        Length         |
+//  +--+--+--+--+--+--+--+--+
+//  |        Length         |
+//  +--+--+--+--+--+--+--+--+
 
-func (cs TLSCipherSuite) String() string {
-	// Common cipher suites mapping
-	suites := map[TLSCipherSuite]string{
-		0x0004: "TLS_RSA_WITH_RC4_128_MD5",
-		0x0005: "TLS_RSA_WITH_RC4_128_SHA",
-		0x002F: "TLS_RSA_WITH_AES_128_CBC_SHA",
-		0x0035: "TLS_RSA_WITH_AES_256_CBC_SHA",
-		0x003C: "TLS_RSA_WITH_AES_128_CBC_SHA256",
-		0x003D: "TLS_RSA_WITH_AES_256_CBC_SHA256",
-		0x009C: "TLS_RSA_WITH_AES_128_GCM_SHA256",
-		0x009D: "TLS_RSA_WITH_AES_256_GCM_SHA384",
-		0xC013: "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-		0xC014: "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-		0xC027: "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
-		0xC028: "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-		0xC02F: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-		0xC030: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-		0x1301: "TLS_AES_128_GCM_SHA256",
-		0x1302: "TLS_AES_256_GCM_SHA384",
-		0x1303: "TLS_CHACHA20_POLY1305_SHA256",
-	}
-
-	if name, exists := suites[cs]; exists {
-		return name
-	}
-	return fmt.Sprintf("Unknown Cipher Suite (0x%04x)", uint16(cs))
-}
-
-// TLS represents a TLS packet
+// TLS is actually a slide of TLSrecord structures
 type TLS struct {
 	BaseLayer
 
-	// TLS record fields
-	RecordType   uint8      // TLS record type
-	Version      TLSVersion // TLS version from record header
-	RecordLength uint16     // Length of the record
-
-	// Handshake fields (if applicable)
-	HandshakeType   uint8  // Handshake message type
-	HandshakeLength uint32 // Length of handshake message
-
-	// Parsed handshake data
-	HandshakeVersion TLSVersion       // TLS version from handshake
-	CipherSuite      TLSCipherSuite   // Chosen cipher suite (from Server Hello)
-	ServerName       string           // Server name from SNI extension
-	SupportedCiphers []TLSCipherSuite // Supported cipher suites (from Client Hello)
-
-	// Additional parsed data
-	Extensions    map[uint16][]byte // Raw extension data
-	IsClientHello bool              // True if this is a Client Hello
-	IsServerHello bool              // True if this is a Server Hello
-
-	// Raw handshake data for further analysis
-	HandshakeData []byte // Raw handshake message data
+	// TLS Records
+	ChangeCipherSpec []TLSChangeCipherSpecRecord
+	Handshake        []TLSHandshakeRecord
+	AppData          []TLSAppDataRecord
+	Alert            []TLSAlertRecord
 }
 
-// LayerType returns the layer type for TLS
-func (t *TLS) LayerType() gopacket.LayerType {
-	return LayerTypeTLS
+// TLSRecordHeader contains all the information that each TLS Record types should have
+type TLSRecordHeader struct {
+	ContentType TLSType
+	Version     TLSVersion
+	Length      uint16
 }
 
-// CanDecode returns the set of layer types that this DecodingLayer can decode
+// LayerType returns gopacket.LayerTypeTLS.
+func (t *TLS) LayerType() gopacket.LayerType { return LayerTypeTLS }
+
+// decodeTLS decodes the byte slice into a TLS type. It also
+// setups the application Layer in PacketBuilder.
+func decodeTLS(data []byte, p gopacket.PacketBuilder) error {
+	t := &TLS{}
+	err := t.DecodeFromBytes(data, p)
+	if err != nil {
+		return err
+	}
+	p.AddLayer(t)
+	p.SetApplicationLayer(t)
+	return nil
+}
+
+// DecodeFromBytes decodes the slice into the TLS struct.
+func (t *TLS) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
+	t.BaseLayer.Contents = data
+	t.BaseLayer.Payload = nil
+
+	t.ChangeCipherSpec = t.ChangeCipherSpec[:0]
+	t.Handshake = t.Handshake[:0]
+	t.AppData = t.AppData[:0]
+	t.Alert = t.Alert[:0]
+
+	return t.decodeTLSRecords(data, df)
+}
+
+func (t *TLS) decodeTLSRecords(data []byte, df gopacket.DecodeFeedback) error {
+	if len(data) < 5 {
+		df.SetTruncated()
+		return errors.New("TLS record too short")
+	}
+
+	// since there are no further layers, the baselayer's content is
+	// pointing to this layer
+	// TODO: Consider removing this
+	t.BaseLayer = BaseLayer{Contents: data[:len(data)]}
+
+	var h TLSRecordHeader
+	h.ContentType = TLSType(data[0])
+	h.Version = TLSVersion(binary.BigEndian.Uint16(data[1:3]))
+	h.Length = binary.BigEndian.Uint16(data[3:5])
+
+	if h.ContentType.String() == "Unknown" {
+		return errors.New("Unknown TLS record type")
+	}
+
+	hl := 5 // header length
+	tl := hl + int(h.Length)
+	if len(data) < tl {
+		df.SetTruncated()
+		return errors.New("TLS packet length mismatch")
+	}
+
+	switch h.ContentType {
+	default:
+		return errors.New("Unknown TLS record type")
+	case TLSChangeCipherSpec:
+		var r TLSChangeCipherSpecRecord
+		e := r.decodeFromBytes(h, data[hl:tl], df)
+		if e != nil {
+			return e
+		}
+		t.ChangeCipherSpec = append(t.ChangeCipherSpec, r)
+	case TLSAlert:
+		var r TLSAlertRecord
+		e := r.decodeFromBytes(h, data[hl:tl], df)
+		if e != nil {
+			return e
+		}
+		t.Alert = append(t.Alert, r)
+	case TLSHandshake:
+		var r TLSHandshakeRecord
+		e := r.decodeFromBytes(h, data[hl:tl], df)
+		if e != nil {
+			return e
+		}
+		t.Handshake = append(t.Handshake, r)
+	case TLSApplicationData:
+		var r TLSAppDataRecord
+		e := r.decodeFromBytes(h, data[hl:tl], df)
+		if e != nil {
+			return e
+		}
+		t.AppData = append(t.AppData, r)
+	}
+
+	if len(data) == tl {
+		return nil
+	}
+	return t.decodeTLSRecords(data[tl:len(data)], df)
+}
+
+// CanDecode implements gopacket.DecodingLayer.
 func (t *TLS) CanDecode() gopacket.LayerClass {
 	return LayerTypeTLS
 }
 
-// NextLayerType returns the layer type contained by this DecodingLayer
+// NextLayerType implements gopacket.DecodingLayer.
 func (t *TLS) NextLayerType() gopacket.LayerType {
-	return gopacket.LayerTypePayload
+	return gopacket.LayerTypeZero
 }
 
-// DecodeFromBytes decodes the given bytes into this layer
-func (t *TLS) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
-	if len(data) < 5 {
-		return errors.New("TLS record too short")
-	}
-
-	t.BaseLayer = BaseLayer{
-		Contents: data,
-		Payload:  nil,
-	}
-
-	// Only parse handshake records for now (minimal, only hello messages)
-	t.RecordType = data[0]
-	t.Version = TLSVersion(binary.BigEndian.Uint16(data[1:3]))
-	t.RecordLength = binary.BigEndian.Uint16(data[3:5])
-
-	if t.RecordType != TLSRecordTypeHandshake {
-		return nil // Only interested in handshake
-	}
-
-	if len(data) < int(5+t.RecordLength) {
-		return errors.New("TLS record length exceeds available data")
-	}
-
-	handshakeData := data[5 : 5+t.RecordLength]
-	if len(handshakeData) < 4 {
-		return errors.New("TLS handshake message too short")
-	}
-	handshakeType := handshakeData[0]
-	handshakeLen := int(handshakeData[1])<<16 | int(handshakeData[2])<<8 | int(handshakeData[3])
-	if len(handshakeData) < 4+handshakeLen {
-		return errors.New("TLS handshake message length exceeds available data")
-	}
-
-	switch handshakeType {
-	case TLSHandshakeTypeClientHello:
-		t.IsClientHello = true
-		return t.parseClientHello(handshakeData[4 : 4+handshakeLen])
-	case TLSHandshakeTypeServerHello:
-		t.IsServerHello = true
-		return t.parseServerHello(handshakeData[4 : 4+handshakeLen])
-	case TLSHandshakeTypeFinished:
-		return errors.New("TLS handshake aborted or finished before hello exchange")
-	default:
-		return nil // Ignore other handshake types for minimal implementation
-	}
-}
-
-// parseHandshake parses TLS handshake messages
-func (t *TLS) parseHandshake(data []byte) error {
-	if len(data) < 4 {
-		return errors.New("handshake message too short")
-	}
-
-	t.HandshakeType = data[0]
-	t.HandshakeLength = uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
-
-	if len(data) < int(4+t.HandshakeLength) {
-		return errors.New("handshake message length exceeds available data")
-	}
-
-	t.HandshakeData = data[4 : 4+t.HandshakeLength]
-
-	switch t.HandshakeType {
-	case TLSHandshakeTypeClientHello:
-		t.IsClientHello = true
-		return t.parseClientHello(t.HandshakeData)
-	case TLSHandshakeTypeServerHello:
-		t.IsServerHello = true
-		return t.parseServerHello(t.HandshakeData)
-	}
-
+// Payload returns nil, since TLS encrypted payload is inside TLSAppDataRecord
+func (t *TLS) Payload() []byte {
 	return nil
 }
 
-// parseClientHello parses Client Hello handshake message
-func (t *TLS) parseClientHello(data []byte) error {
-	if len(data) < 38 {
-		return errors.New("Client Hello too short")
+// SerializeTo writes the serialized form of this layer into the
+// SerializationBuffer, implementing gopacket.SerializableLayer.
+func (t *TLS) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	totalLength := 0
+	for _, record := range t.ChangeCipherSpec {
+		if opts.FixLengths {
+			record.Length = 1
+		}
+		totalLength += 5 + 1 // length of header + record
 	}
-
-	offset := 0
-
-	// Parse version
-	t.HandshakeVersion = TLSVersion(binary.BigEndian.Uint16(data[offset : offset+2]))
-	offset += 2
-
-	// Skip random (32 bytes)
-	offset += 32
-
-	// Parse session ID
-	if offset >= len(data) {
-		return errors.New("Client Hello truncated at session ID")
+	for range t.Handshake {
+		totalLength += 5
+		// TODO
 	}
-	sessionIDLength := int(data[offset])
-	offset += 1 + sessionIDLength
-
-	// Parse cipher suites
-	if offset+2 > len(data) {
-		return errors.New("Client Hello truncated at cipher suites length")
+	for _, record := range t.AppData {
+		if opts.FixLengths {
+			record.Length = uint16(len(record.Payload))
+		}
+		totalLength += 5 + len(record.Payload)
 	}
-	cipherSuitesLength := int(binary.BigEndian.Uint16(data[offset : offset+2]))
-	offset += 2
-
-	if offset+cipherSuitesLength > len(data) {
-		return errors.New("Client Hello truncated at cipher suites")
-	}
-
-	// Extract cipher suites
-	for i := 0; i < cipherSuitesLength; i += 2 {
-		if offset+i+2 <= len(data) {
-			cipher := TLSCipherSuite(binary.BigEndian.Uint16(data[offset+i : offset+i+2]))
-			t.SupportedCiphers = append(t.SupportedCiphers, cipher)
+	for _, record := range t.Alert {
+		if len(record.EncryptedMsg) == 0 {
+			if opts.FixLengths {
+				record.Length = 2
+			}
+			totalLength += 5 + 2
+		} else {
+			if opts.FixLengths {
+				record.Length = uint16(len(record.EncryptedMsg))
+			}
+			totalLength += 5 + len(record.EncryptedMsg)
 		}
 	}
-	offset += cipherSuitesLength
-
-	// Skip compression methods
-	if offset >= len(data) {
-		return nil // No extensions
-	}
-	compressionLength := int(data[offset])
-	offset += 1 + compressionLength
-
-	// Parse extensions
-	if offset+2 <= len(data) {
-		extensionsLength := int(binary.BigEndian.Uint16(data[offset : offset+2]))
-		offset += 2
-		t.parseExtensions(data[offset : offset+extensionsLength])
-	}
-
-	return nil
-}
-
-// parseServerHello parses Server Hello handshake message
-func (t *TLS) parseServerHello(data []byte) error {
-	if len(data) < 38 {
-		return errors.New("Server Hello too short")
-	}
-
-	offset := 0
-
-	// Parse version
-	t.HandshakeVersion = TLSVersion(binary.BigEndian.Uint16(data[offset : offset+2]))
-	offset += 2
-
-	// Skip random (32 bytes)
-	offset += 32
-
-	// Parse session ID
-	if offset >= len(data) {
-		return errors.New("Server Hello truncated at session ID")
-	}
-	sessionIDLength := int(data[offset])
-	offset += 1 + sessionIDLength
-
-	// Parse chosen cipher suite
-	if offset+2 > len(data) {
-		return errors.New("Server Hello truncated at cipher suite")
-	}
-	t.CipherSuite = TLSCipherSuite(binary.BigEndian.Uint16(data[offset : offset+2]))
-	offset += 2
-
-	// Skip compression method
-	offset += 1
-
-	// Parse extensions
-	if offset+2 <= len(data) {
-		extensionsLength := int(binary.BigEndian.Uint16(data[offset : offset+2]))
-		offset += 2
-		if offset+extensionsLength <= len(data) {
-			t.parseExtensions(data[offset : offset+extensionsLength])
-		}
-	}
-
-	return nil
-}
-
-// parseExtensions parses TLS extensions
-func (t *TLS) parseExtensions(data []byte) error {
-	offset := 0
-
-	for offset+4 <= len(data) {
-		extType := binary.BigEndian.Uint16(data[offset : offset+2])
-		extLength := int(binary.BigEndian.Uint16(data[offset+2 : offset+4]))
-		offset += 4
-
-		if offset+extLength > len(data) {
-			break
-		}
-
-		extData := data[offset : offset+extLength]
-		t.Extensions[extType] = extData
-
-		// Parse specific extensions
-		switch extType {
-		case TLSExtensionServerName:
-			t.parseServerNameExtension(extData)
-		}
-
-		offset += extLength
-	}
-
-	return nil
-}
-
-// parseServerNameExtension parses the Server Name Indication extension
-func (t *TLS) parseServerNameExtension(data []byte) {
-	if len(data) < 5 {
-		return
-	}
-
-	offset := 0
-
-	// Server name list length
-	listLength := int(binary.BigEndian.Uint16(data[offset : offset+2]))
-	offset += 2
-
-	if offset+listLength > len(data) {
-		return
-	}
-
-	// Parse server names
-	for offset+3 < len(data) && offset < 2+listLength {
-		nameType := data[offset]
-		nameLength := int(binary.BigEndian.Uint16(data[offset+1 : offset+3]))
-		offset += 3
-
-		if offset+nameLength > len(data) {
-			break
-		}
-
-		if nameType == 0 { // hostname
-			t.ServerName = string(data[offset : offset+nameLength])
-			break
-		}
-
-		offset += nameLength
-	}
-}
-
-// GetEffectiveTLSVersion returns the effective TLS version (handshake version takes precedence)
-func (t *TLS) GetEffectiveTLSVersion() TLSVersion {
-	if t.HandshakeVersion != 0 {
-		return t.HandshakeVersion
-	}
-	return t.Version
-}
-
-// IsHandshake returns true if this is a handshake record
-func (t *TLS) IsHandshake() bool {
-	return t.RecordType == TLSRecordTypeHandshake
-}
-
-// IsApplicationData returns true if this is application data
-func (t *TLS) IsApplicationData() bool {
-	return t.RecordType == TLSRecordTypeApplicationData
-}
-
-// Register custom layer type for TLS
-var LayerTypeTLS = gopacket.RegisterLayerType(2001, gopacket.LayerTypeMetadata{Name: "TLS", Decoder: gopacket.DecodeFunc(decodeTLS)})
-
-func decodeTLS(data []byte, p gopacket.PacketBuilder) error {
-	tls := &TLS{}
-	err := tls.DecodeFromBytes(data, p)
+	data, err := b.PrependBytes(totalLength)
 	if err != nil {
 		return err
 	}
-	p.AddLayer(tls)
+	off := 0
+	for _, record := range t.ChangeCipherSpec {
+		off = encodeHeader(record.TLSRecordHeader, data, off)
+		data[off] = byte(record.Message)
+		off++
+	}
+	for _, record := range t.Handshake {
+		off = encodeHeader(record.TLSRecordHeader, data, off)
+		// TODO
+	}
+	for _, record := range t.AppData {
+		off = encodeHeader(record.TLSRecordHeader, data, off)
+		copy(data[off:], record.Payload)
+		off += len(record.Payload)
+	}
+	for _, record := range t.Alert {
+		off = encodeHeader(record.TLSRecordHeader, data, off)
+		if len(record.EncryptedMsg) == 0 {
+			data[off] = byte(record.Level)
+			data[off+1] = byte(record.Description)
+			off += 2
+		} else {
+			copy(data[off:], record.EncryptedMsg)
+			off += len(record.EncryptedMsg)
+		}
+	}
 	return nil
+}
+
+func encodeHeader(header TLSRecordHeader, data []byte, offset int) int {
+	data[offset] = byte(header.ContentType)
+	binary.BigEndian.PutUint16(data[offset+1:], uint16(header.Version))
+	binary.BigEndian.PutUint16(data[offset+3:], header.Length)
+
+	return offset + 5
+}
+
+// Register custom layer type for TLS
+var LayerTypeTLS = gopacket.RegisterLayerType(2004, gopacket.LayerTypeMetadata{Name: "TLS", Decoder: gopacket.DecodeFunc(decodeTLS)})
+
+// TLSchangeCipherSpec defines the message value inside ChangeCipherSpec Record
+type TLSchangeCipherSpec uint8
+
+const (
+	TLSChangecipherspecMessage TLSchangeCipherSpec = 1
+	TLSChangecipherspecUnknown TLSchangeCipherSpec = 255
+)
+
+//  TLS Change Cipher Spec
+//  0  1  2  3  4  5  6  7  8
+//  +--+--+--+--+--+--+--+--+
+//  |        Message        |
+//  +--+--+--+--+--+--+--+--+
+
+// TLSChangeCipherSpecRecord defines the type of data inside ChangeCipherSpec Record
+type TLSChangeCipherSpecRecord struct {
+	TLSRecordHeader
+
+	Message TLSchangeCipherSpec
+}
+
+// DecodeFromBytes decodes the slice into the TLS struct.
+func (t *TLSChangeCipherSpecRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopacket.DecodeFeedback) error {
+	// TLS Record Header
+	t.ContentType = h.ContentType
+	t.Version = h.Version
+	t.Length = h.Length
+
+	if len(data) != 1 {
+		df.SetTruncated()
+		return errors.New("TLS Change Cipher Spec record incorrect length")
+	}
+
+	t.Message = TLSchangeCipherSpec(data[0])
+	if t.Message != TLSChangecipherspecMessage {
+		t.Message = TLSChangecipherspecUnknown
+	}
+
+	return nil
+}
+
+// String shows the message value nicely formatted
+func (ccs TLSchangeCipherSpec) String() string {
+	switch ccs {
+	default:
+		return "Unknown"
+	case TLSChangecipherspecMessage:
+		return "Change Cipher Spec Message"
+	}
+}
+
+// TLSHandshakeRecord defines the structure of a Handshare Record
+type TLSHandshakeRecord struct {
+	TLSRecordHeader
+}
+
+// DecodeFromBytes decodes the slice into the TLS struct.
+func (t *TLSHandshakeRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopacket.DecodeFeedback) error {
+	// TLS Record Header
+	t.ContentType = h.ContentType
+	t.Version = h.Version
+	t.Length = h.Length
+
+	// TODO
+
+	return nil
+}
+
+// TLSAppDataRecord contains all the information that each AppData Record types should have
+type TLSAppDataRecord struct {
+	TLSRecordHeader
+	Payload []byte
+}
+
+// DecodeFromBytes decodes the slice into the TLS struct.
+func (t *TLSAppDataRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopacket.DecodeFeedback) error {
+	// TLS Record Header
+	t.ContentType = h.ContentType
+	t.Version = h.Version
+	t.Length = h.Length
+
+	if len(data) != int(t.Length) {
+		return errors.New("TLS Application Data length mismatch")
+	}
+
+	t.Payload = data
+	return nil
+}
+
+// TLSAlertLevel defines the alert level data type
+type TLSAlertLevel uint8
+
+// TLSAlertDescr defines the alert descrption data type
+type TLSAlertDescr uint8
+
+const (
+	TLSAlertWarning      TLSAlertLevel = 1
+	TLSAlertFatal        TLSAlertLevel = 2
+	TLSAlertUnknownLevel TLSAlertLevel = 255
+
+	TLSAlertCloseNotify               TLSAlertDescr = 0
+	TLSAlertUnexpectedMessage         TLSAlertDescr = 10
+	TLSAlertBadRecordMac              TLSAlertDescr = 20
+	TLSAlertDecryptionFailedRESERVED  TLSAlertDescr = 21
+	TLSAlertRecordOverflow            TLSAlertDescr = 22
+	TLSAlertDecompressionFailure      TLSAlertDescr = 30
+	TLSAlertHandshakeFailure          TLSAlertDescr = 40
+	TLSAlertNoCertificateRESERVED     TLSAlertDescr = 41
+	TLSAlertBadCertificate            TLSAlertDescr = 42
+	TLSAlertUnsupportedCertificate    TLSAlertDescr = 43
+	TLSAlertCertificateRevoked        TLSAlertDescr = 44
+	TLSAlertCertificateExpired        TLSAlertDescr = 45
+	TLSAlertCertificateUnknown        TLSAlertDescr = 46
+	TLSAlertIllegalParameter          TLSAlertDescr = 47
+	TLSAlertUnknownCa                 TLSAlertDescr = 48
+	TLSAlertAccessDenied              TLSAlertDescr = 49
+	TLSAlertDecodeError               TLSAlertDescr = 50
+	TLSAlertDecryptError              TLSAlertDescr = 51
+	TLSAlertExportRestrictionRESERVED TLSAlertDescr = 60
+	TLSAlertProtocolVersion           TLSAlertDescr = 70
+	TLSAlertInsufficientSecurity      TLSAlertDescr = 71
+	TLSAlertInternalError             TLSAlertDescr = 80
+	TLSAlertUserCanceled              TLSAlertDescr = 90
+	TLSAlertNoRenegotiation           TLSAlertDescr = 100
+	TLSAlertUnsupportedExtension      TLSAlertDescr = 110
+	TLSAlertUnknownDescription        TLSAlertDescr = 255
+)
+
+//  TLS Alert
+//  0  1  2  3  4  5  6  7  8
+//  +--+--+--+--+--+--+--+--+
+//  |         Level         |
+//  +--+--+--+--+--+--+--+--+
+//  |      Description      |
+//  +--+--+--+--+--+--+--+--+
+
+// TLSAlertRecord contains all the information that each Alert Record type should have
+type TLSAlertRecord struct {
+	TLSRecordHeader
+
+	Level       TLSAlertLevel
+	Description TLSAlertDescr
+
+	EncryptedMsg []byte
+}
+
+// DecodeFromBytes decodes the slice into the TLS struct.
+func (t *TLSAlertRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopacket.DecodeFeedback) error {
+	// TLS Record Header
+	t.ContentType = h.ContentType
+	t.Version = h.Version
+	t.Length = h.Length
+
+	if len(data) < 2 {
+		df.SetTruncated()
+		return errors.New("TLS Alert packet too short")
+	}
+
+	if t.Length == 2 {
+		t.Level = TLSAlertLevel(data[0])
+		t.Description = TLSAlertDescr(data[1])
+	} else {
+		t.Level = TLSAlertUnknownLevel
+		t.Description = TLSAlertUnknownDescription
+		t.EncryptedMsg = data
+	}
+
+	return nil
+}
+
+// Strings shows the TLS alert level nicely formatted
+func (al TLSAlertLevel) String() string {
+	switch al {
+	default:
+		return fmt.Sprintf("Unknown(%d)", al)
+	case TLSAlertWarning:
+		return "Warning"
+	case TLSAlertFatal:
+		return "Fatal"
+	}
+}
+
+// Strings shows the TLS alert description nicely formatted
+func (ad TLSAlertDescr) String() string {
+	switch ad {
+	default:
+		return "Unknown"
+	case TLSAlertCloseNotify:
+		return "close_notify"
+	case TLSAlertUnexpectedMessage:
+		return "unexpected_message"
+	case TLSAlertBadRecordMac:
+		return "bad_record_mac"
+	case TLSAlertDecryptionFailedRESERVED:
+		return "decryption_failed_RESERVED"
+	case TLSAlertRecordOverflow:
+		return "record_overflow"
+	case TLSAlertDecompressionFailure:
+		return "decompression_failure"
+	case TLSAlertHandshakeFailure:
+		return "handshake_failure"
+	case TLSAlertNoCertificateRESERVED:
+		return "no_certificate_RESERVED"
+	case TLSAlertBadCertificate:
+		return "bad_certificate"
+	case TLSAlertUnsupportedCertificate:
+		return "unsupported_certificate"
+	case TLSAlertCertificateRevoked:
+		return "certificate_revoked"
+	case TLSAlertCertificateExpired:
+		return "certificate_expired"
+	case TLSAlertCertificateUnknown:
+		return "certificate_unknown"
+	case TLSAlertIllegalParameter:
+		return "illegal_parameter"
+	case TLSAlertUnknownCa:
+		return "unknown_ca"
+	case TLSAlertAccessDenied:
+		return "access_denied"
+	case TLSAlertDecodeError:
+		return "decode_error"
+	case TLSAlertDecryptError:
+		return "decrypt_error"
+	case TLSAlertExportRestrictionRESERVED:
+		return "export_restriction_RESERVED"
+	case TLSAlertProtocolVersion:
+		return "protocol_version"
+	case TLSAlertInsufficientSecurity:
+		return "insufficient_security"
+	case TLSAlertInternalError:
+		return "internal_error"
+	case TLSAlertUserCanceled:
+		return "user_canceled"
+	case TLSAlertNoRenegotiation:
+		return "no_renegotiation"
+	case TLSAlertUnsupportedExtension:
+		return "unsupported_extension"
+	}
 }
