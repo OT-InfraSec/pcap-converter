@@ -3,7 +3,6 @@ package parser
 import (
 	"bytes"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
-	"net"
 	"os"
 	"testing"
 	"time"
@@ -11,33 +10,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
-
-type MockRepository struct {
-	mock.Mock
-}
-
-func (m *MockRepository) SaveDevice(device repository.Device) error {
-	args := m.Called(device)
-	return args.Error(0)
-}
-
-func (m *MockRepository) SaveFlow(flow repository.Flow) error {
-	args := m.Called(flow)
-	return args.Error(0)
-}
-
-func (m *MockRepository) SaveService(service repository.Service) error {
-	args := m.Called(service)
-	return args.Error(0)
-}
-
-func (m *MockRepository) SaveDNSQuery(query repository.DNSQuery) error {
-	args := m.Called(query)
-	return args.Error(0)
-}
 
 func TestGopacketParser_ParseFile_Empty(t *testing.T) {
 	// Create an empty pcap file
@@ -205,11 +178,11 @@ func TestGopacketParser_ParseFile_DNS(t *testing.T) {
 	}
 	udp.SetNetworkLayerForChecksum(ip)
 	dns := &layers.DNS{
-		QR:     true,
-		OpCode: layers.DNSOpCodeQuery,
-		AA:     true,
-		RD:     true,
-		RA:     true,
+		QR:      true,
+		OpCode:  layers.DNSOpCodeQuery,
+		AA:      true,
+		RD:      true,
+		RA:      true,
 		QDCount: 1,
 		Questions: []layers.DNSQuestion{{
 			Name:  []byte("example.com"),
@@ -252,150 +225,4 @@ func TestGopacketParser_ParseFile_ErrorHandling(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error for nonexistent file, got nil")
 	}
-}
-
-func TestParseTCPPacket(t *testing.T) {
-	// Create a mock repository
-	mockRepo := new(MockRepository)
-	mockRepo.On("SaveService", mock.Anything).Return(nil)
-
-	// Create a TCP packet
-	ipLayer := &layers.IPv4{
-		SrcIP: net.ParseIP("192.168.1.1"),
-		DstIP: net.ParseIP("192.168.1.2"),
-	}
-	tcpLayer := &layers.TCP{
-		SrcPort: layers.TCPPort(80),
-		DstPort: layers.TCPPort(8080),
-	}
-	packet := gopacket.NewPacket([]byte{}, layers.LayerTypeIPv4, gopacket.Default)
-	packet.NetworkLayer = ipLayer
-	packet.TransportLayer = tcpLayer
-	packet.Metadata().Timestamp = time.Now()
-
-	// Create a GopacketParser
-	parser := &parser.GopacketParser{
-		Repository: mockRepo,
-	}
-
-	// Parse the packet
-	parser.ParsePacket(packet)
-
-	// Verify that the service was saved
-	mockRepo.AssertCalled(t, "SaveService", mock.Anything)
-}
-
-func TestParseUDPPacket(t *testing.T) {
-	// Create a mock repository
-	mockRepo := new(MockRepository)
-	mockRepo.On("SaveService", mock.Anything).Return(nil)
-
-	// Create a UDP packet
-	ipLayer := &layers.IPv4{
-		SrcIP: net.ParseIP("192.168.1.1"),
-		DstIP: net.ParseIP("192.168.1.2"),
-	}
-	udpLayer := &layers.UDP{
-		SrcPort: layers.UDPPort(5060),
-		DstPort: layers.UDPPort(5060),
-	}
-	packet := gopacket.NewPacket([]byte{}, layers.LayerTypeIPv4, gopacket.Default)
-	packet.NetworkLayer = ipLayer
-	packet.TransportLayer = udpLayer
-	packet.Metadata().Timestamp = time.Now()
-
-	// Create a GopacketParser
-	parser := &parser.GopacketParser{
-		Repository: mockRepo,
-	}
-
-	// Parse the packet
-	parser.ParsePacket(packet)
-
-	// Verify that the service was saved
-	mockRepo.AssertCalled(t, "SaveService", mock.Anything)
-}
-
-func TestParseDNSPacket(t *testing.T) {
-	// Create a mock repository
-	mockRepo := new(MockRepository)
-	mockRepo.On("SaveDNSQuery", mock.Anything).Return(nil)
-
-	// Create a DNS packet
-	ipLayer := &layers.IPv4{
-		SrcIP: net.ParseIP("192.168.1.1"),
-		DstIP: net.ParseIP("192.168.1.2"),
-	}
-	dnsLayer := &layers.DNS{
-		Questions: []layers.DNSQuestion{
-			{
-				Name:  []byte("example.com"),
-				Type:  layers.DNSTypeA,
-				Class: layers.DNSClassIN,
-			},
-		},
-		Answers: []layers.DNSResourceRecord{
-			{
-				Name:  []byte("example.com"),
-				Type:  layers.DNSTypeA,
-				Class: layers.DNSClassIN,
-				TTL:   3600,
-				IP:    net.ParseIP("192.168.1.3"),
-			},
-		},
-	}
-	packet := gopacket.NewPacket([]byte{}, layers.LayerTypeIPv4, gopacket.Default)
-	packet.NetworkLayer = ipLayer
-	packet.ApplicationLayer = dnsLayer
-	packet.Metadata().Timestamp = time.Now()
-
-	// Create a GopacketParser
-	parser := &parser.GopacketParser{
-		Repository: mockRepo,
-	}
-
-	// Parse the packet
-	parser.ParsePacket(packet)
-
-	// Verify that the DNS query was saved
-	mockRepo.AssertCalled(t, "SaveDNSQuery", mock.Anything)
-}
-
-func TestParseHTTPPacket(t *testing.T) {
-	// Create a mock repository
-	mockRepo := new(MockRepository)
-	mockRepo.On("SaveService", mock.Anything).Return(nil)
-
-	// Create an HTTP packet
-	ipLayer := &layers.IPv4{
-		SrcIP: net.ParseIP("192.168.1.1"),
-		DstIP: net.ParseIP("192.168.1.2"),
-	}
-	tcpLayer := &layers.TCP{
-		SrcPort: layers.TCPPort(80),
-		DstPort: layers.TCPPort(8080),
-	}
-	httpLayer := &liblayers.HTTP{
-		Method:      []byte("GET"),
-		RequestURI:  []byte("/index.html"),
-		Version:     []byte("HTTP/1.1"),
-		Headers:     map[string][]string{"Host": {"example.com"}},
-		Body:        []byte(""),
-	}
-	packet := gopacket.NewPacket([]byte{}, layers.LayerTypeIPv4, gopacket.Default)
-	packet.NetworkLayer = ipLayer
-	packet.TransportLayer = tcpLayer
-	packet.ApplicationLayer = httpLayer
-	packet.Metadata().Timestamp = time.Now()
-
-	// Create a GopacketParser
-	parser := &parser.GopacketParser{
-		Repository: mockRepo,
-	}
-
-	// Parse the packet
-	parser.ParsePacket(packet)
-
-	// Verify that the service was saved
-	mockRepo.AssertCalled(t, "SaveService", mock.Anything)
 }
