@@ -129,7 +129,6 @@ func (t *TLS) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
 
 func (t *TLS) decodeTLSRecords(data []byte, df gopacket.DecodeFeedback) error {
 	if len(data) < 5 {
-		df.SetTruncated()
 		return errors.New("TLS record too short")
 	}
 
@@ -150,7 +149,6 @@ func (t *TLS) decodeTLSRecords(data []byte, df gopacket.DecodeFeedback) error {
 	hl := 5 // header length
 	tl := hl + int(h.Length)
 	if len(data) < tl {
-		df.SetTruncated()
 		return errors.New("TLS packet length mismatch")
 	}
 
@@ -314,7 +312,6 @@ func (t *TLSChangeCipherSpecRecord) decodeFromBytes(h TLSRecordHeader, data []by
 	t.Length = h.Length
 
 	if len(data) != 1 {
-		df.SetTruncated()
 		return errors.New("TLS Change Cipher Spec record incorrect length")
 	}
 
@@ -336,19 +333,54 @@ func (ccs TLSchangeCipherSpec) String() string {
 	}
 }
 
+const (
+	TLSHandshakeTypeHelloRequest        uint8 = 0
+	TLSHandshakeTypeClientHello         uint8 = 1
+	TLSHandshakeTypeServerHello         uint8 = 2
+	TLSHandshakeTypeHelloVerifyRequest  uint8 = 3
+	TLSHandshakeTypeNewSessionTicket    uint8 = 4
+	TLSHandshakeTypeEndOfEarlyData      uint8 = 5
+	TLSHandshakeTypeHelloRetryRequest   uint8 = 6
+	TLSHandshakeTypeEncryptedExtensions uint8 = 8
+	TLSHandshakeTypeCertificate         uint8 = 11
+	TLSHandshakeTypeServerKeyExchange   uint8 = 12
+	TLSHandshakeTypeCertificateRequest  uint8 = 13
+	TLSHandshakeTypeServerHelloDone     uint8 = 14
+	TLSHandshakeTypeCertificateVerify   uint8 = 15
+	TLSHandshakeTypeClientKeyExchange   uint8 = 16
+	TLSHandshakeTypeFinished            uint8 = 20
+	TLSHandshakeTypeCertificateURL      uint8 = 21
+	TLSHandshakeTypeCertificateStatus   uint8 = 22
+	TLSHandshakeTypeSupplementalData    uint8 = 23
+)
+
 // TLSHandshakeRecord defines the structure of a Handshare Record
 type TLSHandshakeRecord struct {
 	TLSRecordHeader
+
+	Type   uint8
+	Length int
+	Body   []byte
 }
 
-// DecodeFromBytes decodes the slice into the TLS struct.
+// DecodeFromBytes decodes the slice into the TLSHandshakeRecord struct according to the TLS Handshake Protocol.
 func (t *TLSHandshakeRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopacket.DecodeFeedback) error {
 	// TLS Record Header
 	t.ContentType = h.ContentType
 	t.Version = h.Version
-	t.Length = h.Length
+	t.Length = int(h.Length)
 
-	// TODO
+	// According to the TLS Handshake Protocol, the handshake message starts with:
+	// 1 byte: Handshake Type
+	// 3 bytes: Length
+	// The rest: Handshake message body
+	if len(data) < 4 {
+		return errors.New("TLS Handshake record too short")
+	}
+
+	t.Type = data[0]
+	t.Length = int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+	t.Body = data[4:]
 
 	return nil
 }
@@ -439,7 +471,6 @@ func (t *TLSAlertRecord) decodeFromBytes(h TLSRecordHeader, data []byte, df gopa
 	t.Length = h.Length
 
 	if len(data) < 2 {
-		df.SetTruncated()
 		return errors.New("TLS Alert packet too short")
 	}
 
