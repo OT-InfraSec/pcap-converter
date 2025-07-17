@@ -528,6 +528,39 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
 						}
 
+						if httpLayer.IsUpnpReqest() {
+							// Set the device as a UPnP server
+							additionalDataMap := make(map[string]string)
+							additionalDataMap["is_upnp_host"] = "true"
+							additionalDataJSON, err := json.Marshal(additionalDataMap)
+							if err != nil {
+								return fmt.Errorf("failed to marshal additional data: %w", err)
+							}
+							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+						}
+
+						if httpLayer.IsUpnpResponse() {
+							// Set the device as a UPnP server
+							additionalDataMap := make(map[string]string)
+							additionalDataMap["is_upnp_host"] = "true"
+							additionalDataJSON, err := json.Marshal(additionalDataMap)
+							if err != nil {
+								return fmt.Errorf("failed to marshal additional data: %w", err)
+							}
+							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+						}
+
+						if httpLayer.IsWindowsRequest() {
+							// Set the device as a Windows host
+							additionalDataMap := make(map[string]string)
+							additionalDataMap["is_windows_host"] = "true"
+							additionalDataJSON, err := json.Marshal(additionalDataMap)
+							if err != nil {
+								return fmt.Errorf("failed to marshal additional data: %w", err)
+							}
+							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+						}
+
 						// Update the service for HTTP request
 						timestamp := packet.Metadata().Timestamp
 						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
@@ -547,6 +580,13 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 						httpData["status_code"] = httpLayer.StatusCode
 						httpData["status_msg"] = httpLayer.StatusMsg
 						httpData["is_proxy_discovery_resp"] = httpLayer.IsProxyDiscoveryResponse(request)
+
+						timestamp := packet.Metadata().Timestamp
+						if srcPort != "" /*&& (srcPortNum == 80 || srcPortNum == 443)*/ {
+							if port, err := strconv.Atoi(srcPort); err == nil {
+								p.updateService(srcIP, port, "http", timestamp)
+							}
+						}
 					}
 
 					if httpLayer.ContentLength > 0 {
@@ -1067,68 +1107,6 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							p.updateService(srcIP, int(answer.SRV.Port), "discovered", timestamp)
 						}
 					}
-				}
-			}
-		}
-
-		// HTTP
-		if httpLayer := packet.Layer(liblayers.LayerTypeHTTP); httpLayer != nil {
-			http := httpLayer.(*liblayers.HTTP)
-
-			flowProto = "http"
-			httpData := map[string]interface{}{
-				"is_request":    http.IsRequest,
-				"version":       string(http.Version),
-				"headers":       http.Headers,
-				"body":          string(http.Body),
-				"content_type":  http.ContentType,
-				"user_agent":    http.UserAgent,
-				"host":          http.Host,
-				"connection":    http.Connection,
-				"cookies":       http.Cookies,
-				"is_keep_alive": http.IsKeepAlive(),
-				"is_chunked":    http.IsChunked(),
-			}
-
-			if http.IsRequest {
-				httpData["method"] = string(http.Method)
-				httpData["request_uri"] = http.RequestURI
-				httpData["query_params"] = http.QueryParams
-				if http.URL != nil {
-					httpData["parsed_url"] = map[string]interface{}{
-						"scheme":   http.URL.Scheme,
-						"host":     http.URL.Host,
-						"path":     http.URL.Path,
-						"query":    http.URL.RawQuery,
-						"fragment": http.URL.Fragment,
-					}
-				}
-			} else {
-				httpData["status_code"] = http.StatusCode
-				httpData["status_msg"] = http.StatusMsg
-			}
-
-			if http.ContentLength > 0 {
-				httpData["content_length"] = http.ContentLength
-			}
-
-			if len(http.TransferEncoding) > 0 {
-				httpData["transfer_encoding"] = http.TransferEncoding
-			}
-
-			layersMap["http"] = httpData
-			protocols = append(protocols, "http")
-
-			// Update service for HTTP - determine port from source/destination
-			timestamp := packet.Metadata().Timestamp
-			if srcPort != "" {
-				if port, err := strconv.Atoi(srcPort); err == nil {
-					p.updateService(srcIP, port, "http", timestamp)
-				}
-			}
-			if dstPort != "" {
-				if port, err := strconv.Atoi(dstPort); err == nil {
-					p.updateService(dstIP, port, "http", timestamp)
 				}
 			}
 		}

@@ -74,6 +74,7 @@ type HTTP struct {
 	Cookies          map[string]string // Parsed cookies
 	QueryParams      map[string]string // Parsed query parameters (for requests)
 	Accept           []string          // Accept header values
+	Server           string            // Server header value (for responses)
 
 	Identifier string // Unique identifier for the HTTP request/response used for response matching
 }
@@ -327,6 +328,10 @@ func (h *HTTP) parseAdditionalFields() {
 			h.Accept[i] = strings.TrimSpace(h.Accept[i])
 		}
 	}
+
+	if server, exists := h.Headers["server"]; exists {
+		h.Server = server
+	}
 }
 
 // parseCookies parses the Cookie header
@@ -424,6 +429,32 @@ func (h *HTTP) IsMSCCMPost() bool {
 		return false
 	}
 	if strings.Contains(h.RequestURI, "/ccm_system") || strings.Contains(h.RequestURI, "/ccm_client") {
+		return true
+	}
+	return false
+}
+
+func (h *HTTP) IsUpnpReqest() bool {
+	return strings.Contains(h.URL.Path, "/upnphost")
+}
+
+func (h *HTTP) IsUpnpResponse() bool {
+	// Check if the response is a UPnP response
+	if !h.IsResponse() {
+		return false
+	}
+	return strings.Contains(h.Server, "UPnP")
+}
+
+func (h *HTTP) IsWindowsRequest() bool {
+	// Check if the request is a Windows-specific request
+	if !h.IsRequest {
+		return false
+	}
+	if strings.Contains(h.RequestURI, "windows") || strings.Contains(h.RequestURI, "microsoft") {
+		return true
+	}
+	if ua, exists := h.Headers["user-agent"]; exists && strings.Contains(strings.ToLower(ua), "Windows") {
 		return true
 	}
 	return false
