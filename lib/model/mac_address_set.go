@@ -15,6 +15,12 @@ func NewMACAddressSet() *MACAddressSet {
 	}
 }
 
+func (m *MACAddressSet) AddMACAddressBatch(mac []string) {
+	for _, macAddress := range mac {
+		m.set.Add(macAddress)
+	}
+}
+
 func (m *MACAddressSet) Add(value string) {
 	if m.set == nil {
 		m.set = helper.NewSet()
@@ -50,7 +56,7 @@ func (m *MACAddressSet) List() []string {
 	list := make([]string, 0, m.set.Size())
 
 	for _, value := range m.set.List() {
-		if value != "00:00:00:00:00:00" { // Exclude the zero MAC address
+		if value != "00:00:00:00:00:00" && value != "ff:ff:ff:ff:ff:ff" { // Exclude the zero MAC address
 			list = append(list, value)
 		}
 	}
