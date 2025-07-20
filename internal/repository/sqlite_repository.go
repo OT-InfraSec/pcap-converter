@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/mattn/go-sqlite3"
 	"log"
@@ -191,6 +192,52 @@ func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
 	return &device, nil
 }
 
+func (r *SQLiteRepository) GetDevices(filters map[string]interface{}) ([]*model2.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices`
+	params := []interface{}{}
+
+	if len(filters) > 0 {
+		conditions := []string{}
+		for key, value := range filters {
+			conditions = append(conditions, key+" = ?")
+			params = append(params, value)
+		}
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	rows, err := r.db.Query(query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var devices []*model2.Device
+	for rows.Next() {
+		var firstSeenStr, lastSeenStr, macAddressesStr string
+		var device model2.Device
+
+		if err := rows.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination); err != nil {
+			return nil, err
+		}
+
+		device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+		device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+		device.MACAddressSet = model2.NewMACAddressSet()
+
+		for _, mac := range strings.Split(macAddressesStr, ",") {
+			if mac != "" {
+				device.MACAddressSet.Add(mac)
+			}
+		}
+
+		devices = append(devices, &device)
+	}
+
+	return devices, nil
+}
+
 func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	// Validiere den Flow bevor er zur Datenbank hinzugefügt wird
 	if err := flow.Validate(); err != nil {
@@ -248,6 +295,61 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		log.Fatalf("Error getting last insert ID for flow: %v", err)
 	}
 	return err
+}
+
+func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.Flow, error) {
+	query := `SELECT id, source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports FROM flows`
+	params := []interface{}{}
+
+	if len(filters) > 0 {
+		conditions := []string{}
+		for key, value := range filters {
+			conditions = append(conditions, key+" = ?")
+			params = append(params, value)
+		}
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	rows, err := r.db.Query(query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var flows []*model2.Flow
+	for rows.Next() {
+		var firstSeenStr, lastSeenStr, sourcePortsStr, destinationPortsStr, packetRefsJson string
+		var flow model2.Flow
+
+		if err := rows.Scan(&flow.ID, &flow.Source, &flow.Destination, &flow.Protocol, &flow.Packets, &flow.Bytes, &firstSeenStr, &lastSeenStr, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr); err != nil {
+			return nil, err
+		}
+
+		flow.SourcePorts = helper.NewSet()
+		for _, port := range strings.Split(sourcePortsStr, ",") {
+			if port != "" {
+				flow.SourcePorts.Add(port)
+			}
+		}
+		flow.DestinationPorts = helper.NewSet()
+		for _, port := range strings.Split(destinationPortsStr, ",") {
+			if port != "" {
+				flow.DestinationPorts.Add(port)
+			}
+		}
+
+		if err := json.Unmarshal([]byte(packetRefsJson), &flow.PacketRefs); err != nil {
+			log.Printf("Error unmarshaling packet refs for flow ID %d: %v", flow.ID, err)
+			flow.PacketRefs = make([]int64, 0) // Initialize to an empty map if unmarshaling fails
+		}
+
+		flow.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+		flow.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+		flows = append(flows, &flow)
+	}
+
+	return flows, nil
 }
 
 func (r *SQLiteRepository) AllPackets() ([]*model2.Packet, error) {
@@ -634,17 +736,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 		if flow.DestinationPorts != nil {
 			destinationPorts = flow.DestinationPorts.ToString()
 		}
-		var minPkt, maxPkt interface{}
-		if flow.MinPacketSize != nil {
-			minPkt = *flow.MinPacketSize
-		} else {
-			minPkt = nil
-		}
-		if flow.MaxPacketSize != nil {
-			maxPkt = *flow.MaxPacketSize
-		} else {
-			maxPkt = nil
-		}
+		minPkt := flow.MinPacketSize
+		maxPkt := flow.MaxPacketSize
 		_, err = stmt.Exec(
 			flow.Source,
 			flow.Destination,
@@ -783,4 +876,1041 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 		device.ID,
 	)
 	return err
+}
+
+// UpdatePacket updates an existing packet in the database by ID.
+func (r *SQLiteRepository) UpdatePacket(packet *model2.Packet) error {
+	if packet.ID == 0 {
+		return errors.New("packet ID is required for update")
+	}
+
+	layersJSON, err := json.Marshal(packet.Layers)
+	if err != nil {
+		return err
+	}
+
+	protocolsJSON, err := json.Marshal(packet.Protocols)
+	if err != nil {
+		return err
+	}
+
+	_, err = r.db.Exec(
+		`UPDATE packets SET timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`,
+		packet.Timestamp.Format(time.RFC3339Nano),
+		packet.Length,
+		string(layersJSON),
+		string(protocolsJSON),
+		packet.ID,
+	)
+	return err
+}
+
+// UpsertPacket inserts a packet if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertPacket(packet *model2.Packet) error {
+	// If packet has ID, try to update first
+	if packet.ID > 0 {
+		// Check if packet exists
+		var exists bool
+		err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM packets WHERE id = ?)", packet.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			return r.UpdatePacket(packet)
+		}
+	}
+
+	// If packet doesn't exist or has no ID, insert it
+	return r.AddPacket(packet)
+}
+
+// UpsertPackets inserts multiple packets in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Prepare insert statement
+	insertStmt, err := tx.Prepare(`INSERT INTO packets (timestamp, length, layers, protocols) VALUES (?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	// Prepare update statement
+	updateStmt, err := tx.Prepare(`UPDATE packets SET timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	// Prepare check statement
+	checkStmt, err := tx.Prepare("SELECT EXISTS(SELECT 1 FROM packets WHERE id = ?)")
+	if err != nil {
+		return err
+	}
+	defer checkStmt.Close()
+
+	for _, packet := range packets {
+		layersJSON, err := json.Marshal(packet.Layers)
+		if err != nil {
+			return err
+		}
+
+		protocolsJSON, err := json.Marshal(packet.Protocols)
+		if err != nil {
+			return err
+		}
+
+		// If packet has an ID, check if it exists
+		if packet.ID > 0 {
+			var exists bool
+			err = checkStmt.QueryRow(packet.ID).Scan(&exists)
+			if err != nil {
+				return err
+			}
+
+			if exists {
+				_, err = updateStmt.Exec(
+					packet.Timestamp.Format(time.RFC3339Nano),
+					packet.Length,
+					string(layersJSON),
+					string(protocolsJSON),
+					packet.ID,
+				)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+		}
+
+		// If packet doesn't exist or has no ID, insert it
+		_, err = insertStmt.Exec(
+			packet.Timestamp.Format(time.RFC3339Nano),
+			packet.Length,
+			string(layersJSON),
+			string(protocolsJSON),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// UpsertDevice inserts a device if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
+	// Validate the device
+	if err := device.Validate(); err != nil {
+		return err
+	}
+
+	// Check if device exists by address
+	existingDevice, err := r.GetDevice(device.Address)
+	if err == nil && existingDevice != nil {
+		// Device exists, update it
+		device.ID = existingDevice.ID
+		return r.UpdateDevice(device)
+	}
+
+	// Device doesn't exist or there was an error retrieving it, insert it
+	return r.AddDevice(device)
+}
+
+// UpsertDevices inserts multiple devices in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Prepare statements
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	updateStmt, err := tx.Prepare(`UPDATE devices SET address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ? WHERE id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	checkStmt, err := tx.Prepare(`SELECT id FROM devices WHERE address = ?;`)
+	if err != nil {
+		return err
+	}
+	defer checkStmt.Close()
+
+	for _, device := range devices {
+		if err := device.Validate(); err != nil {
+			return err
+		}
+
+		// Check if device exists
+		var deviceID int64
+		err = checkStmt.QueryRow(device.Address).Scan(&deviceID)
+
+		if err == nil {
+			// Device exists, update it
+			macs := ""
+			if device.MACAddressSet != nil {
+				macs = device.MACAddressSet.ToString()
+			}
+
+			_, err = updateStmt.Exec(
+				device.AddressType,
+				device.FirstSeen.Format(time.RFC3339Nano),
+				device.LastSeen.Format(time.RFC3339Nano),
+				device.AddressSubType,
+				device.AddressScope,
+				macs,
+				device.AdditionalData,
+				device.IsOnlyDestination,
+				deviceID,
+			)
+			if err != nil {
+				return err
+			}
+			device.ID = deviceID
+		} else if err == sql.ErrNoRows {
+			// Device doesn't exist, insert it
+			macs := ""
+			if device.MACAddressSet != nil {
+				macs = device.MACAddressSet.ToString()
+			}
+
+			result, err := insertStmt.Exec(
+				device.Address,
+				device.AddressType,
+				device.FirstSeen.Format(time.RFC3339Nano),
+				device.LastSeen.Format(time.RFC3339Nano),
+				device.AddressSubType,
+				device.AddressScope,
+				macs,
+				device.AdditionalData,
+				device.IsOnlyDestination,
+			)
+			if err != nil {
+				return err
+			}
+
+			lastInsertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			device.ID = lastInsertID
+		} else {
+			// Other error
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpdateService updates an existing service in the database by ID.
+func (r *SQLiteRepository) UpdateService(service *model2.Service) error {
+	if service.ID == 0 {
+		return errors.New("service ID is required for update")
+	}
+
+	if err := service.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`UPDATE services SET ip = ?, port = ?, first_seen = ?, last_seen = ?, protocol = ? WHERE element_id = ?;`,
+		service.IP,
+		service.Port,
+		service.FirstSeen.Format(time.RFC3339Nano),
+		service.LastSeen.Format(time.RFC3339Nano),
+		service.Protocol,
+		service.ID,
+	)
+	return err
+}
+
+// UpdateFlow updates an existing flow in the database by ID.
+func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
+	if flow.ID == 0 {
+		return errors.New("flow ID is required for update")
+	}
+
+	if err := flow.Validate(); err != nil {
+		return err
+	}
+
+	// Get source and destination device IDs
+	srcAddress := flow.Source
+	srcAddress, err := model2.ExtractIPAddress(srcAddress)
+	if srcAddress == "" || err != nil {
+		return errors.New("invalid source address")
+	}
+	destAddress := flow.Destination
+	destAddress, err = model2.ExtractIPAddress(destAddress)
+	if destAddress == "" || err != nil {
+		return errors.New("invalid destination address")
+	}
+
+	srcDevice, err := r.GetDeviceForAddress(srcAddress)
+	if err != nil {
+		log.Printf("Error getting source device for address %s: %v", srcAddress, err)
+		return err
+	}
+
+	destDevice, err := r.GetDeviceForAddress(destAddress)
+	if err != nil {
+		log.Printf("Error getting destination device for address %s: %v", destAddress, err)
+		return err
+	}
+
+	// Marshal packet references
+	packetRefsJSON, err := json.Marshal(flow.PacketRefs)
+	if err != nil {
+		return err
+	}
+
+	// Prepare source and destination ports
+	sourcePorts := ""
+	destinationPorts := ""
+	if flow.SourcePorts != nil {
+		sourcePorts = flow.SourcePorts.ToString()
+	}
+	if flow.DestinationPorts != nil {
+		destinationPorts = flow.DestinationPorts.ToString()
+	}
+
+	_, err = r.db.Exec(
+		`UPDATE flows SET source = ?, destination = ?, protocol = ?, packets = ?, bytes = ?, 
+		first_seen = ?, last_seen = ?, source_device_id = ?, destination_device_id = ?, 
+		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ? 
+		WHERE id = ?;`,
+		flow.Source,
+		flow.Destination,
+		flow.Protocol,
+		flow.Packets,
+		flow.Bytes,
+		flow.FirstSeen.Format(time.RFC3339Nano),
+		flow.LastSeen.Format(time.RFC3339Nano),
+		srcDevice.ID,
+		destDevice.ID,
+		flow.MinPacketSize,
+		flow.MaxPacketSize,
+		string(packetRefsJSON),
+		sourcePorts,
+		destinationPorts,
+		flow.ID,
+	)
+	return err
+}
+
+// UpdateDeviceRelation updates an existing device relation in the database by ID.
+func (r *SQLiteRepository) UpdateDeviceRelation(relation *model2.DeviceRelation) error {
+	if relation.ID == 0 {
+		return errors.New("device relation ID is required for update")
+	}
+
+	_, err := r.db.Exec(
+		`UPDATE device_relations SET device_id_1 = ?, device_id_2 = ?, comment = ? WHERE id = ?;`,
+		relation.DeviceID1,
+		relation.DeviceID2,
+		relation.Comment,
+		relation.ID,
+	)
+	return err
+}
+
+// UpsertDeviceRelation inserts a device relation if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertDeviceRelation(relation *model2.DeviceRelation) error {
+	// Try to insert with UNIQUE constraint (will fail if relation with same device IDs exists)
+	result, err := r.db.Exec(
+		`INSERT OR IGNORE INTO device_relations (device_id_1, device_id_2, comment) VALUES (?, ?, ?);`,
+		relation.DeviceID1,
+		relation.DeviceID2,
+		relation.Comment,
+	)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// If insert succeeded, get the new ID and return
+	if rowsAffected > 0 {
+		lastInsertID, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		relation.ID = lastInsertID
+		return nil
+	}
+
+	// If no rows affected, it means the relation already exists, so update it
+	// First find the existing relation ID
+	var existingID int64
+	err = r.db.QueryRow(
+		"SELECT id FROM device_relations WHERE device_id_1 = ? AND device_id_2 = ?",
+		relation.DeviceID1,
+		relation.DeviceID2,
+	).Scan(&existingID)
+	if err != nil {
+		return err
+	}
+
+	// Set the ID and update
+	relation.ID = existingID
+	return r.UpdateDeviceRelation(relation)
+}
+
+// UpdateDNSQuery updates an existing DNS query in the database by ID.
+func (r *SQLiteRepository) UpdateDNSQuery(query *model2.DNSQuery) error {
+	if query.ID == 0 {
+		return errors.New("DNS query ID is required for update")
+	}
+
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	jsonQueryResult, err := json.Marshal(query.QueryResult)
+	if err != nil {
+		log.Printf("Error marshaling query result: %v", err)
+		return err
+	}
+
+	_, err = r.db.Exec(
+		`UPDATE dns_queries SET querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`,
+		query.QueryingDeviceID,
+		query.AnsweringDeviceID,
+		query.QueryName,
+		query.QueryType,
+		string(jsonQueryResult),
+		query.Timestamp.Format(time.RFC3339Nano),
+		query.ID,
+	)
+	return err
+}
+
+// UpsertDNSQuery inserts a DNS query if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertDNSQuery(query *model2.DNSQuery) error {
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	// For DNS queries we can't directly use the OR REPLACE approach because of the UNIQUE constraint
+	// on multiple columns. Instead, we'll use the ID if provided to check if it exists.
+
+	// If query has ID, try to update first
+	if query.ID > 0 {
+		// Check if query exists
+		var exists bool
+		err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM dns_queries WHERE id = ?)", query.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			return r.UpdateDNSQuery(query)
+		}
+	}
+
+	// Otherwise, check if a query with the same unique identifiers exists
+	var existingID int64
+	jsonQueryResult, err := json.Marshal(query.QueryResult)
+	if err != nil {
+		log.Printf("Error marshaling query result: %v", err)
+		return err
+	}
+
+	err = r.db.QueryRow(
+		`SELECT id FROM dns_queries WHERE querying_device_id = ? AND answering_device_id = ? 
+		AND query_name = ? AND query_type = ? AND query_result = ? AND timestamp = ?`,
+		query.QueryingDeviceID,
+		query.AnsweringDeviceID,
+		query.QueryName,
+		query.QueryType,
+		string(jsonQueryResult),
+		query.Timestamp.Format(time.RFC3339Nano),
+	).Scan(&existingID)
+
+	if err == nil {
+		// Query exists, update it
+		query.ID = existingID
+		return r.UpdateDNSQuery(query)
+	} else if err == sql.ErrNoRows {
+		// Query doesn't exist, insert it
+		return r.AddDNSQuery(query)
+	} else {
+		// Other error
+		return err
+	}
+}
+
+// UpsertDNSQueries inserts multiple DNS queries in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertDNSQueries(queries []*model2.DNSQuery) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Prepare statements
+	insertStmt, err := tx.Prepare(`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	updateStmt, err := tx.Prepare(`UPDATE dns_queries SET querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	// Prepare check statement for ID
+	checkByIDStmt, err := tx.Prepare("SELECT EXISTS(SELECT 1 FROM dns_queries WHERE id = ?)")
+	if err != nil {
+		return err
+	}
+	defer checkByIDStmt.Close()
+
+	// Prepare check statement for unique combination
+	checkByUniqueStmt, err := tx.Prepare(`SELECT id FROM dns_queries WHERE querying_device_id = ? AND answering_device_id = ? AND query_name = ? AND query_type = ? AND query_result = ? AND timestamp = ?`)
+	if err != nil {
+		return err
+	}
+	defer checkByUniqueStmt.Close()
+
+	for _, query := range queries {
+		if err := query.Validate(); err != nil {
+			continue // Skip invalid queries
+		}
+
+		jsonQueryResult, err := json.Marshal(query.QueryResult)
+		if err != nil {
+			log.Printf("Error marshaling query result: %v", err)
+			continue
+		}
+
+		// Check if query has an ID and exists
+		var exists bool = false
+		var existingID int64 = 0
+
+		if query.ID > 0 {
+			err = checkByIDStmt.QueryRow(query.ID).Scan(&exists)
+			if err != nil {
+				return err
+			}
+
+			if exists {
+				existingID = query.ID
+			}
+		}
+
+		// If no ID or ID not found, check by unique combination
+		if !exists {
+			err = checkByUniqueStmt.QueryRow(
+				query.QueryingDeviceID,
+				query.AnsweringDeviceID,
+				query.QueryName,
+				query.QueryType,
+				string(jsonQueryResult),
+				query.Timestamp.Format(time.RFC3339Nano),
+			).Scan(&existingID)
+
+			if err == nil {
+				exists = true
+			} else if err != sql.ErrNoRows {
+				// Real error, not just "not found"
+				return err
+			}
+		}
+
+		if exists {
+			// Update existing query
+			_, err = updateStmt.Exec(
+				query.QueryingDeviceID,
+				query.AnsweringDeviceID,
+				query.QueryName,
+				query.QueryType,
+				string(jsonQueryResult),
+				query.Timestamp.Format(time.RFC3339Nano),
+				existingID,
+			)
+			if err != nil {
+				return err
+			}
+			query.ID = existingID
+		} else {
+			// Insert new query
+			result, err := insertStmt.Exec(
+				query.QueryingDeviceID,
+				query.AnsweringDeviceID,
+				query.QueryName,
+				query.QueryType,
+				string(jsonQueryResult),
+				query.Timestamp.Format(time.RFC3339Nano),
+			)
+			if err != nil {
+				// Check if it's a constraint violation (entry already exists)
+				if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
+					continue // Skip if already exists due to unique constraint
+				}
+				return err
+			}
+
+			lastInsertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			query.ID = lastInsertID
+		}
+	}
+
+	return tx.Commit()
+}
+
+// AllDevices returns all devices from the database.
+func (r *SQLiteRepository) AllDevices() ([]*model2.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var devices []*model2.Device
+	for rows.Next() {
+		var device model2.Device
+		var firstSeenStr, lastSeenStr, macAddressesStr string
+
+		if err := rows.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination); err != nil {
+			return nil, err
+		}
+
+		device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+		device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+		device.MACAddressSet = model2.NewMACAddressSet()
+
+		for _, mac := range strings.Split(macAddressesStr, ",") {
+			if mac != "" {
+				device.MACAddressSet.Add(mac)
+			}
+		}
+
+		devices = append(devices, &device)
+	}
+
+	return devices, nil
+}
+
+// AllFlows returns all flows from the database.
+func (r *SQLiteRepository) AllFlows() ([]*model2.Flow, error) {
+	query := `SELECT id, source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, 
+	          min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports FROM flows`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var flows []*model2.Flow
+	for rows.Next() {
+		var flow model2.Flow
+		var firstSeenStr, lastSeenStr, packetRefsStr, sourcePortsStr, destPortsStr string
+		var minPacketSizeSQL, maxPacketSizeSQL sql.NullInt64
+		var sourceDeviceID, destDeviceID sql.NullInt64
+
+		if err := rows.Scan(&flow.ID, &flow.Source, &flow.Destination, &flow.Protocol, &flow.Packets, &flow.Bytes,
+			&firstSeenStr, &lastSeenStr, &sourceDeviceID, &destDeviceID, &minPacketSizeSQL, &maxPacketSizeSQL,
+			&packetRefsStr, &sourcePortsStr, &destPortsStr); err != nil {
+			return nil, err
+		}
+
+		flow.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+		flow.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+		if minPacketSizeSQL.Valid {
+			minSize := int(minPacketSizeSQL.Int64)
+			flow.MinPacketSize = minSize
+		}
+		if maxPacketSizeSQL.Valid {
+			maxSize := int(maxPacketSizeSQL.Int64)
+			flow.MaxPacketSize = maxSize
+		}
+
+		// Parse packet references
+		if packetRefsStr != "" {
+			var packetRefs []int64
+			if err := json.Unmarshal([]byte(packetRefsStr), &packetRefs); err != nil {
+				log.Printf("Error parsing packet refs: %v", err)
+			} else {
+				flow.PacketRefs = packetRefs
+			}
+		}
+
+		// Parse ports
+		flow.SourcePorts = helper.NewSet()
+		flow.DestinationPorts = helper.NewSet()
+
+		if sourcePortsStr != "" {
+			for _, port := range strings.Split(sourcePortsStr, ",") {
+				flow.SourcePorts.Add(port)
+			}
+		}
+
+		if destPortsStr != "" {
+			for _, port := range strings.Split(destPortsStr, ",") {
+				flow.DestinationPorts.Add(port)
+			}
+		}
+
+		flows = append(flows, &flow)
+	}
+
+	return flows, nil
+}
+
+// UpsertService inserts a service if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertService(service *model2.Service) error {
+	if err := service.Validate(); err != nil {
+		return err
+	}
+
+	// Check if service exists by IP, port, and protocol
+	var serviceID int64
+	err := r.db.QueryRow(
+		`SELECT element_id FROM services WHERE ip = ? AND port = ? AND protocol = ?`,
+		service.IP, service.Port, service.Protocol,
+	).Scan(&serviceID)
+
+	if err == nil {
+		// Service exists, update it
+		service.ID = serviceID
+		return r.UpdateService(service)
+	} else if err == sql.ErrNoRows {
+		// Service doesn't exist, insert it
+		result, err := r.db.Exec(
+			`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`,
+			service.IP,
+			service.Port,
+			service.FirstSeen.Format(time.RFC3339Nano),
+			service.LastSeen.Format(time.RFC3339Nano),
+			service.Protocol,
+		)
+		if err != nil {
+			return err
+		}
+
+		lastInsertID, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
+		service.ID = lastInsertID
+		return nil
+	}
+
+	// Other error
+	return err
+}
+
+// UpsertServices inserts multiple services in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertServices(services []*model2.Service) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Prepare statements
+	insertStmt, err := tx.Prepare(`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	updateStmt, err := tx.Prepare(`UPDATE services SET first_seen = ?, last_seen = ?, protocol = ? WHERE element_id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	checkStmt, err := tx.Prepare(`SELECT element_id FROM services WHERE ip = ? AND port = ? AND protocol = ?`)
+	if err != nil {
+		return err
+	}
+	defer checkStmt.Close()
+
+	for _, service := range services {
+		if err := service.Validate(); err != nil {
+			return err
+		}
+
+		// Check if service exists
+		var serviceID int64
+		err = checkStmt.QueryRow(service.IP, service.Port, service.Protocol).Scan(&serviceID)
+
+		if err == nil {
+			// Service exists, update it
+			_, err = updateStmt.Exec(
+				service.FirstSeen.Format(time.RFC3339Nano),
+				service.LastSeen.Format(time.RFC3339Nano),
+				service.Protocol,
+				serviceID,
+			)
+			if err != nil {
+				return err
+			}
+			service.ID = serviceID
+		} else if err == sql.ErrNoRows {
+			// Service doesn't exist, insert it
+			result, err := insertStmt.Exec(
+				service.IP,
+				service.Port,
+				service.FirstSeen.Format(time.RFC3339Nano),
+				service.LastSeen.Format(time.RFC3339Nano),
+				service.Protocol,
+			)
+			if err != nil {
+				return err
+			}
+
+			lastInsertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			service.ID = lastInsertID
+		} else {
+			// Other error
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpsertFlow inserts a flow if it doesn't exist, or updates it if it exists.
+func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
+	if err := flow.Validate(); err != nil {
+		return err
+	}
+
+	// If flow has ID, try to update it
+	if flow.ID > 0 {
+		var exists bool
+		err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM flows WHERE id = ?)", flow.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			return r.UpdateFlow(flow)
+		}
+	}
+
+	// Try to find existing flow by source, destination, and protocol
+	var flowID int64
+	err := r.db.QueryRow(
+		`SELECT id FROM flows WHERE source = ? AND destination = ? AND protocol = ?`,
+		flow.Source, flow.Destination, flow.Protocol,
+	).Scan(&flowID)
+
+	if err == nil {
+		// Flow exists, update it
+		flow.ID = flowID
+		return r.UpdateFlow(flow)
+	} else if err == sql.ErrNoRows {
+		// Flow doesn't exist, insert it
+		return r.AddFlow(flow)
+	}
+
+	// Other error
+	return err
+}
+
+// UpsertFlows inserts multiple flows in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertFlows(flows []*model2.Flow) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, flow := range flows {
+		if err := flow.Validate(); err != nil {
+			return err
+		}
+
+		// Check if flow exists
+		var flowID int64
+		if flow.ID > 0 {
+			var exists bool
+			err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM flows WHERE id = ?)", flow.ID).Scan(&exists)
+			if err != nil {
+				return err
+			}
+
+			if exists {
+				flowID = flow.ID
+			}
+		}
+
+		if flowID == 0 {
+			// Check by source, destination, and protocol
+			err := tx.QueryRow(
+				`SELECT id FROM flows WHERE source = ? AND destination = ? AND protocol = ?`,
+				flow.Source, flow.Destination, flow.Protocol,
+			).Scan(&flowID)
+
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+		}
+
+		if flowID > 0 {
+			// Flow exists, update it
+			flow.ID = flowID
+
+			// Get source and destination device IDs
+			srcAddress, err := model2.ExtractIPAddress(flow.Source)
+			if srcAddress == "" || err != nil {
+				return errors.New("invalid source address")
+			}
+			destAddress, err := model2.ExtractIPAddress(flow.Destination)
+			if destAddress == "" || err != nil {
+				return errors.New("invalid destination address")
+			}
+
+			var srcDeviceID, destDeviceID int64
+			err = tx.QueryRow("SELECT id FROM devices WHERE address = ?", srcAddress).Scan(&srcDeviceID)
+			if err != nil {
+				return err
+			}
+
+			err = tx.QueryRow("SELECT id FROM devices WHERE address = ?", destAddress).Scan(&destDeviceID)
+			if err != nil {
+				return err
+			}
+
+			// Marshal packet references and prepare port strings
+			packetRefsJSON, err := json.Marshal(flow.PacketRefs)
+			if err != nil {
+				return err
+			}
+
+			sourcePorts := ""
+			if flow.SourcePorts != nil {
+				sourcePorts = flow.SourcePorts.ToString()
+			}
+
+			destinationPorts := ""
+			if flow.DestinationPorts != nil {
+				destinationPorts = flow.DestinationPorts.ToString()
+			}
+
+			// Update the flow
+			_, err = tx.Exec(
+				`UPDATE flows SET source = ?, destination = ?, protocol = ?, packets = ?, bytes = ?,
+				first_seen = ?, last_seen = ?, source_device_id = ?, destination_device_id = ?,
+				min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?
+				WHERE id = ?;`,
+				flow.Source,
+				flow.Destination,
+				flow.Protocol,
+				flow.Packets,
+				flow.Bytes,
+				flow.FirstSeen.Format(time.RFC3339Nano),
+				flow.LastSeen.Format(time.RFC3339Nano),
+				srcDeviceID,
+				destDeviceID,
+				flow.MinPacketSize,
+				flow.MaxPacketSize,
+				string(packetRefsJSON),
+				sourcePorts,
+				destinationPorts,
+				flowID,
+			)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Flow doesn't exist, insert it
+
+			// Get source and destination device IDs
+			srcAddress, err := model2.ExtractIPAddress(flow.Source)
+			if srcAddress == "" || err != nil {
+				return errors.New("invalid source address")
+			}
+			destAddress, err := model2.ExtractIPAddress(flow.Destination)
+			if destAddress == "" || err != nil {
+				return errors.New("invalid destination address")
+			}
+
+			// Marshal packet references and prepare port strings
+			packetRefsJSON, err := json.Marshal(flow.PacketRefs)
+			if err != nil {
+				return err
+			}
+
+			sourcePorts := ""
+			if flow.SourcePorts != nil {
+				sourcePorts = flow.SourcePorts.ToString()
+			}
+
+			destinationPorts := ""
+			if flow.DestinationPorts != nil {
+				destinationPorts = flow.DestinationPorts.ToString()
+			}
+
+			minPkt := flow.MinPacketSize
+			maxPkt := flow.MaxPacketSize
+
+			// Insert the new flow
+			result, err := tx.Exec(
+				`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, 
+				min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, 
+				source_device_id, destination_device_id) 
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+				(SELECT id FROM devices WHERE address = ?), 
+				(SELECT id FROM devices WHERE address = ?));`,
+				flow.Source,
+				flow.Destination,
+				flow.Protocol,
+				flow.Packets,
+				flow.Bytes,
+				flow.FirstSeen.Format(time.RFC3339Nano),
+				flow.LastSeen.Format(time.RFC3339Nano),
+				minPkt,
+				maxPkt,
+				string(packetRefsJSON),
+				sourcePorts,
+				destinationPorts,
+				srcAddress,
+				destAddress,
+			)
+			if err != nil {
+				return err
+			}
+
+			lastInsertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			flow.ID = lastInsertID
+		}
+	}
+
+	return tx.Commit()
 }

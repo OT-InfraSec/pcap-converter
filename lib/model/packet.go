@@ -181,11 +181,11 @@ type Flow struct {
 	Bytes               int
 	FirstSeen           time.Time
 	LastSeen            time.Time
-	SourceDeviceID      *int64
-	DestinationDeviceID *int64
+	SourceDeviceID      int64
+	DestinationDeviceID int64
 	PacketRefs          []int64
-	MinPacketSize       *int
-	MaxPacketSize       *int
+	MinPacketSize       int
+	MaxPacketSize       int
 	SourcePorts         *helper.Set
 	DestinationPorts    *helper.Set
 }
@@ -284,13 +284,13 @@ func (f *Flow) Validate() error {
 	if f.Bytes < 0 {
 		return errors.New("bytes count must not be negative")
 	}
-	if f.MinPacketSize != nil && *f.MinPacketSize < 0 {
+	if f.MinPacketSize < 0 {
 		return errors.New("minimum packet size must not be negative")
 	}
-	if f.MaxPacketSize != nil && *f.MaxPacketSize < 0 {
+	if f.MaxPacketSize < 0 {
 		return errors.New("maximum packet size must not be negative")
 	}
-	if f.MinPacketSize != nil && f.MaxPacketSize != nil && *f.MinPacketSize > *f.MaxPacketSize {
+	if f.MinPacketSize > f.MaxPacketSize {
 		return errors.New("minimum packet size must not be greater than maximum packet size")
 	}
 	return nil

@@ -60,13 +60,13 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 				}
 				log.Printf("Using database at %s", dbPath)
 				provider.Repository = repo
-				provider.Parser = parser.NewGopacketParser(pcapFile)
+				provider.Parser = parser.NewGopacketParser(pcapFile, repo)
 				// TODO: Replace with real DNS processor implementation
 				provider.DNSProcessor = &dns.NoopDNSProcessor{}
 			}
 
 			startTime := time.Now()
-			if err := provider.Parser.ParseFile(provider.Repository); err != nil {
+			if err := provider.Parser.ParseFile(); err != nil {
 				return err
 			}
 			if err := provider.DNSProcessor.Process(provider.Repository); err != nil {

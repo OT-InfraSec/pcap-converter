@@ -42,17 +42,111 @@ type GopacketParser struct {
 	deviceCounter int64
 
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
+
+	repo repository.Repository
 }
 
-func NewGopacketParser(pcapFile string) *GopacketParser {
-	return &GopacketParser{
+func NewGopacketParser(pcapFile string, repo repository.Repository) *GopacketParser {
+	parser := &GopacketParser{
 		PcapFile:       pcapFile,
 		devices:        make(map[string]*model2.Device),
 		flows:          make(map[string]*model2.Flow),
 		services:       make(map[string]*model2.Service),
 		dnsQueries:     make(map[string]*DNSQuery),
 		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
+		repo:           repo,
 	}
+
+	// Import existing devices from repository
+	devices, err := repo.GetDevices(nil)
+	if err == nil {
+		for _, device := range devices {
+			deviceKey := device.AddressType + ":" + device.Address
+			parser.devices[deviceKey] = device
+			// Update device counter to be greater than any existing device ID
+			if device.ID >= parser.deviceCounter {
+				parser.deviceCounter = device.ID + 1
+			}
+		}
+	}
+
+	// Import existing flows from repository
+	flows, err := repo.GetFlows(nil)
+	if err == nil {
+		for _, flow := range flows {
+			flowKey := fmt.Sprintf("%s:%s:%s", flow.Source, flow.Destination, flow.Protocol)
+			// If this flow has port information, include it in the key
+			if flow.SourcePorts.Size() > 0 && flow.DestinationPorts.Size() > 0 {
+				srcPorts := flow.SourcePorts.List()
+				dstPorts := flow.DestinationPorts.List()
+				if len(srcPorts) > 0 && len(dstPorts) > 0 {
+					flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", flow.Source, srcPorts[0], flow.Destination, dstPorts[0], flow.Protocol)
+				}
+			}
+			parser.flows[flowKey] = flow
+		}
+	}
+
+	// Import existing services from repository
+	services, err := repo.GetServices(nil)
+	if err == nil {
+		for _, service := range services {
+			serviceKey := fmt.Sprintf("%s:%d:%s", service.IP, service.Port, service.Protocol)
+			parser.services[serviceKey] = service
+		}
+	}
+
+	// Import existing DNS queries from repository
+	dnsQueries, err := repo.GetDNSQueries(nil, nil)
+	if err == nil {
+		for _, query := range dnsQueries {
+			// We need to find the corresponding devices for these DNS queries
+			var queryingDeviceIP, answeringDeviceIP string
+
+			// Find querying device
+			for _, device := range parser.devices {
+				if device.ID == query.QueryingDeviceID {
+					queryingDeviceIP = device.Address
+					break
+				}
+			}
+
+			// Find answering device
+			for _, device := range parser.devices {
+				if device.ID == query.AnsweringDeviceID {
+					answeringDeviceIP = device.Address
+					break
+				}
+			}
+
+			if queryingDeviceIP != "" && answeringDeviceIP != "" {
+				queryKey := fmt.Sprintf("%s:%s:%s:%s", queryingDeviceIP, answeringDeviceIP, query.QueryName, query.QueryType)
+
+				// Extract questions and answers from QueryResult
+				var questions, answers map[string]interface{}
+				if query.QueryResult != nil {
+					if q, ok := query.QueryResult["questions"].(map[string]interface{}); ok {
+						questions = q
+					}
+					if a, ok := query.QueryResult["answers"].(map[string]interface{}); ok {
+						answers = a
+					}
+				}
+
+				parser.dnsQueries[queryKey] = &DNSQuery{
+					QueryingDeviceIP:  queryingDeviceIP,
+					AnsweringDeviceIP: answeringDeviceIP,
+					QueryName:         query.QueryName,
+					QueryType:         query.QueryType,
+					Questions:         questions,
+					Answers:           answers,
+					Timestamp:         query.Timestamp,
+				}
+			}
+		}
+	}
+
+	return parser
 }
 
 // upsertDevice updates or creates a device
@@ -133,8 +227,8 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 			FirstSeen:        timestamp,
 			LastSeen:         timestamp,
 			PacketRefs:       []int64{packetID},
-			MinPacketSize:    &packetSize,
-			MaxPacketSize:    &packetSize,
+			MinPacketSize:    packetSize,
+			MaxPacketSize:    packetSize,
 			SourcePorts:      sourcePortsSet,
 			DestinationPorts: destinationPortsSet,
 		}
@@ -144,11 +238,11 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 		flow.Bytes += packetSize
 		flow.LastSeen = timestamp
 		flow.PacketRefs = append(flow.PacketRefs, packetID)
-		if packetSize < *flow.MinPacketSize {
-			*flow.MinPacketSize = packetSize
+		if packetSize < flow.MinPacketSize {
+			flow.MinPacketSize = packetSize
 		}
-		if packetSize > *flow.MaxPacketSize {
-			*flow.MaxPacketSize = packetSize
+		if packetSize > flow.MaxPacketSize {
+			flow.MaxPacketSize = packetSize
 		}
 		if srcPort != "" && dstPort != "" {
 			flow.SourcePorts.Add(srcPort)
@@ -282,7 +376,7 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 }
 
 // ParseFile processes a PCAP file and extracts network information.
-func (p *GopacketParser) ParseFile(repo repository.Repository) error {
+func (p *GopacketParser) ParseFile() error {
 	handle, err := pcap.OpenOffline(p.PcapFile)
 	if err != nil {
 		return fmt.Errorf("failed to open pcap: %w", err)
@@ -324,8 +418,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			batch = append(batch, packet)
 
 			if len(batch) >= batchSize {
-				if err := repo.AddPackets(batch); err != nil {
-					errChan <- fmt.Errorf("failed to add packet batch: %w", err)
+				if err := p.repo.UpsertPackets(batch); err != nil {
+					errChan <- fmt.Errorf("failed to upsert packet batch: %w", err)
 					return
 				}
 				// Clear the batch but keep the allocated memory
@@ -335,8 +429,8 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 		// Process any remaining packets
 		if len(batch) > 0 {
-			if err := repo.AddPackets(batch); err != nil {
-				errChan <- fmt.Errorf("failed to add final packet batch: %w", err)
+			if err := p.repo.UpsertPackets(batch); err != nil {
+				errChan <- fmt.Errorf("failed to upsert final packet batch: %w", err)
 			}
 		}
 	}()
@@ -423,12 +517,12 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
 			icmp := icmpLayer.(*layers.ICMPv4)
 			flowProto = "icmp"
-			type_code := icmp.TypeCode.String()
+			typeCode := icmp.TypeCode.String()
 			layersMap["icmp"] = map[string]interface{}{
-				"type_code": type_code,
-				"checksum":  icmp.Checksum,
+				"typeCode": typeCode,
+				"checksum": icmp.Checksum,
 			}
-			if strings.Contains(type_code, "DestinationUnreachable") {
+			if strings.Contains(typeCode, "DestinationUnreachable") {
 				// Skip packets that are ICMP Destination Unreachable
 				continue
 			}
@@ -1195,7 +1289,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		deviceCount++
 
 		if deviceCount >= maxBatchSize {
-			if err := repo.AddDevices(deviceBatch); err != nil {
+			if err := p.repo.UpsertDevices(deviceBatch); err != nil {
 				return fmt.Errorf("failed to add device batch: %w", err)
 			}
 			deviceBatch = deviceBatch[:0]
@@ -1205,7 +1299,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 	// Add remaining devices
 	if deviceCount > 0 {
-		if err := repo.AddDevices(deviceBatch); err != nil {
+		if err := p.repo.UpsertDevices(deviceBatch); err != nil {
 			return fmt.Errorf("failed to add devices: %w", err)
 		}
 	}
@@ -1219,7 +1313,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		flowCount++
 
 		if flowCount >= maxBatchSize {
-			if err := repo.AddFlows(flowBatch); err != nil {
+			if err := p.repo.UpsertFlows(flowBatch); err != nil {
 				return fmt.Errorf("failed to add flow batch: %w", err)
 			}
 			flowBatch = flowBatch[:0]
@@ -1229,7 +1323,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 	// Add remaining flows
 	if flowCount > 0 {
-		if err := repo.AddFlows(flowBatch); err != nil {
+		if err := p.repo.UpsertFlows(flowBatch); err != nil {
 			return fmt.Errorf("failed to add flows: %w", err)
 		}
 	}
@@ -1243,7 +1337,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		serviceCount++
 
 		if serviceCount >= maxBatchSize {
-			if err := repo.AddServices(serviceBatch); err != nil {
+			if err := p.repo.UpsertServices(serviceBatch); err != nil {
 				return fmt.Errorf("failed to add service batch: %w", err)
 			}
 			serviceBatch = serviceBatch[:0]
@@ -1253,7 +1347,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 
 	// Add remaining services
 	if serviceCount > 0 {
-		if err := repo.AddServices(serviceBatch); err != nil {
+		if err := p.repo.UpsertServices(serviceBatch); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
 		}
 	}
@@ -1267,7 +1361,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		answeringDeviceKey := "IP:" + dnsQuery.AnsweringDeviceIP
 		answeringDevice := p.devices[answeringDeviceKey]
 		if queryingDevice == nil {
-			err = repo.AddDevice(&model2.Device{
+			err = p.repo.UpsertDevice(&model2.Device{
 				Address:           dnsQuery.QueryingDeviceIP,
 				AddressType:       "IP",
 				FirstSeen:         dnsQuery.Timestamp,
@@ -1280,13 +1374,13 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			if err != nil {
 				return fmt.Errorf("failed to add querying device: %w", err)
 			}
-			queryingDevice, err = repo.GetDevice(dnsQuery.QueryingDeviceIP)
+			queryingDevice, err = p.repo.GetDevice(dnsQuery.QueryingDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve querying device: %w", err)
 			}
 		}
 		if answeringDevice == nil {
-			err = repo.AddDevice(&model2.Device{
+			err = p.repo.UpsertDevice(&model2.Device{
 				Address:           dnsQuery.AnsweringDeviceIP,
 				AddressType:       "IP",
 				FirstSeen:         dnsQuery.Timestamp,
@@ -1299,7 +1393,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 			if err != nil {
 				return fmt.Errorf("failed to add answering device: %w", err)
 			}
-			answeringDevice, err = repo.GetDevice(dnsQuery.AnsweringDeviceIP)
+			answeringDevice, err = p.repo.GetDevice(dnsQuery.AnsweringDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve answering device: %w", err)
 			}
@@ -1317,7 +1411,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 	}
 
 	if len(dnsQueriesToSave) > 0 {
-		err = repo.AddDNSQueries(dnsQueriesToSave)
+		err = p.repo.UpsertDNSQueries(dnsQueriesToSave)
 		if err != nil {
 			return fmt.Errorf("failed to add DNS queries: %w", err)
 		}
@@ -1383,7 +1477,7 @@ func (p *GopacketParser) saveAllDeviceRelations(devices []*model2.Device, repo r
 				DeviceID2: dev2.ID,
 				Comment:   comment,
 			}
-			if err := repo.AddDeviceRelation(relation); err != nil {
+			if err := p.repo.UpsertDeviceRelation(relation); err != nil {
 				return fmt.Errorf("failed to add device relation: %w", err)
 			}
 		}
