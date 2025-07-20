@@ -149,7 +149,7 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	// Validiere das Device bevor es zur Datenbank hinzugefügt wird
 	if err := device.Validate(); err != nil {
-		return err
+		return errors.Join(err, errors.New("invalid device data in function AddDevice"))
 	}
 	_, err := r.db.Exec(
 		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
@@ -1006,7 +1006,7 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
 	// Validate the device
 	if err := device.Validate(); err != nil {
-		return err
+		return errors.Join(err, errors.New("invalid device data in function UpsertDevice"))
 	}
 
 	// Check if device exists by address
@@ -1049,8 +1049,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer checkStmt.Close()
 
 	for _, device := range devices {
-		if err := device.Validate(); err != nil {
-			return err
+		if err = device.Validate(); err != nil {
+			return errors.Join(err, errors.New("invalid device data in for range of function UpsertDevice"))
 		}
 
 		// Check if device exists

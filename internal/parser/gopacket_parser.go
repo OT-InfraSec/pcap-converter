@@ -198,7 +198,13 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 		if dev.IsOnlyDestination && !isDestination {
 			dev.IsOnlyDestination = false
 		}
-		dev.LastSeen = timestamp
+		if timestamp.Before(dev.FirstSeen) {
+			dev.FirstSeen = timestamp
+		}
+		if timestamp.After(dev.LastSeen) {
+			dev.LastSeen = timestamp
+		}
+		p.devices[devKey] = dev
 	}
 	return dev
 }
@@ -236,7 +242,12 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 	} else {
 		flow.Packets++
 		flow.Bytes += packetSize
-		flow.LastSeen = timestamp
+		if timestamp.Before(flow.FirstSeen) {
+			flow.FirstSeen = timestamp
+		}
+		if timestamp.After(flow.LastSeen) {
+			flow.LastSeen = timestamp
+		}
 		flow.PacketRefs = append(flow.PacketRefs, packetID)
 		if packetSize < flow.MinPacketSize {
 			flow.MinPacketSize = packetSize
@@ -275,7 +286,12 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 		}
 		p.services[serviceKey] = service
 	} else {
-		service.LastSeen = timestamp
+		if timestamp.Before(service.FirstSeen) {
+			service.FirstSeen = timestamp
+		}
+		if timestamp.After(service.LastSeen) {
+			service.LastSeen = timestamp
+		}
 	}
 	return service
 }
@@ -1289,7 +1305,7 @@ func (p *GopacketParser) ParseFile() error {
 		deviceCount++
 
 		if deviceCount >= maxBatchSize {
-			if err := p.repo.UpsertDevices(deviceBatch); err != nil {
+			if err = p.repo.UpsertDevices(deviceBatch); err != nil {
 				return fmt.Errorf("failed to add device batch: %w", err)
 			}
 			deviceBatch = deviceBatch[:0]
@@ -1299,7 +1315,7 @@ func (p *GopacketParser) ParseFile() error {
 
 	// Add remaining devices
 	if deviceCount > 0 {
-		if err := p.repo.UpsertDevices(deviceBatch); err != nil {
+		if err = p.repo.UpsertDevices(deviceBatch); err != nil {
 			return fmt.Errorf("failed to add devices: %w", err)
 		}
 	}
@@ -1313,7 +1329,7 @@ func (p *GopacketParser) ParseFile() error {
 		flowCount++
 
 		if flowCount >= maxBatchSize {
-			if err := p.repo.UpsertFlows(flowBatch); err != nil {
+			if err = p.repo.UpsertFlows(flowBatch); err != nil {
 				return fmt.Errorf("failed to add flow batch: %w", err)
 			}
 			flowBatch = flowBatch[:0]
