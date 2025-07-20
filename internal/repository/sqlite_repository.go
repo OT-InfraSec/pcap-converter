@@ -47,7 +47,8 @@ func (r *SQLiteRepository) createTables() error {
 			address_sub_type TEXT,
 			address_scope TEXT,
 			mac_addresses TEXT,
-			additional_data TEXT
+			additional_data TEXT,
+			is_only_destination BOOLEAN
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,9 +150,8 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	if err := device.Validate(); err != nil {
 		return err
 	}
-
 	_, err := r.db.Exec(
-		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		device.Address,
 		device.AddressType,
 		device.FirstSeen.Format(time.RFC3339Nano),
@@ -160,19 +160,20 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.AddressScope,
 		device.MACAddressSet.ToString(),
 		device.AdditionalData,
+		device.IsOnlyDestination,
 	)
 	return err
 }
 
 func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data FROM devices WHERE address = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
 	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData); err != nil {
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination); err != nil {
 		return nil, err
 	}
 
@@ -565,7 +566,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -585,6 +586,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 			device.AddressScope,
 			macs,
 			device.AdditionalData,
+			device.IsOnlyDestination,
 		)
 		if err != nil {
 			return err

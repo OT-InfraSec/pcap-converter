@@ -56,7 +56,7 @@ func NewGopacketParser(pcapFile string) *GopacketParser {
 }
 
 // upsertDevice updates or creates a device
-func (p *GopacketParser) upsertDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string, additionalData string) *model2.Device {
+func (p *GopacketParser) upsertDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string, additionalData string, isDestination bool) *model2.Device {
 	devKey := addressType + ":" + address
 	dev, exists := p.devices[devKey]
 	if !exists {
@@ -65,15 +65,16 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 			macAddressSet.Add(macAddress)
 		}
 		dev = &model2.Device{
-			ID:             p.deviceCounter,
-			Address:        address,
-			AddressType:    addressType,
-			FirstSeen:      timestamp,
-			LastSeen:       timestamp,
-			AddressSubType: addressSubType,
-			AddressScope:   helper2.GetAddressScope(address, addressType),
-			MACAddressSet:  macAddressSet,
-			AdditionalData: additionalData,
+			ID:                p.deviceCounter,
+			Address:           address,
+			AddressType:       addressType,
+			FirstSeen:         timestamp,
+			LastSeen:          timestamp,
+			AddressSubType:    addressSubType,
+			AddressScope:      helper2.GetAddressScope(address, addressType),
+			MACAddressSet:     macAddressSet,
+			AdditionalData:    additionalData,
+			IsOnlyDestination: isDestination,
 		}
 		p.devices[devKey] = dev
 		p.deviceCounter++
@@ -99,6 +100,9 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 			} else {
 				dev.AdditionalData = additionalData
 			}
+		}
+		if dev.IsOnlyDestination && !isDestination {
+			dev.IsOnlyDestination = false
 		}
 		dev.LastSeen = timestamp
 	}
@@ -188,11 +192,11 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 	if queryingDevice == nil {
 		// create new device
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.QueryingDeviceIP)
-		queryingDevice = p.upsertDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "")
+		queryingDevice = p.upsertDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", false)
 	}
 	if answeringDevice == nil {
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.AnsweringDeviceIP)
-		answeringDevice = p.upsertDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "")
+		answeringDevice = p.upsertDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", true)
 	}
 	// Create a unique key for the DNS query
 	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
@@ -525,7 +529,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
 						}
 
 						if httpLayer.IsUpnpReqest() {
@@ -536,7 +540,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
 						}
 
 						if httpLayer.IsUpnpResponse() {
@@ -547,7 +551,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
 						}
 
 						if httpLayer.IsWindowsRequest() {
@@ -558,7 +562,7 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON))
+							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
 						}
 
 						// Update the service for HTTP request
@@ -1128,11 +1132,11 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" {
 			addressSubType := GetAddressSubTypeForIP(srcIP)
-			p.upsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "")
+			p.upsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "", false)
 		}
 		if dstMAC != "" && dstIP != "" {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
-			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "")
+			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
 		}
 
 		// Flow extraction and storage
@@ -1264,13 +1268,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		answeringDevice := p.devices[answeringDeviceKey]
 		if queryingDevice == nil {
 			err = repo.AddDevice(&model2.Device{
-				Address:        dnsQuery.QueryingDeviceIP,
-				AddressType:    "IP",
-				FirstSeen:      dnsQuery.Timestamp,
-				LastSeen:       dnsQuery.Timestamp,
-				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   helper2.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
-				MACAddressSet:  model2.NewMACAddressSet(),
+				Address:           dnsQuery.QueryingDeviceIP,
+				AddressType:       "IP",
+				FirstSeen:         dnsQuery.Timestamp,
+				LastSeen:          dnsQuery.Timestamp,
+				AddressSubType:    "IPv4", // Default to IPv4, can be adjusted
+				AddressScope:      helper2.GetAddressScope(dnsQuery.QueryingDeviceIP, "IP"),
+				MACAddressSet:     model2.NewMACAddressSet(),
+				IsOnlyDestination: false,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to add querying device: %w", err)
@@ -1282,13 +1287,14 @@ func (p *GopacketParser) ParseFile(repo repository.Repository) error {
 		}
 		if answeringDevice == nil {
 			err = repo.AddDevice(&model2.Device{
-				Address:        dnsQuery.AnsweringDeviceIP,
-				AddressType:    "IP",
-				FirstSeen:      dnsQuery.Timestamp,
-				LastSeen:       dnsQuery.Timestamp,
-				AddressSubType: "IPv4", // Default to IPv4, can be adjusted
-				AddressScope:   helper2.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
-				MACAddressSet:  model2.NewMACAddressSet(),
+				Address:           dnsQuery.AnsweringDeviceIP,
+				AddressType:       "IP",
+				FirstSeen:         dnsQuery.Timestamp,
+				LastSeen:          dnsQuery.Timestamp,
+				AddressSubType:    "IPv4", // Default to IPv4, can be adjusted
+				AddressScope:      helper2.GetAddressScope(dnsQuery.AnsweringDeviceIP, "IP"),
+				MACAddressSet:     model2.NewMACAddressSet(),
+				IsOnlyDestination: true,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to add answering device: %w", err)

@@ -149,15 +149,16 @@ type Packet struct {
 
 // Device represents a network device.
 type Device struct {
-	ID             int64
-	Address        string
-	AddressType    string
-	FirstSeen      time.Time
-	LastSeen       time.Time
-	AddressSubType string
-	AddressScope   string
-	MACAddressSet  *MACAddressSet
-	AdditionalData string // JSON string for additional data
+	ID                int64
+	Address           string
+	AddressType       string
+	FirstSeen         time.Time
+	LastSeen          time.Time
+	AddressSubType    string
+	AddressScope      string // IPv4 or IPv6
+	MACAddressSet     *MACAddressSet
+	AdditionalData    string // JSON string for additional data
+	IsOnlyDestination bool
 }
 
 // Service represents a network service.
