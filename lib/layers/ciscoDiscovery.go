@@ -260,8 +260,9 @@ func (c *CiscoDiscoveryInfo) LayerType() gopacket.LayerType {
 }
 
 func decodeCiscoDiscoveryTLVs(data []byte, p gopacket.PacketBuilder) (values []CiscoDiscoveryValue, err error) {
-	for len(data) > 0 {
-		if len(data) < 4 {
+	dataLen := len(data)
+	for dataLen > 0 {
+		if dataLen < 4 {
 			p.SetTruncated()
 			return nil, errors.New("CDP TLV < 4 bytes")
 		}
@@ -423,7 +424,8 @@ func decodeCiscoDiscoveryInfo(data []byte, p gopacket.PacketBuilder) error {
 			}
 			info.PowerRequest.ID = binary.BigEndian.Uint16(val.Value[0:2])
 			info.PowerRequest.MgmtID = binary.BigEndian.Uint16(val.Value[2:4])
-			for n := 4; n < len(val.Value); n += 4 {
+			valueLen := len(val.Value)
+			for n := 4; n < valueLen; n += 4 {
 				info.PowerRequest.Values = append(info.PowerRequest.Values, binary.BigEndian.Uint32(val.Value[n:n+4]))
 			}
 		case CDPTLVPowerAvailable:
@@ -432,7 +434,8 @@ func decodeCiscoDiscoveryInfo(data []byte, p gopacket.PacketBuilder) error {
 			}
 			info.PowerAvailable.ID = binary.BigEndian.Uint16(val.Value[0:2])
 			info.PowerAvailable.MgmtID = binary.BigEndian.Uint16(val.Value[2:4])
-			for n := 4; n < len(val.Value); n += 4 {
+			valueLen := len(val.Value)
+			for n := 4; n < valueLen; n += 4 {
 				info.PowerAvailable.Values = append(info.PowerAvailable.Values, binary.BigEndian.Uint32(val.Value[n:n+4]))
 			}
 			//		case CDPTLVPortUnidirectional

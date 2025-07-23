@@ -156,8 +156,9 @@ func (e *EIGRP) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error {
 	offset := headerLen
 	e.TLVs = []EIGRPTLV{}
 
-	for offset+4 <= len(data) {
-		if offset+4 > len(data) {
+	dataLen := len(data)
+	for offset+4 <= dataLen {
+		if offset+4 > dataLen {
 			break
 		}
 
@@ -288,12 +289,13 @@ func InitLayerEIGRP() {
 func tcpipChecksum(data []byte, initial uint32) uint16 {
 	// Calculate the checksum
 	sum := initial
-	for i := 0; i < len(data)-1; i += 2 {
+	dataLen := len(data)
+	for i := 0; i < dataLen-1; i += 2 {
 		sum += uint32(data[i]) << 8
 		sum += uint32(data[i+1])
 	}
-	if len(data)%2 == 1 {
-		sum += uint32(data[len(data)-1]) << 8
+	if dataLen%2 == 1 {
+		sum += uint32(data[dataLen-1]) << 8
 	}
 	// Take care of any overflow
 	for sum > 0xffff {

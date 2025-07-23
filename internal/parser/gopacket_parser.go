@@ -943,28 +943,29 @@ func (p *GopacketParser) ParseFile() error {
 			if dhcpv4.Operation == layers.DHCPOpReply {
 				serverInfo := make(map[string]interface{})
 				for _, option := range dhcpv4.Options {
+					dataLen := len(option.Data)
 					switch option.Type {
 					case layers.DHCPOptServerID:
 						// DHCP server IP
-						if len(option.Data) == 4 {
+						if dataLen == 4 {
 							serverInfo["server_ip"] = net.IP(option.Data).String()
 						}
 					case layers.DHCPOptSubnetMask:
 						// Subnet mask
-						if len(option.Data) == 4 {
+						if dataLen == 4 {
 							serverInfo["subnet_mask"] = net.IP(option.Data).String()
 						}
 					case layers.DHCPOptRouter:
 						// Routers (can be multiple)
 						var routers []string
-						for i := 0; i+3 < len(option.Data); i += 4 {
+						for i := 0; i+3 < dataLen; i += 4 {
 							routers = append(routers, net.IP(option.Data[i:i+4]).String())
 						}
 						serverInfo["routers"] = routers
 					case layers.DHCPOptDNS:
 						// DNS servers (can be multiple)
 						var dnsServers []string
-						for i := 0; i+3 < len(option.Data); i += 4 {
+						for i := 0; i+3 < dataLen; i += 4 {
 							dnsServers = append(dnsServers, net.IP(option.Data[i:i+4]).String())
 						}
 						serverInfo["dns_servers"] = dnsServers

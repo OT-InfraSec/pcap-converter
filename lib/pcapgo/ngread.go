@@ -89,7 +89,8 @@ func NewNgReader(r io.Reader, options NgReaderOptions) (*NgReader, error) {
 // Additionally this removes the bounds check compared to io.ReadFull due to the use of uint
 func (r *NgReader) readBytes(buffer []byte) error {
 	n := uint(0)
-	for n < uint(len(buffer)) {
+	bufferLen := uint(len(buffer))
+	for n < bufferLen {
 		nn, err := r.r.Read(buffer[n:])
 		n += uint(nn)
 		if err != nil {

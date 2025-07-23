@@ -821,8 +821,9 @@ func (c *LinkLayerDiscovery) SerializeTo(b gopacket.SerializeBuffer, opts gopack
 func decodeLinkLayerDiscovery(data []byte, p gopacket.PacketBuilder) error {
 	var vals []LinkLayerDiscoveryValue
 	vData := data[0:]
-	for len(vData) > 0 {
-		if len(vData) < 2 {
+	vDataLen := len(vData)
+	for vDataLen > 0 {
+		if vDataLen < 2 {
 			p.SetTruncated()
 			return errors.New("LLDP vdata < 2 bytes")
 		}
@@ -830,7 +831,7 @@ func decodeLinkLayerDiscovery(data []byte, p gopacket.PacketBuilder) error {
 		t := LLDPTLVType(vData[0] >> 1)
 		val := LinkLayerDiscoveryValue{Type: t, Length: uint16(nbit)<<8 + uint16(vData[1])}
 		if val.Length > 0 {
-			if len(vData) < int(val.Length+2) {
+			if vDataLen < int(val.Length+2) {
 				p.SetTruncated()
 				return fmt.Errorf("LLDP VData < %d bytes", val.Length+2)
 			}
@@ -840,10 +841,11 @@ func decodeLinkLayerDiscovery(data []byte, p gopacket.PacketBuilder) error {
 		if t == LLDPTLVEnd {
 			break
 		}
-		if len(vData) < int(2+val.Length) {
+		if vDataLen < int(2+val.Length) {
 			return errors.New("Malformed LinkLayerDiscovery Header")
 		}
 		vData = vData[2+val.Length:]
+		vDataLen = len(vData)
 	}
 	if len(vals) < 4 {
 		return errors.New("Missing mandatory LinkLayerDiscovery TLV")

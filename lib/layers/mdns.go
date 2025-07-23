@@ -293,7 +293,8 @@ func (m *MDNS) parseName(data []byte, offset int) ([]byte, int, error) {
 	jumped := false
 	jumpCount := 0
 
-	for offset < len(data) {
+	dataLen := len(data)
+	for offset < dataLen {
 		length := int(data[offset])
 
 		// Check for compression pointer
@@ -301,7 +302,7 @@ func (m *MDNS) parseName(data []byte, offset int) ([]byte, int, error) {
 			if !jumped {
 				originalOffset = offset + 2
 			}
-			if len(data) < offset+2 {
+			if dataLen < offset+2 {
 				return nil, offset, errors.New("invalid compression pointer")
 			}
 			offset = int(binary.BigEndian.Uint16(data[offset:offset+2]) & 0x3FFF)
@@ -319,7 +320,7 @@ func (m *MDNS) parseName(data []byte, offset int) ([]byte, int, error) {
 			break
 		}
 
-		if len(data) < offset+length {
+		if dataLen < offset+length {
 			return nil, offset, errors.New("name extends beyond packet")
 		}
 
@@ -341,11 +342,12 @@ func (m *MDNS) parseTXT(data []byte) [][]byte {
 	var txt [][]byte
 	offset := 0
 
-	for offset < len(data) {
+	dataLen := len(data)
+	for offset < dataLen {
 		length := int(data[offset])
 		offset++
 
-		if offset+length > len(data) {
+		if offset+length > dataLen {
 			break
 		}
 
