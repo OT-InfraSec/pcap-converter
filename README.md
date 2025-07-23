@@ -17,6 +17,11 @@ A high-performance, testable, and extensible tool for importing PCAP files into 
 go build -o pcap-importer ./cmd/importer
 ```
 
+### Build for production
+```
+go build -ldflags="-s -w" -o pcap-importer ./cmd/importer
+```
+
 ### Run Import
 ```
 ./pcap-importer import <pcap-file> [--db-path <sqlite-file>] [--batch-size <n>] [--clear]
