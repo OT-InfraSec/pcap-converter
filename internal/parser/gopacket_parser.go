@@ -274,7 +274,7 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 
 // updateService updates or creates a service
 func (p *GopacketParser) updateService(ip string, port int, protocol string, timestamp time.Time) *model2.Service {
-	serviceKey := fmt.Sprintf("%s:%d:%s", ip, port, protocol)
+	serviceKey := p.generateServiceKey(ip, port, protocol)
 	service, exists := p.services[serviceKey]
 	if !exists {
 		service = &model2.Service{
@@ -294,6 +294,10 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 		}
 	}
 	return service
+}
+
+func (p *GopacketParser) generateServiceKey(ip string, port int, protocol string) string {
+	return fmt.Sprintf("%s:%d:%s", ip, port, protocol)
 }
 
 func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
@@ -678,7 +682,7 @@ func (p *GopacketParser) ParseFile() error {
 						// Update the service for HTTP request
 						timestamp := packet.Metadata().Timestamp
 						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
-					} else {
+					} else { // IsResponse
 						var request *liblayers.HTTP
 						var index int
 						for _, httpL := range p.httpRingBuffer.GetAllLIFO() {
@@ -691,14 +695,25 @@ func (p *GopacketParser) ParseFile() error {
 						}
 						//fmt.Printf("found at index %d\n", index) TODO: refactor to log debug output
 
-						httpData["status_code"] = httpLayer.StatusCode
-						httpData["status_msg"] = httpLayer.StatusMsg
-						httpData["is_proxy_discovery_resp"] = httpLayer.IsProxyDiscoveryResponse(request)
+						if httpLayer.StatusCode >= 200 && httpLayer.StatusCode < 300 {
+							httpData["status_code"] = httpLayer.StatusCode
+							httpData["status_msg"] = httpLayer.StatusMsg
+							httpData["is_proxy_discovery_resp"] = httpLayer.IsProxyDiscoveryResponse(request)
 
-						timestamp := packet.Metadata().Timestamp
-						if srcPort != "" /*&& (srcPortNum == 80 || srcPortNum == 443)*/ {
+							timestamp := packet.Metadata().Timestamp
+							if srcPort != "" /*&& (srcPortNum == 80 || srcPortNum == 443)*/ {
+								if port, err := strconv.Atoi(srcPort); err == nil {
+									p.updateService(srcIP, port, "http", timestamp)
+								}
+							}
+						} else { // no valid HTTP response
+							// check if request was the first HTTP request to this server
 							if port, err := strconv.Atoi(srcPort); err == nil {
-								p.updateService(srcIP, port, "http", timestamp)
+								service := p.services[p.generateServiceKey(srcIP, port, "http")]
+								if service != nil && service.FirstSeen == service.LastSeen {
+									// This means this is the first HTTP request to this server and we delete it
+									p.services[p.generateServiceKey(srcIP, port, "http")] = nil
+								}
 							}
 						}
 					}
