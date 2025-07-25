@@ -59,5 +59,10 @@ go build -ldflags="-s -w" -o pcap-importer ./cmd/importer
 - [ ] More integration and end-to-end tests
 - [ ] Improved documentation and developer guides
 
+## Future Analyses
+
+- [ ] Get Proxy Authentication credentials from HTTP requests (SELECT layers FROM packets WHERE layers like '%http%"method":"CONNECT%')
+- [ ] Inspect number of hops distance between source and destination devices
+
 ## License
 MIT 
