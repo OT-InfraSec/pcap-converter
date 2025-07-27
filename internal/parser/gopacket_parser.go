@@ -3,7 +3,6 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"net"
@@ -224,8 +223,8 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
 	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
 
-	sourcePortsSet := helper.NewSet()
-	destinationPortsSet := helper.NewSet()
+	sourcePortsSet := model2.NewSet()
+	destinationPortsSet := model2.NewSet()
 
 	if srcPort != "" && dstPort != "" {
 		flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", src, srcPort, dst, dstPort, protocol)
@@ -273,10 +272,10 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 			// If ports are not specified, we still want to keep the flow
 			// but without port information
 			if flow.SourcePorts == nil {
-				flow.SourcePorts = helper.NewSet()
+				flow.SourcePorts = model2.NewSet()
 			}
 			if flow.DestinationPorts == nil {
-				flow.DestinationPorts = helper.NewSet()
+				flow.DestinationPorts = model2.NewSet()
 			}
 		}
 	}
@@ -1626,7 +1625,7 @@ func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
 
 	// Associate DNS name with the device
 	dnsNameMap, ok := additionalDataMap["dnsNames"]
-	dnsNameSet := helper.NewSet()
+	dnsNameSet := model2.NewSet()
 	if !ok {
 		dnsNameSet.Add(dnsName)
 	} else {

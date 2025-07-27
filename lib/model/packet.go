@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	"net"
 	"regexp"
 	"strconv"
@@ -186,8 +185,8 @@ type Flow struct {
 	PacketRefs          []int64
 	MinPacketSize       int
 	MaxPacketSize       int
-	SourcePorts         *helper.Set
-	DestinationPorts    *helper.Set
+	SourcePorts         *Set
+	DestinationPorts    *Set
 }
 
 // DeviceRelation represents a relationship between two devices.

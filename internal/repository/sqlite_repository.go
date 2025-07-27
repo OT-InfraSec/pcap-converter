@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/mattn/go-sqlite3"
 	"log"
@@ -333,13 +332,13 @@ func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.F
 			return nil, err
 		}
 
-		flow.SourcePorts = helper.NewSet()
+		flow.SourcePorts = model2.NewSet()
 		for _, port := range strings.Split(sourcePortsStr, ",") {
 			if port != "" {
 				flow.SourcePorts.Add(port)
 			}
 		}
-		flow.DestinationPorts = helper.NewSet()
+		flow.DestinationPorts = model2.NewSet()
 		for _, port := range strings.Split(destinationPortsStr, ",") {
 			if port != "" {
 				flow.DestinationPorts.Add(port)
@@ -1570,8 +1569,8 @@ func (r *SQLiteRepository) AllFlows() ([]*model2.Flow, error) {
 		}
 
 		// Parse ports
-		flow.SourcePorts = helper.NewSet()
-		flow.DestinationPorts = helper.NewSet()
+		flow.SourcePorts = model2.NewSet()
+		flow.DestinationPorts = model2.NewSet()
 
 		if sourcePortsStr != "" {
 			for _, port := range strings.Split(sourcePortsStr, ",") {

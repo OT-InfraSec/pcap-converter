@@ -1,17 +1,16 @@
 package model
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/internal/helper"
 	"strings"
 )
 
 type MACAddressSet struct {
-	set *helper.Set
+	set *Set
 }
 
 func NewMACAddressSet() *MACAddressSet {
 	return &MACAddressSet{
-		set: helper.NewSet(),
+		set: NewSet(),
 	}
 }
 
@@ -23,7 +22,7 @@ func (m *MACAddressSet) AddMACAddressBatch(mac []string) {
 
 func (m *MACAddressSet) Add(value string) {
 	if m.set == nil {
-		m.set = helper.NewSet()
+		m.set = NewSet()
 	}
 	m.set.Add(value)
 }
@@ -63,7 +62,7 @@ func (m *MACAddressSet) List() []string {
 	return list
 }
 
-func (m *MACAddressSet) Union(other *helper.Set) *helper.Set {
+func (m *MACAddressSet) Union(other *Set) *Set {
 	if m.set == nil {
 		return other // If this set is nil, return the other set
 	}
@@ -73,16 +72,16 @@ func (m *MACAddressSet) Union(other *helper.Set) *helper.Set {
 	return m.set.Union(other)
 }
 
-func (m *MACAddressSet) Intersection(other *helper.Set) *helper.Set {
+func (m *MACAddressSet) Intersection(other *Set) *Set {
 	if m.set == nil || other == nil {
-		return helper.NewSet() // If either set is nil, return an empty set
+		return NewSet() // If either set is nil, return an empty set
 	}
 	return m.set.Intersection(other)
 }
 
-func (m *MACAddressSet) Difference(other *helper.Set) *helper.Set {
+func (m *MACAddressSet) Difference(other *Set) *Set {
 	if m.set == nil {
-		return helper.NewSet() // If this set is nil, return an empty set
+		return NewSet() // If this set is nil, return an empty set
 	}
 	if other == nil {
 		return m.set // If the other set is nil, return this set
@@ -97,14 +96,14 @@ func (m *MACAddressSet) ToString() string {
 	return strings.Join(m.List(), ",")
 }
 
-func (m *MACAddressSet) ToSet() *helper.Set {
+func (m *MACAddressSet) ToSet() *Set {
 	if m.set == nil {
-		return helper.NewSet() // If the set is nil, return an empty set
+		return NewSet() // If the set is nil, return an empty set
 	}
 	return m.set
 }
 
-func FromSet(set *helper.Set) *MACAddressSet {
+func FromSet(set *Set) *MACAddressSet {
 	if set == nil {
 		return NewMACAddressSet() // Return a new empty MACAddressSet if the input set is nil
 	}
