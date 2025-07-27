@@ -1525,6 +1525,24 @@ func (p *GopacketParser) ParseFile() error {
 	for _, ssdpQuery := range p.ssdpQueries {
 		queryingDeviceKey := "IP:" + ssdpQuery.QueryingDeviceIP
 		queryingDevice := p.devices[queryingDeviceKey]
+
+		var additionalDataJSON []byte
+		additionalDataMap := make(map[string]string)
+		if strings.Contains(ssdpQuery.UserAgent, "Windows") {
+			additionalDataMap["is_windows_host"] = "true"
+			additionalDataJSON, err = json.Marshal(additionalDataMap)
+			if err != nil {
+				return fmt.Errorf("failed to marshal additional data: %w", err)
+			}
+		}
+		if strings.Contains(ssdpQuery.UserAgent, "Linux") {
+			additionalDataMap["is_linux_host"] = "true"
+			additionalDataJSON, err = json.Marshal(additionalDataMap)
+			if err != nil {
+				return fmt.Errorf("failed to marshal additional data: %w", err)
+			}
+		}
+
 		if queryingDevice == nil {
 			err = p.repo.UpsertDevice(&model2.Device{
 				Address:           ssdpQuery.QueryingDeviceIP,
@@ -1535,6 +1553,7 @@ func (p *GopacketParser) ParseFile() error {
 				AddressScope:      helper2.GetAddressScope(ssdpQuery.QueryingDeviceIP, "IP"),
 				MACAddressSet:     model2.NewMACAddressSet(),
 				IsOnlyDestination: false,
+				AdditionalData:    string(additionalDataJSON),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to add querying device for SSDP query: %w", err)
@@ -1542,6 +1561,31 @@ func (p *GopacketParser) ParseFile() error {
 			queryingDevice, err = p.repo.GetDevice(ssdpQuery.QueryingDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve querying device for SSDP query: %w", err)
+			}
+		} else {
+			// Update existing device with additional data if needed
+			if len(additionalDataMap) > 0 {
+				if existingData := queryingDevice.AdditionalData; existingData != "" {
+					var existingDataMap map[string]interface{}
+					err = json.Unmarshal([]byte(existingData), &existingDataMap)
+					if err != nil {
+						return fmt.Errorf("failed to unmarshal existing additional data: %w", err)
+					}
+					for key, value := range additionalDataMap {
+						existingDataMap[key] = value
+					}
+					additionalDataJSON, err = json.Marshal(existingDataMap)
+					if err != nil {
+						return fmt.Errorf("failed to marshal updated additional data: %w", err)
+					}
+					queryingDevice.AdditionalData = string(additionalDataJSON)
+				} else {
+					queryingDevice.AdditionalData = string(additionalDataJSON)
+				}
+				err = p.repo.UpsertDevice(queryingDevice)
+				if err != nil {
+					return fmt.Errorf("failed to update querying device for SSDP query: %w", err)
+				}
 			}
 		}
 		ssdpRecord := &model2.SSDPQuery{
