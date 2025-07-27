@@ -112,6 +112,14 @@ func (r *SQLiteRepository) createTables() error {
 			FOREIGN KEY (querying_device_id) REFERENCES devices (id),
 			FOREIGN KEY (answering_device_id) REFERENCES devices (id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS ssdp_queries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			querying_device_id INTEGER NOT NULL,
+			query_type VARCHAR(20) NOT NULL,
+			st TEXT,
+			user_agent TEXT,
+			UNIQUE (querying_device_id, query_type)
+        );`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
@@ -1912,5 +1920,190 @@ func (r *SQLiteRepository) UpsertFlows(flows []*model2.Flow) error {
 		}
 	}
 
+	return tx.Commit()
+}
+
+func (r *SQLiteRepository) AddSSDPQuery(query *model2.SSDPQuery) error {
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	// Insert the SSDP query
+	result, err := r.db.Exec(
+		`INSERT INTO ssdp_queries (querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?);`,
+		query.QueryingDeviceID,
+		query.QueryType,
+		query.ST,
+		query.UserAgent,
+	)
+	if err != nil {
+		return err
+	}
+
+	lastInsertID, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	query.ID = lastInsertID
+
+	return nil
+}
+
+func (r *SQLiteRepository) UpdateSSDPQuery(query *model2.SSDPQuery) error {
+	if query.ID == 0 {
+		return errors.New("SSDP query ID is required for update")
+	}
+
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	// Query exists, update it
+	_, err := r.db.Exec(
+		`UPDATE ssdp_queries SET st = ?, user_agent = ? WHERE id = ?;`,
+		query.ST,
+		query.UserAgent,
+		query.ID)
+
+	return err
+}
+
+func (r *SQLiteRepository) UpsertSSDPQuery(query *model2.SSDPQuery) error {
+	if err := query.Validate(); err != nil {
+		return err
+	}
+
+	if query.ID > 0 {
+		var exists bool
+		err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM ssdp_queries WHERE id = ?)", query.ID).Scan(&exists)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			return r.UpdateSSDPQuery(query)
+		}
+	}
+
+	// Check if query exists by device ID and search target
+	var existingID int64
+	err := r.db.QueryRow(
+		`SELECT id FROM ssdp_queries WHERE querying_device_id = ? AND query_type = ?`,
+		query.QueryingDeviceID, query.QueryType,
+	).Scan(&existingID)
+
+	if err == nil {
+		query.ID = existingID
+		return r.UpdateSSDPQuery(query)
+	} else if errors.Is(err, sql.ErrNoRows) {
+		// Flow doesn't exist, insert it
+		return r.AddSSDPQuery(query)
+	}
+
+	// Other error
+	return err
+}
+
+// UpsertSSDPQueries inserts multiple SSDP queries in a single transaction, updating existing ones.
+func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Prepare insert statement
+	insertStmt, err := tx.Prepare(`INSERT INTO ssdp_queries (querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?);`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	// Prepare update statement
+	updateStmt, err := tx.Prepare(`UPDATE ssdp_queries SET st = ?, user_agent = ? WHERE id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer updateStmt.Close()
+
+	// Prepare check statement for ID
+	checkByIDStmt, err := tx.Prepare("SELECT EXISTS(SELECT 1 FROM ssdp_queries WHERE id = ?)")
+	if err != nil {
+		return err
+	}
+	defer checkByIDStmt.Close()
+
+	// Prepare check statement for unique combination
+	checkByUniqueStmt, err := tx.Prepare(`SELECT id FROM ssdp_queries WHERE querying_device_id = ? AND query_type = ?`)
+	if err != nil {
+		return err
+	}
+	defer checkByUniqueStmt.Close()
+
+	for _, query := range queries {
+		if err := query.Validate(); err != nil {
+			continue // Skip invalid queries
+		}
+
+		// If query has an ID, check if it exists
+		var exists bool = false
+		var existingID int64 = 0
+
+		if query.ID > 0 {
+			err = checkByIDStmt.QueryRow(query.ID).Scan(&exists)
+			if err != nil {
+				return err
+			}
+
+			if exists {
+				existingID = query.ID
+			}
+		}
+
+		if !exists {
+			err = checkByUniqueStmt.QueryRow(query.QueryingDeviceID, query.QueryType).Scan(&existingID)
+
+			if err == nil {
+				exists = true
+			} else if errors.Is(err, sql.ErrNoRows) {
+				exists = false
+			} else {
+				return err
+			}
+		}
+
+		if exists {
+			query.ID = existingID
+			// Update existing query
+			_, err = updateStmt.Exec(
+				query.ST,
+				query.UserAgent,
+				query.ID,
+			)
+			if err != nil {
+				return err
+			}
+		} else { // Insert new query
+			result, err := insertStmt.Exec(
+				query.QueryingDeviceID,
+				query.QueryType,
+				query.ST,
+				query.UserAgent,
+			)
+			if err != nil {
+				// Check if it's a constraint violation (entry already exists)
+				if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
+					continue // Skip if already exists due to unique constraint
+				}
+				return err
+			}
+
+			lastInsertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			query.ID = lastInsertID
+		}
+	}
 	return tx.Commit()
 }

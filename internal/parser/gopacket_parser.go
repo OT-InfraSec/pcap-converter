@@ -19,6 +19,14 @@ import (
 	"github.com/google/gopacket/pcap"
 )
 
+type SSDPQuery struct {
+	QueryingDeviceIP string
+	QueryType        string
+	ST               string
+	UserAgent        string
+	Timestamp        time.Time
+}
+
 type DNSQuery struct {
 	QueryingDeviceIP  string
 	AnsweringDeviceIP string
@@ -37,6 +45,8 @@ type GopacketParser struct {
 	flows map[string]*model2.Flow
 	// Track services
 	services map[string]*model2.Service
+	// SSDP queries
+	ssdpQueries map[string]*SSDPQuery
 	// DNS queries
 	dnsQueries    map[string]*DNSQuery
 	deviceCounter int64
@@ -53,6 +63,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository) *GopacketPar
 		flows:          make(map[string]*model2.Flow),
 		services:       make(map[string]*model2.Service),
 		dnsQueries:     make(map[string]*DNSQuery),
+		ssdpQueries:    make(map[string]*SSDPQuery),
 		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
 		repo:           repo,
 	}
@@ -272,6 +283,42 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 	return flow
 }
 
+func (p *GopacketParser) updateSSDPQuery(ssdpQuery SSDPQuery, timestamp time.Time) {
+	queryingDevice := p.devices["IP:"+ssdpQuery.QueryingDeviceIP]
+	if queryingDevice == nil {
+		addressSubType := GetAddressSubTypeForIP(ssdpQuery.QueryingDeviceIP)
+		queryingDevice = p.upsertDevice(ssdpQuery.QueryingDeviceIP, "IP", timestamp, addressSubType, "", "", false)
+	}
+
+	queryKey := fmt.Sprintf("%s:%s", queryingDevice.Address, ssdpQuery.QueryType)
+	if existingQuery, exists := p.ssdpQueries[queryKey]; exists {
+		// Update existing query
+		if ssdpQuery.UserAgent != "" {
+			if existingQuery.UserAgent == "" {
+				existingQuery.UserAgent = ssdpQuery.UserAgent
+			} else {
+				// If the user agent already exists, we can append or merge as needed
+				if !strings.Contains(existingQuery.UserAgent, ssdpQuery.UserAgent) {
+					existingQuery.UserAgent += ", " + ssdpQuery.UserAgent
+				}
+			}
+		}
+		if ssdpQuery.ST != "" {
+			if existingQuery.ST == "" {
+				existingQuery.ST = ssdpQuery.ST
+			} else {
+				// If the ST already exists, we can append or merge as needed
+				if !strings.Contains(existingQuery.ST, ssdpQuery.ST) {
+					existingQuery.ST += ", " + ssdpQuery.ST
+				}
+			}
+		}
+	} else {
+		// Add new query
+		p.ssdpQueries[queryKey] = &ssdpQuery
+	}
+}
+
 // updateService updates or creates a service
 func (p *GopacketParser) updateService(ip string, port int, protocol string, timestamp time.Time) *model2.Service {
 	serviceKey := p.generateServiceKey(ip, port, protocol)
@@ -461,10 +508,12 @@ func (p *GopacketParser) ParseFile() error {
 		protocols := make([]string, 0, 5)             // Assume average 5 protocols
 
 		var (
-			srcMAC, dstMAC   string
-			srcIP, dstIP     string
-			srcPort, dstPort string
-			flowProto        string
+			srcMAC, dstMAC         string
+			srcIP, dstIP           string
+			srcPort, dstPort       string
+			srcPortNum, dstPortNum uint16
+			flowProto              string
+			isHTTPResponse         bool
 		)
 
 		// Ethernet
@@ -564,8 +613,8 @@ func (p *GopacketParser) ParseFile() error {
 		// TCP
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			tcp := tcpLayer.(*layers.TCP)
-			srcPortNum := uint16(tcp.SrcPort)
-			dstPortNum := uint16(tcp.DstPort)
+			srcPortNum = uint16(tcp.SrcPort)
+			dstPortNum = uint16(tcp.DstPort)
 
 			// Use pre-allocated buffer for string conversion instead of fmt.Sprintf
 			sb.Reset()
@@ -616,6 +665,7 @@ func (p *GopacketParser) ParseFile() error {
 					}
 
 					if httpLayer.IsRequest {
+						isHTTPResponse = true
 						httpData["method"] = string(httpLayer.Method)
 						httpData["request_uri"] = httpLayer.RequestURI
 						httpData["query_params"] = httpLayer.QueryParams
@@ -738,6 +788,7 @@ func (p *GopacketParser) ParseFile() error {
 					if err = tls.DecodeFromBytes(tcp.Payload, nil); err == nil {
 						for _, handshake := range tls.Handshake {
 							if handshake.Type == liblayers.TLSHandshakeTypeClientHello && handshake.ClientHello != nil {
+								isHTTPResponse = true
 								servernames := ""
 								alpnProtocols := ""
 								if handshake.ClientHello.SNI != nil && handshake.ClientHello.SNI.ServerNames != nil {
@@ -781,8 +832,8 @@ func (p *GopacketParser) ParseFile() error {
 		// UDP
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			udp := udpLayer.(*layers.UDP)
-			srcPortNum := uint16(udp.SrcPort)
-			dstPortNum := uint16(udp.DstPort)
+			srcPortNum = uint16(udp.SrcPort)
+			dstPortNum = uint16(udp.DstPort)
 
 			// Use pre-allocated buffer for string conversion
 			sb.Reset()
@@ -1072,7 +1123,25 @@ func (p *GopacketParser) ParseFile() error {
 
 			// Update service for SSDP (typically port 1900)
 			timestamp := packet.Metadata().Timestamp
-			p.updateService(srcIP, 1900, "ssdp", timestamp)
+			var ssdpQuery SSDPQuery
+			if ssdp.IsResponse {
+				ssdpQuery = SSDPQuery{
+					QueryingDeviceIP: srcIP,
+					QueryType:        ssdp.Method,
+					ST:               ssdp.Headers["NT"],
+					UserAgent:        ssdp.Headers["Server"],
+					Timestamp:        timestamp,
+				}
+			} else {
+				ssdpQuery = SSDPQuery{
+					QueryingDeviceIP: srcIP,
+					QueryType:        ssdp.Method,
+					ST:               ssdp.Headers["ST"],
+					UserAgent:        ssdp.Headers["USER-AGENT"],
+					Timestamp:        timestamp,
+				}
+			}
+			p.updateSSDPQuery(ssdpQuery, timestamp)
 		}
 
 		// MDNS
@@ -1293,7 +1362,9 @@ func (p *GopacketParser) ParseFile() error {
 			destination = dstIP
 			//}
 
-			p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
+			if !isHTTPResponse {
+				p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
+			}
 		}
 
 		packetID++
@@ -1446,6 +1517,46 @@ func (p *GopacketParser) ParseFile() error {
 		err = p.repo.UpsertDNSQueries(dnsQueriesToSave)
 		if err != nil {
 			return fmt.Errorf("failed to add DNS queries: %w", err)
+		}
+	}
+
+	// Save SSDP queries
+	ssdpQueriesToSave := make([]*model2.SSDPQuery, 0, len(p.ssdpQueries))
+	for _, ssdpQuery := range p.ssdpQueries {
+		queryingDeviceKey := "IP:" + ssdpQuery.QueryingDeviceIP
+		queryingDevice := p.devices[queryingDeviceKey]
+		if queryingDevice == nil {
+			err = p.repo.UpsertDevice(&model2.Device{
+				Address:           ssdpQuery.QueryingDeviceIP,
+				AddressType:       "IP",
+				FirstSeen:         ssdpQuery.Timestamp,
+				LastSeen:          ssdpQuery.Timestamp,
+				AddressSubType:    "IPv4", // Default to IPv4, can be adjusted
+				AddressScope:      helper2.GetAddressScope(ssdpQuery.QueryingDeviceIP, "IP"),
+				MACAddressSet:     model2.NewMACAddressSet(),
+				IsOnlyDestination: false,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to add querying device for SSDP query: %w", err)
+			}
+			queryingDevice, err = p.repo.GetDevice(ssdpQuery.QueryingDeviceIP)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve querying device for SSDP query: %w", err)
+			}
+		}
+		ssdpRecord := &model2.SSDPQuery{
+			QueryingDeviceID: queryingDevice.ID,
+			QueryType:        ssdpQuery.QueryType,
+			ST:               ssdpQuery.ST,
+			UserAgent:        ssdpQuery.UserAgent,
+			Timestamp:        ssdpQuery.Timestamp,
+		}
+		ssdpQueriesToSave = append(ssdpQueriesToSave, ssdpRecord)
+	}
+	if len(ssdpQueriesToSave) > 0 {
+		err = p.repo.UpsertSSDPQueries(ssdpQueriesToSave)
+		if err != nil {
+			return fmt.Errorf("failed to add SSDP queries: %w", err)
 		}
 	}
 

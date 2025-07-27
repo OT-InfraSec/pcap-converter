@@ -61,6 +61,16 @@ type Repository interface {
 	AddDNSQueries(queries []*model.DNSQuery) error
 	UpsertDNSQueries(queries []*model.DNSQuery) error
 
+	// SSDP operations
+	AddSSDPQuery(ssdp *model.SSDPQuery) error
+	//GetSSDPQueries(filters map[string]interface{}) ([]*model.SSDPQuery, error)
+	// New SSDP operations
+	UpdateSSDPQuery(ssdp *model.SSDPQuery) error
+	UpsertSSDPQuery(ssdp *model.SSDPQuery) error
+	// Batch SSDP operations for performance
+	//AddSSDPQueries(ssdps []*model.SSDPQuery) error
+	UpsertSSDPQueries(ssdps []*model.SSDPQuery) error
+
 	// Transaction operations
 	Commit() error
 	Close() error

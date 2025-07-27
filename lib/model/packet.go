@@ -209,6 +209,15 @@ type DNSQuery struct {
 	Timestamp         time.Time
 }
 
+type SSDPQuery struct {
+	ID               int64
+	QueryingDeviceID int64
+	QueryType        string
+	ST               string
+	UserAgent        string
+	Timestamp        time.Time
+}
+
 func (d *Device) Validate() error {
 	if d.Address == "" {
 		return errors.New("address must not be empty")
@@ -321,6 +330,22 @@ func (dq *DNSQuery) Validate() error {
 	}
 	if dq.Timestamp.IsZero() {
 		return errors.New("timestamp must not be zero")
+	}
+	return nil
+}
+
+func (ssdp *SSDPQuery) Validate() error {
+	if ssdp.QueryingDeviceID == 0 {
+		return errors.New("querying device ID must not be zero")
+	}
+	if ssdp.QueryType == "" {
+		return errors.New("query type must not be empty")
+	}
+	if ssdp.ST == "" {
+		return errors.New("ST (search target) must not be empty")
+	}
+	if ssdp.UserAgent == "" {
+		return errors.New("user agent must not be empty")
 	}
 	return nil
 }
