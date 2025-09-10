@@ -11,6 +11,121 @@ type mockRepo struct {
 	packets    []*model.Packet
 }
 
+// AddSSDPQuery implements repository.Repository.
+func (m *mockRepo) AddSSDPQuery(ssdp *model.SSDPQuery) error {
+	panic("unimplemented")
+}
+
+// GetDevices implements repository.Repository.
+func (m *mockRepo) GetDevices(filters map[string]interface{}) ([]*model.Device, error) {
+	panic("unimplemented")
+}
+
+// GetFlows implements repository.Repository.
+func (m *mockRepo) GetFlows(filters map[string]interface{}) ([]*model.Flow, error) {
+	panic("unimplemented")
+}
+
+// UpdateDNSQuery implements repository.Repository.
+func (m *mockRepo) UpdateDNSQuery(query *model.DNSQuery) error {
+	panic("unimplemented")
+}
+
+// UpdateDevice implements repository.Repository.
+func (m *mockRepo) UpdateDevice(device *model.Device) error {
+	panic("unimplemented")
+}
+
+// UpdateDeviceRelation implements repository.Repository.
+func (m *mockRepo) UpdateDeviceRelation(relation *model.DeviceRelation) error {
+	panic("unimplemented")
+}
+
+// UpdateFlow implements repository.Repository.
+func (m *mockRepo) UpdateFlow(flow *model.Flow) error {
+	panic("unimplemented")
+}
+
+// UpdatePacket implements repository.Repository.
+func (m *mockRepo) UpdatePacket(packet *model.Packet) error {
+	panic("unimplemented")
+}
+
+// UpdateSSDPQuery implements repository.Repository.
+func (m *mockRepo) UpdateSSDPQuery(ssdp *model.SSDPQuery) error {
+	panic("unimplemented")
+}
+
+// UpdateService implements repository.Repository.
+func (m *mockRepo) UpdateService(service *model.Service) error {
+	panic("unimplemented")
+}
+
+// UpsertDNSQueries implements repository.Repository.
+func (m *mockRepo) UpsertDNSQueries(queries []*model.DNSQuery) error {
+	panic("unimplemented")
+}
+
+// UpsertDNSQuery implements repository.Repository.
+func (m *mockRepo) UpsertDNSQuery(query *model.DNSQuery) error {
+	panic("unimplemented")
+}
+
+// UpsertDevice implements repository.Repository.
+func (m *mockRepo) UpsertDevice(device *model.Device) error {
+	panic("unimplemented")
+}
+
+// UpsertDeviceRelation implements repository.Repository.
+func (m *mockRepo) UpsertDeviceRelation(relation *model.DeviceRelation) error {
+	panic("unimplemented")
+}
+
+// UpsertDevices implements repository.Repository.
+func (m *mockRepo) UpsertDevices(devices []*model.Device) error {
+	panic("unimplemented")
+}
+
+// UpsertFlow implements repository.Repository.
+func (m *mockRepo) UpsertFlow(flow *model.Flow) error {
+	panic("unimplemented")
+}
+
+// UpsertFlows implements repository.Repository.
+func (m *mockRepo) UpsertFlows(flows []*model.Flow) error {
+	panic("unimplemented")
+}
+
+// UpsertPacket implements repository.Repository.
+func (m *mockRepo) UpsertPacket(packet *model.Packet) error {
+	panic("unimplemented")
+}
+
+// UpsertPackets implements repository.Repository.
+func (m *mockRepo) UpsertPackets(packets []*model.Packet) error {
+	panic("unimplemented")
+}
+
+// UpsertSSDPQueries implements repository.Repository.
+func (m *mockRepo) UpsertSSDPQueries(ssdps []*model.SSDPQuery) error {
+	panic("unimplemented")
+}
+
+// UpsertSSDPQuery implements repository.Repository.
+func (m *mockRepo) UpsertSSDPQuery(ssdp *model.SSDPQuery) error {
+	panic("unimplemented")
+}
+
+// UpsertService implements repository.Repository.
+func (m *mockRepo) UpsertService(service *model.Service) error {
+	panic("unimplemented")
+}
+
+// UpsertServices implements repository.Repository.
+func (m *mockRepo) UpsertServices(services []*model.Service) error {
+	panic("unimplemented")
+}
+
 func (m *mockRepo) AddPackets(packets []*model.Packet) error {
 	//TODO implement me
 	panic("implement me")

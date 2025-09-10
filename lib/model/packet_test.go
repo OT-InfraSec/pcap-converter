@@ -48,13 +48,13 @@ func TestFlowStruct(t *testing.T) {
 		Bytes:               1000,
 		FirstSeen:           ts,
 		LastSeen:            ts,
-		SourceDeviceID:      &id,
-		DestinationDeviceID: &id,
+		SourceDeviceID:      id,
+		DestinationDeviceID: id,
 		PacketRefs:          []int64{1, 2, 3},
-		MinPacketSize:       &minSize,
-		MaxPacketSize:       &minSize,
+		MinPacketSize:       minSize,
+		MaxPacketSize:       minSize,
 	}
-	if f.ID != 3 || f.Protocol != "TCP" || *f.SourceDeviceID != 3 {
+	if f.ID != 3 || f.Protocol != "TCP" || f.SourceDeviceID != 3 {
 		t.Errorf("Flow struct fields not set correctly")
 	}
 }

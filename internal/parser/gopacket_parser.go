@@ -759,7 +759,7 @@ func (p *GopacketParser) ParseFile() error {
 							// check if request was the first HTTP request to this server
 							if port, err := strconv.Atoi(srcPort); err == nil {
 								service := p.services[p.generateServiceKey(srcIP, port, "http")]
-								if service != nil && service.FirstSeen == service.LastSeen {
+								if service != nil && service.FirstSeen.Equal(service.LastSeen) {
 									// This means this is the first HTTP request to this server and we delete it
 									p.services[p.generateServiceKey(srcIP, port, "http")] = nil
 								}

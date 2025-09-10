@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 )
 
 type MockPacketParser struct {
@@ -9,7 +8,7 @@ type MockPacketParser struct {
 	ParseFileErr    error
 }
 
-func (m *MockPacketParser) ParseFile(repo repository.Repository) error {
+func (m *MockPacketParser) ParseFile() error {
 	m.ParseFileCalled = true
 	return m.ParseFileErr
 }

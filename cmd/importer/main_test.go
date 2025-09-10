@@ -82,7 +82,7 @@ func makeTestRootCmd(provider *DependencyProvider) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pcapFile := args[0]
 			// Simulate import logic with injected dependencies
-			if err := provider.Parser.ParseFile(provider.Repository); err != nil {
+			if err := provider.Parser.ParseFile(); err != nil {
 				return err
 			}
 			if err := provider.DNSProcessor.Process(provider.Repository); err != nil {
