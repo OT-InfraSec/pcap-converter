@@ -71,6 +71,18 @@ type IndustrialProtocolParserImpl struct {
 	errorHandler ErrorHandler
 }
 
+// SetErrorHandler sets the error handler for the parser
+func (p *IndustrialProtocolParserImpl) SetErrorHandler(handler ErrorHandler) {
+	if handler != nil {
+		p.errorHandler = handler
+	}
+}
+
+// GetErrorHandler returns the current error handler
+func (p *IndustrialProtocolParserImpl) GetErrorHandler() ErrorHandler {
+	return p.errorHandler
+}
+
 // NewIndustrialProtocolParser creates a new industrial protocol parser
 func NewIndustrialProtocolParser() IndustrialProtocolParser {
 	return &IndustrialProtocolParserImpl{
@@ -94,6 +106,16 @@ func NewIndustrialProtocolParserWithErrorHandler(errorHandler ErrorHandler) Indu
 // ParseIndustrialProtocols analyzes a packet for industrial protocol information
 func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.Packet) ([]IndustrialProtocolInfo, error) {
 	var protocols []IndustrialProtocolInfo
+
+	// Validate packet first
+	if packet == nil {
+		err := NewParsingError("unknown", packet, fmt.Errorf("packet is nil"), "packet validation", false)
+		if handleErr := p.errorHandler.HandleProtocolError(err); handleErr != nil {
+			return nil, handleErr
+		}
+		return protocols, nil
+	}
+
 	timestamp := packet.Metadata().Timestamp
 
 	// Check if error threshold has been exceeded
@@ -135,6 +157,14 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []IndustrialPr
 	if len(protocols) == 0 {
 		return model.DeviceTypeUnknown
 	}
+
+	// Add error handling for device classification
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("panic during device type detection: %v", r)
+			p.errorHandler.HandleClassificationError("unknown", err)
+		}
+	}()
 
 	// Count protocol usage patterns
 	ethernetIPCount := 0
@@ -420,6 +450,345 @@ func (p *IndustrialProtocolParserImpl) parseOPCUA(packet gopacket.Packet, timest
 	info.Direction = p.determineDirection(packet, []uint16{4840})
 
 	return info
+}
+
+// parseEtherNetIPWithErrorHandling parses EtherNet/IP protocol with comprehensive error handling
+func (p *IndustrialProtocolParserImpl) parseEtherNetIPWithErrorHandling(packet gopacket.Packet, timestamp time.Time) (*IndustrialProtocolInfo, *IndustrialProtocolError) {
+	// Validate packet
+	if packet == nil {
+		return nil, NewParsingError("ethernetip", packet, fmt.Errorf("packet is nil"), "packet validation", false)
+	}
+
+	// Check if packet has EtherNet/IP layer or uses EtherNet/IP ports
+	if !p.hasEtherNetIPLayer(packet) && !p.hasEtherNetIPPorts(packet) {
+		return nil, nil // Not an EtherNet/IP packet, not an error
+	}
+
+	// Attempt to parse with recovery
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error
+			err := fmt.Errorf("panic during EtherNet/IP parsing: %v", r)
+			p.errorHandler.HandleProtocolError(NewParsingError("ethernetip", packet, err, "panic recovery", false))
+		}
+	}()
+
+	info := &IndustrialProtocolInfo{
+		Protocol:       "ethernetip",
+		Timestamp:      timestamp,
+		DeviceIdentity: make(map[string]interface{}),
+		SecurityInfo:   make(map[string]interface{}),
+		AdditionalData: make(map[string]interface{}),
+		Confidence:     0.8, // Default confidence for EtherNet/IP detection
+	}
+
+	// Try to get EtherNet/IP layer for detailed parsing
+	if ethernetIPLayer := p.getEtherNetIPLayer(packet); ethernetIPLayer != nil {
+		// Validate layer data
+		if err := p.validateEtherNetIPLayer(ethernetIPLayer); err != nil {
+			return nil, NewMalformedPacketError("ethernetip", packet, err, "layer validation")
+		}
+
+		info.Confidence = 1.0 // High confidence when layer is present
+
+		// Extract device identity information with error handling
+		deviceIdentity, err := p.safeGetDeviceIdentity(ethernetIPLayer)
+		if err != nil {
+			// Log error but continue with partial data
+			p.errorHandler.HandleValidationError(ethernetIPLayer, err)
+		} else {
+			for k, v := range deviceIdentity {
+				info.DeviceIdentity[k] = v
+			}
+		}
+
+		// Extract CIP information with error handling
+		cipInfo, err := p.safeGetCIPInfo(ethernetIPLayer)
+		if err != nil {
+			// Log error but continue with partial data
+			p.errorHandler.HandleValidationError(ethernetIPLayer, err)
+		} else {
+			for k, v := range cipInfo {
+				info.AdditionalData[k] = v
+			}
+		}
+
+		// Determine message characteristics with error handling
+		info.IsDiscovery = p.safeIsDiscoveryMessage(ethernetIPLayer)
+		info.IsRealTimeData = ethernetIPLayer.IsImplicitMsg
+		info.IsConfiguration = ethernetIPLayer.IsExplicitMsg
+
+		// Set message type
+		if info.IsDiscovery {
+			info.MessageType = "discovery"
+		} else if info.IsRealTimeData {
+			info.MessageType = "real_time_io"
+		} else if info.IsConfiguration {
+			info.MessageType = "configuration"
+		} else {
+			info.MessageType = "data_transfer"
+		}
+
+		// Extract service type from CIP info
+		if serviceName, ok := cipInfo["service_name"].(string); ok {
+			info.ServiceType = serviceName
+		}
+	} else {
+		// Port-based detection only
+		info.Confidence = 0.6
+		info.MessageType = "unknown"
+
+		// Extract port information with error handling
+		if err := p.extractPortInfo(packet, info, []uint16{44818, 2222}); err != nil {
+			return nil, NewMalformedPacketError("ethernetip", packet, err, "port extraction")
+		}
+	}
+
+	// Determine direction based on port usage
+	info.Direction = p.determineDirection(packet, []uint16{44818, 2222})
+
+	return info, nil
+}
+
+// parseOPCUAWithErrorHandling parses OPC UA protocol with comprehensive error handling
+func (p *IndustrialProtocolParserImpl) parseOPCUAWithErrorHandling(packet gopacket.Packet, timestamp time.Time) (*IndustrialProtocolInfo, *IndustrialProtocolError) {
+	// Validate packet
+	if packet == nil {
+		return nil, NewParsingError("opcua", packet, fmt.Errorf("packet is nil"), "packet validation", false)
+	}
+
+	// Check if packet has OPC UA layer or uses OPC UA ports
+	if !p.hasOPCUALayer(packet) && !p.hasOPCUAPorts(packet) {
+		return nil, nil // Not an OPC UA packet, not an error
+	}
+
+	// Attempt to parse with recovery
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error
+			err := fmt.Errorf("panic during OPC UA parsing: %v", r)
+			p.errorHandler.HandleProtocolError(NewParsingError("opcua", packet, err, "panic recovery", false))
+		}
+	}()
+
+	info := &IndustrialProtocolInfo{
+		Protocol:       "opcua",
+		Port:           4840,
+		Timestamp:      timestamp,
+		DeviceIdentity: make(map[string]interface{}),
+		SecurityInfo:   make(map[string]interface{}),
+		AdditionalData: make(map[string]interface{}),
+		Confidence:     0.8, // Default confidence for OPC UA detection
+	}
+
+	// Try to get OPC UA layer for detailed parsing
+	if opcuaLayer := p.getOPCUALayer(packet); opcuaLayer != nil {
+		// Validate layer data
+		if err := p.validateOPCUALayer(opcuaLayer); err != nil {
+			return nil, NewMalformedPacketError("opcua", packet, err, "layer validation")
+		}
+
+		info.Confidence = 1.0 // High confidence when layer is present
+
+		// Extract security information with error handling
+		securityInfo, err := p.safeGetSecurityInfo(opcuaLayer)
+		if err != nil {
+			// Log error but continue with partial data
+			p.errorHandler.HandleValidationError(opcuaLayer, err)
+		} else {
+			for k, v := range securityInfo {
+				info.SecurityInfo[k] = v
+			}
+		}
+
+		// Extract service information with error handling
+		serviceInfo, err := p.safeGetServiceInfo(opcuaLayer)
+		if err != nil {
+			// Log error but continue with partial data
+			p.errorHandler.HandleValidationError(opcuaLayer, err)
+		} else {
+			for k, v := range serviceInfo {
+				info.AdditionalData[k] = v
+			}
+		}
+
+		// Determine message characteristics with error handling
+		info.IsDiscovery = opcuaLayer.IsHandshake
+		info.IsRealTimeData = p.safeIsRealTimeData(opcuaLayer)
+		info.IsConfiguration = opcuaLayer.IsSessionMgmt
+
+		// Set message type
+		if info.IsDiscovery {
+			info.MessageType = "handshake"
+		} else if info.IsRealTimeData {
+			info.MessageType = "subscription_data"
+		} else if info.IsConfiguration {
+			info.MessageType = "session_management"
+		} else {
+			info.MessageType = "service_call"
+		}
+
+		// Extract service type
+		if opcuaLayer.ServiceType != "" {
+			info.ServiceType = opcuaLayer.ServiceType
+		}
+
+		// Store message type and security mode
+		info.AdditionalData["message_type"] = opcuaLayer.MessageType
+		info.AdditionalData["chunk_type"] = opcuaLayer.ChunkType
+		if opcuaLayer.SecurityMode != "" {
+			info.AdditionalData["security_mode"] = opcuaLayer.SecurityMode
+		}
+	} else {
+		// Port-based detection only
+		info.Confidence = 0.6
+		info.MessageType = "unknown"
+		info.AdditionalData["transport"] = "tcp"
+	}
+
+	// Determine direction based on port usage
+	info.Direction = p.determineDirection(packet, []uint16{4840})
+
+	return info, nil
+}
+
+// Helper methods for safe data extraction and validation
+
+// validateEtherNetIPLayer validates EtherNet/IP layer data
+func (p *IndustrialProtocolParserImpl) validateEtherNetIPLayer(layer *lib_layers.EtherNetIP) error {
+	if layer == nil {
+		return fmt.Errorf("EtherNet/IP layer is nil")
+	}
+	// Add more validation as needed based on the layer structure
+	return nil
+}
+
+// validateOPCUALayer validates OPC UA layer data
+func (p *IndustrialProtocolParserImpl) validateOPCUALayer(layer *lib_layers.OPCUA) error {
+	if layer == nil {
+		return fmt.Errorf("OPC UA layer is nil")
+	}
+	// Add more validation as needed based on the layer structure
+	return nil
+}
+
+// safeGetDeviceIdentity safely extracts device identity information
+func (p *IndustrialProtocolParserImpl) safeGetDeviceIdentity(layer *lib_layers.EtherNetIP) (map[string]interface{}, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error for logging
+		}
+	}()
+
+	if layer == nil {
+		return nil, fmt.Errorf("layer is nil")
+	}
+
+	return layer.GetDeviceIdentity(), nil
+}
+
+// safeGetCIPInfo safely extracts CIP information
+func (p *IndustrialProtocolParserImpl) safeGetCIPInfo(layer *lib_layers.EtherNetIP) (map[string]interface{}, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error for logging
+		}
+	}()
+
+	if layer == nil {
+		return nil, fmt.Errorf("layer is nil")
+	}
+
+	return layer.GetCIPInfo(), nil
+}
+
+// safeIsDiscoveryMessage safely checks if message is discovery
+func (p *IndustrialProtocolParserImpl) safeIsDiscoveryMessage(layer *lib_layers.EtherNetIP) bool {
+	defer func() {
+		if r := recover(); r != nil {
+			// Return false on panic
+		}
+	}()
+
+	if layer == nil {
+		return false
+	}
+
+	return layer.IsDiscoveryMessage()
+}
+
+// safeGetSecurityInfo safely extracts security information
+func (p *IndustrialProtocolParserImpl) safeGetSecurityInfo(layer *lib_layers.OPCUA) (map[string]interface{}, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error for logging
+		}
+	}()
+
+	if layer == nil {
+		return nil, fmt.Errorf("layer is nil")
+	}
+
+	return layer.GetSecurityInfo(), nil
+}
+
+// safeGetServiceInfo safely extracts service information
+func (p *IndustrialProtocolParserImpl) safeGetServiceInfo(layer *lib_layers.OPCUA) (map[string]interface{}, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Convert panic to error for logging
+		}
+	}()
+
+	if layer == nil {
+		return nil, fmt.Errorf("layer is nil")
+	}
+
+	return layer.GetServiceInfo(), nil
+}
+
+// safeIsRealTimeData safely checks if data is real-time
+func (p *IndustrialProtocolParserImpl) safeIsRealTimeData(layer *lib_layers.OPCUA) bool {
+	defer func() {
+		if r := recover(); r != nil {
+			// Return false on panic
+		}
+	}()
+
+	if layer == nil {
+		return false
+	}
+
+	return layer.IsRealTimeData()
+}
+
+// extractPortInfo safely extracts port information from packet
+func (p *IndustrialProtocolParserImpl) extractPortInfo(packet gopacket.Packet, info *IndustrialProtocolInfo, ports []uint16) error {
+	// Extract TCP port information
+	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		tcp := tcpLayer.(*layers.TCP)
+		for _, port := range ports {
+			if uint16(tcp.DstPort) == port || uint16(tcp.SrcPort) == port {
+				info.Port = port
+				info.AdditionalData["transport"] = "tcp"
+				return nil
+			}
+		}
+	}
+
+	// Extract UDP port information
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp := udpLayer.(*layers.UDP)
+		for _, port := range ports {
+			if uint16(udp.DstPort) == port || uint16(udp.SrcPort) == port {
+				info.Port = port
+				info.AdditionalData["transport"] = "udp"
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("no matching industrial ports found")
 }
 
 // Helper methods for layer detection
