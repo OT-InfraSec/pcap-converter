@@ -55,7 +55,7 @@ go build -ldflags="-s -w" -o pcap-importer ./cmd/importer
 ## Roadmap
 - [ ] Add support for more protocols (ARP, ICMP, LLDP, CDP, VLAN, etc.)
 - [ ] Enrich device/flow extraction (relations, advanced heuristics)
-- [ ] Batch/optimized DB insertion for performance
+- [x] Batch/optimized DB insertion for performance
 - [ ] More integration and end-to-end tests
 - [ ] Improved documentation and developer guides
 
