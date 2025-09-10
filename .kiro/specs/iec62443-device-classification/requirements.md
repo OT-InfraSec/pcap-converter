@@ -4,6 +4,8 @@
 
 This feature implements IEC 62443 device classification and industrial protocol detection capabilities for the Go PCAP Importer. Building on the existing device discovery foundation, this enhancement will identify industrial devices and classify them based on protocol usage patterns, specifically focusing on EtherNet/IP and OPC UA protocols. This is the first phase toward full IEC 62443 compliance auditing and network security zone identification.
 
+The implementation will extend the existing gopacket-based parser architecture to support industrial protocols while maintaining the established patterns of interface-driven design, repository abstraction, and London School TDD testing approaches.
+
 ## Requirements
 
 ### Requirement 1: EtherNet/IP Protocol Detection
@@ -49,11 +51,12 @@ This feature implements IEC 62443 device classification and industrial protocol 
 
 #### Acceptance Criteria
 
-1. WHEN an industrial device is detected THEN the system SHALL store its device type classification
-2. WHEN protocol-specific attributes are extracted THEN the system SHALL store them in structured format
-3. WHEN security-relevant information is detected THEN the system SHALL flag it for compliance analysis
-4. WHEN device roles are inferred THEN the system SHALL store role classifications with timestamps
-5. WHEN multiple protocols are detected from the same device THEN the system SHALL maintain protocol usage statistics
+1. WHEN an industrial device is detected THEN the system SHALL store its device type classification with confidence levels
+2. WHEN protocol-specific attributes are extracted THEN the system SHALL store them in structured format within the existing Device model
+3. WHEN security-relevant information is detected THEN the system SHALL flag it for compliance analysis using dedicated fields
+4. WHEN device roles are inferred THEN the system SHALL store role classifications with timestamps and confidence scores
+5. WHEN multiple protocols are detected from the same device THEN the system SHALL maintain protocol usage statistics and communication patterns
+6. WHEN industrial device data is persisted THEN it SHALL use the existing Repository interface pattern for consistency
 
 ### Requirement 5: Protocol Usage Pattern Analysis
 
@@ -67,14 +70,29 @@ This feature implements IEC 62443 device classification and industrial protocol 
 4. WHEN request-response patterns are analyzed THEN the system SHALL determine communication criticality levels
 5. WHEN communication patterns change over time THEN the system SHALL update device classifications accordingly
 
-### Requirement 6: Integration with Existing Architecture
+### Requirement 6: Error Handling and Validation
+
+**User Story:** As a system administrator, I want robust error handling and data validation for industrial protocol parsing, so that the system can handle malformed or incomplete industrial network traffic gracefully.
+
+#### Acceptance Criteria
+
+1. WHEN malformed EtherNet/IP packets are encountered THEN the system SHALL log the error and continue processing other packets
+2. WHEN incomplete OPC UA handshakes are detected THEN the system SHALL handle partial data gracefully without crashing
+3. WHEN industrial protocol parsing fails THEN the system SHALL provide detailed error messages for troubleshooting
+4. WHEN device classification confidence is low THEN the system SHALL mark devices with appropriate uncertainty indicators
+5. WHEN protocol-specific validation fails THEN the system SHALL fall back to generic packet analysis
+6. WHEN industrial device data validation fails THEN the system SHALL reject invalid data and log validation errors
+
+### Requirement 7: Integration with Existing Architecture
 
 **User Story:** As a developer, I want the new industrial protocol support to integrate seamlessly with the existing parser and repository architecture, so that the system remains maintainable and testable.
 
 #### Acceptance Criteria
 
-1. WHEN new protocol parsers are added THEN they SHALL implement the existing PacketParser interface pattern
-2. WHEN industrial device data is stored THEN it SHALL use the existing Repository interface
-3. WHEN new data models are created THEN they SHALL include validation methods following existing patterns
-4. WHEN protocol detection is performed THEN it SHALL integrate with the existing gopacket parsing pipeline
-5. WHEN tests are written THEN they SHALL follow the existing London School TDD patterns with mocks
+1. WHEN new protocol parsers are added THEN they SHALL implement the existing PacketParser interface pattern without breaking changes
+2. WHEN industrial device data is stored THEN it SHALL use the existing Repository interface with new methods for industrial-specific queries
+3. WHEN new data models are created THEN they SHALL include validation methods following existing patterns in lib/model
+4. WHEN protocol detection is performed THEN it SHALL integrate with the existing gopacket parsing pipeline in internal/parser
+5. WHEN tests are written THEN they SHALL follow the existing London School TDD patterns with mocks in internal/testutil
+6. WHEN industrial protocol layers are implemented THEN they SHALL be placed in lib/layers following existing naming conventions
+7. WHEN new interfaces are created THEN they SHALL be defined in appropriate packages (internal/ for application-specific, lib/ for reusable)

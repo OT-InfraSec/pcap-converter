@@ -71,6 +71,35 @@ type Repository interface {
 	//AddSSDPQueries(ssdps []*model.SSDPQuery) error
 	UpsertSSDPQueries(ssdps []*model.SSDPQuery) error
 
+	// Industrial device operations
+	SaveIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error
+	GetIndustrialDeviceInfo(deviceAddress string) (*model.IndustrialDeviceInfo, error)
+	GetIndustrialDevicesByType(deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error)
+	UpdateIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error
+	UpsertIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error
+	DeleteIndustrialDeviceInfo(deviceAddress string) error
+
+	// Protocol usage statistics operations
+	SaveProtocolUsageStats(stats *model.ProtocolUsageStats) error
+	GetProtocolUsageStats(deviceAddress string) ([]*model.ProtocolUsageStats, error)
+	GetProtocolUsageStatsByProtocol(protocol string) ([]*model.ProtocolUsageStats, error)
+	UpdateProtocolUsageStats(stats *model.ProtocolUsageStats) error
+	UpsertProtocolUsageStats(stats *model.ProtocolUsageStats) error
+	DeleteProtocolUsageStats(deviceAddress, protocol string) error
+
+	// Communication pattern operations
+	SaveCommunicationPattern(pattern *model.CommunicationPattern) error
+	GetCommunicationPatterns(deviceAddress string) ([]*model.CommunicationPattern, error)
+	GetCommunicationPatternsByProtocol(protocol string) ([]*model.CommunicationPattern, error)
+	UpdateCommunicationPattern(pattern *model.CommunicationPattern) error
+	UpsertCommunicationPattern(pattern *model.CommunicationPattern) error
+	DeleteCommunicationPattern(sourceDeviceAddress, destinationDeviceAddress, protocol string) error
+
+	// Batch operations for industrial data
+	SaveIndustrialDeviceInfos(infos []*model.IndustrialDeviceInfo) error
+	SaveProtocolUsageStatsMultiple(stats []*model.ProtocolUsageStats) error
+	SaveCommunicationPatterns(patterns []*model.CommunicationPattern) error
+
 	// Transaction operations
 	Commit() error
 	Close() error

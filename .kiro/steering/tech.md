@@ -1,21 +1,50 @@
 # Technology Stack
 
-## Language & Runtime
+## Open-Source Core Stack
+
+### Language & Runtime
 - **Go 1.24.1** - Primary language
 - Uses Go modules for dependency management
+- Designed as both library and CLI application
 
-## Key Dependencies
+### Key Dependencies
 - **github.com/google/gopacket** - Packet parsing and protocol analysis
 - **github.com/mattn/go-sqlite3** - SQLite database driver
 - **github.com/spf13/cobra** - CLI framework
 - **github.com/rs/zerolog** - Structured logging
 
+## Web Visualizer Stack (Closed-Source)
+
+### Language & Runtime
+- **Go 1.24.3** - Backend language
+- **Echo v4** - Web framework (Labstack)
+- **Node.js** - Frontend tooling and E2E testing
+
+### Key Dependencies
+- **github.com/InfraSecConsult/pcap-importer-go** - Core analysis library (this project)
+- **github.com/labstack/echo/v4** - HTTP web framework
+- **github.com/mattn/go-sqlite3** - Database driver (shared with core)
+- **github.com/rs/zerolog** - Logging (shared with core)
+- **github.com/stretchr/testify** - Testing framework
+- **Cytoscape.js** - Network visualization library
+- **Playwright** - E2E testing framework
+
 ## Architecture Patterns
+
+### Open-Source Core Patterns
 - **Repository Pattern** - Database abstraction layer
 - **Dependency Injection** - Testable component wiring
 - **Interface-First Design** - All core logic behind interfaces
 - **London School TDD** - Mock-driven development and testing
 - **Plugin Architecture** - Extensible protocol and analysis modules for industrial protocols
+- **Library-First Design** - CLI built on top of reusable library components
+
+### Web Visualizer Patterns
+- **MVC Architecture** - Handlers (controllers), templates (views), models
+- **Middleware Pattern** - Authentication, logging, security headers
+- **Template Inheritance** - Base templates with content blocks
+- **Session-Based Auth** - Secure cookie-based authentication
+- **Single Package Structure** - Flat organization for rapid development
 
 ## IEC 62443 Technical Requirements
 

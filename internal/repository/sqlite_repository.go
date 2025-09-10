@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
-	"github.com/mattn/go-sqlite3"
 	"log"
 	"strings"
 	"time"
+
+	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
+	"github.com/mattn/go-sqlite3"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -119,12 +120,58 @@ func (r *SQLiteRepository) createTables() error {
 			user_agent TEXT,
 			UNIQUE (querying_device_id, query_type)
         );`,
+		`CREATE TABLE IF NOT EXISTS industrial_devices (
+			device_address TEXT PRIMARY KEY,
+			device_type TEXT NOT NULL,
+			role TEXT NOT NULL,
+			confidence REAL NOT NULL,
+			protocols TEXT NOT NULL,
+			security_level INTEGER NOT NULL,
+			vendor TEXT,
+			product_name TEXT,
+			serial_number TEXT,
+			firmware_version TEXT,
+			last_seen DATETIME NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS protocol_usage_stats (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			device_address TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			packet_count INTEGER NOT NULL,
+			byte_count INTEGER NOT NULL,
+			first_seen DATETIME NOT NULL,
+			last_seen DATETIME NOT NULL,
+			communication_role TEXT NOT NULL,
+			ports_used TEXT NOT NULL,
+			UNIQUE (device_address, protocol)
+		);`,
+		`CREATE TABLE IF NOT EXISTS communication_patterns (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_device_address TEXT NOT NULL,
+			destination_device_address TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			frequency_ms INTEGER NOT NULL,
+			data_volume INTEGER NOT NULL,
+			pattern_type TEXT NOT NULL,
+			criticality TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			UNIQUE (source_device_address, destination_device_address, protocol)
+		);`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
 		`CREATE INDEX IF NOT EXISTS idx_services_ip_port ON services(ip, port);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_protocol ON flows(protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_timestamps ON flows(first_seen, last_seen);`,
+		`CREATE INDEX IF NOT EXISTS idx_industrial_devices_type ON industrial_devices(device_type);`,
+		`CREATE INDEX IF NOT EXISTS idx_industrial_devices_role ON industrial_devices(role);`,
+		`CREATE INDEX IF NOT EXISTS idx_protocol_usage_stats_device ON protocol_usage_stats(device_address);`,
+		`CREATE INDEX IF NOT EXISTS idx_protocol_usage_stats_protocol ON protocol_usage_stats(protocol);`,
+		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_source ON communication_patterns(source_device_address);`,
+		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_dest ON communication_patterns(destination_device_address);`,
+		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_protocol ON communication_patterns(protocol);`,
 	}
 
 	// Enable foreign key constraints
@@ -158,6 +205,11 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	if err := device.Validate(); err != nil {
 		return errors.Join(err, errors.New("invalid device data in function AddDevice"))
 	}
+	macAddresses := ""
+	if device.MACAddressSet != nil {
+		macAddresses = device.MACAddressSet.ToString()
+	}
+
 	_, err := r.db.Exec(
 		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		device.Address,
@@ -166,7 +218,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.LastSeen.Format(time.RFC3339Nano),
 		device.AddressSubType,
 		device.AddressScope,
-		device.MACAddressSet.ToString(),
+		macAddresses,
 		device.AdditionalData,
 		device.IsOnlyDestination,
 	)
@@ -870,6 +922,11 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 	if device.ID == 0 {
 		return errors.New("device ID must not be zero")
 	}
+	macAddresses := ""
+	if device.MACAddressSet != nil {
+		macAddresses = device.MACAddressSet.ToString()
+	}
+
 	_, err := r.db.Exec(
 		`UPDATE devices SET address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ? WHERE id = ?;`,
 		device.Address,
@@ -878,7 +935,7 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 		device.LastSeen.Format(time.RFC3339Nano),
 		device.AddressSubType,
 		device.AddressScope,
-		device.MACAddressSet.ToString(),
+		macAddresses,
 		device.AdditionalData,
 		device.ID,
 	)
@@ -2106,3 +2163,4 @@ func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error 
 	}
 	return tx.Commit()
 }
+

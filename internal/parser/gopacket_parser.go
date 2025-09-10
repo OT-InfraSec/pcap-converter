@@ -3,12 +3,13 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
-	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
-	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
+	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
@@ -52,19 +53,21 @@ type GopacketParser struct {
 
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 
-	repo repository.Repository
+	repo             repository.Repository
+	industrialParser IndustrialProtocolParser
 }
 
 func NewGopacketParser(pcapFile string, repo repository.Repository) *GopacketParser {
 	parser := &GopacketParser{
-		PcapFile:       pcapFile,
-		devices:        make(map[string]*model2.Device),
-		flows:          make(map[string]*model2.Flow),
-		services:       make(map[string]*model2.Service),
-		dnsQueries:     make(map[string]*DNSQuery),
-		ssdpQueries:    make(map[string]*SSDPQuery),
-		httpRingBuffer: helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
-		repo:           repo,
+		PcapFile:         pcapFile,
+		devices:          make(map[string]*model2.Device),
+		flows:            make(map[string]*model2.Flow),
+		services:         make(map[string]*model2.Service),
+		dnsQueries:       make(map[string]*DNSQuery),
+		ssdpQueries:      make(map[string]*SSDPQuery),
+		httpRingBuffer:   helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
+		repo:             repo,
+		industrialParser: NewIndustrialProtocolParser(),
 	}
 
 	// Import existing devices from repository
@@ -282,6 +285,123 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 	return flow
 }
 
+// updateDeviceWithIndustrialInfo updates a device with industrial protocol information
+func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protocolInfo IndustrialProtocolInfo, isDestination bool) {
+	deviceKey := "IP:" + deviceIP
+	device, exists := p.devices[deviceKey]
+	if !exists {
+		// Device doesn't exist yet, it will be created by upsertDevice
+		return
+	}
+
+	// Create or update additional data with industrial protocol information
+	var additionalData map[string]interface{}
+	if device.AdditionalData != "" {
+		if err := json.Unmarshal([]byte(device.AdditionalData), &additionalData); err != nil {
+			additionalData = make(map[string]interface{})
+		}
+	} else {
+		additionalData = make(map[string]interface{})
+	}
+
+	// Add industrial protocol information
+	if additionalData["industrial_protocols"] == nil {
+		additionalData["industrial_protocols"] = make(map[string]interface{})
+	}
+
+	industrialProtocols := additionalData["industrial_protocols"].(map[string]interface{})
+
+	// Store protocol-specific information
+	protocolData := map[string]interface{}{
+		"protocol":         protocolInfo.Protocol,
+		"direction":        protocolInfo.Direction,
+		"service_type":     protocolInfo.ServiceType,
+		"message_type":     protocolInfo.MessageType,
+		"is_real_time":     protocolInfo.IsRealTimeData,
+		"is_discovery":     protocolInfo.IsDiscovery,
+		"is_configuration": protocolInfo.IsConfiguration,
+		"confidence":       protocolInfo.Confidence,
+		"last_seen":        protocolInfo.Timestamp,
+	}
+
+	// Add device identity information if available
+	if len(protocolInfo.DeviceIdentity) > 0 {
+		protocolData["device_identity"] = protocolInfo.DeviceIdentity
+	}
+
+	// Add security information if available
+	if len(protocolInfo.SecurityInfo) > 0 {
+		protocolData["security_info"] = protocolInfo.SecurityInfo
+	}
+
+	// Add additional protocol-specific data
+	if len(protocolInfo.AdditionalData) > 0 {
+		protocolData["additional_data"] = protocolInfo.AdditionalData
+	}
+
+	industrialProtocols[protocolInfo.Protocol] = protocolData
+
+	// Perform device type classification based on accumulated protocol information
+	var allProtocols []IndustrialProtocolInfo
+	for _, protoData := range industrialProtocols {
+		if protoMap, ok := protoData.(map[string]interface{}); ok {
+			protocol := IndustrialProtocolInfo{
+				Protocol:        getString(protoMap, "protocol"),
+				Direction:       getString(protoMap, "direction"),
+				ServiceType:     getString(protoMap, "service_type"),
+				MessageType:     getString(protoMap, "message_type"),
+				IsRealTimeData:  getBool(protoMap, "is_real_time"),
+				IsDiscovery:     getBool(protoMap, "is_discovery"),
+				IsConfiguration: getBool(protoMap, "is_configuration"),
+				Confidence:      getFloat64(protoMap, "confidence"),
+			}
+			allProtocols = append(allProtocols, protocol)
+		}
+	}
+
+	// Classify device type based on protocol usage patterns
+	if len(allProtocols) > 0 {
+		deviceType := p.industrialParser.DetectDeviceType(allProtocols, []model2.Flow{})
+		if deviceType != model2.DeviceTypeUnknown {
+			additionalData["industrial_device_type"] = string(deviceType)
+		}
+	}
+
+	// Update device additional data
+	updatedAdditionalData, err := json.Marshal(additionalData)
+	if err == nil {
+		device.AdditionalData = string(updatedAdditionalData)
+	}
+}
+
+// Helper functions for type conversion
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getBool(m map[string]interface{}, key string) bool {
+	if val, ok := m[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok {
+		if f, ok := val.(float64); ok {
+			return f
+		}
+	}
+	return 0.0
+}
+
 func (p *GopacketParser) updateSSDPQuery(ssdpQuery SSDPQuery, timestamp time.Time) {
 	queryingDevice := p.devices["IP:"+ssdpQuery.QueryingDeviceIP]
 	if queryingDevice == nil {
@@ -454,6 +574,8 @@ func (p *GopacketParser) ParseFile() error {
 	liblayers.InitLayerSSDP()
 	liblayers.InitLayerMDNS()
 	liblayers.InitLayerHTTP()
+	liblayers.InitLayerEtherNetIP()
+	liblayers.InitLayerOPCUA()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	// Set DecodeOptions for better performance
@@ -1331,6 +1453,32 @@ func (p *GopacketParser) ParseFile() error {
 		if dstMAC != "" && dstIP != "" {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
 			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
+		}
+
+		// Industrial protocol parsing and device classification
+		if p.industrialParser.IsIndustrialProtocol(packet) {
+			industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
+			if err == nil && len(industrialProtocols) > 0 {
+				// Update devices with industrial protocol information
+				for _, protocolInfo := range industrialProtocols {
+					// Update source device with industrial protocol info
+					if srcIP != "" {
+						p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
+					}
+					// Update destination device with industrial protocol info
+					if dstIP != "" {
+						p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
+					}
+				}
+
+				// Add industrial protocol information to layers map
+				layersMap["industrial_protocols"] = industrialProtocols
+
+				// Update protocols list with industrial protocol names
+				for _, protocolInfo := range industrialProtocols {
+					protocols = append(protocols, protocolInfo.Protocol)
+				}
+			}
 		}
 
 		// Flow extraction and storage

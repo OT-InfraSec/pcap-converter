@@ -1,9 +1,10 @@
 package repository
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"testing"
 	"time"
+
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 )
 
 func TestSQLiteRepository_AddPacketAndAllPackets(t *testing.T) {
@@ -62,15 +63,45 @@ func TestSQLiteRepository_AddFlow(t *testing.T) {
 	}
 	defer repo.Close()
 	ts := time.Now()
+
+	// Create required devices first
+	srcDevice := &model.Device{
+		Address:           "192.168.1.1",
+		AddressType:       "IPv4",
+		FirstSeen:         ts,
+		LastSeen:          ts,
+		MACAddressSet:     model.NewMACAddressSet(),
+		IsOnlyDestination: false,
+	}
+	err = repo.AddDevice(srcDevice)
+	if err != nil {
+		t.Fatalf("AddDevice failed: %v", err)
+	}
+
+	dstDevice := &model.Device{
+		Address:           "192.168.1.2",
+		AddressType:       "IPv4",
+		FirstSeen:         ts,
+		LastSeen:          ts,
+		MACAddressSet:     model.NewMACAddressSet(),
+		IsOnlyDestination: false,
+	}
+	err = repo.AddDevice(dstDevice)
+	if err != nil {
+		t.Fatalf("AddDevice failed: %v", err)
+	}
+
 	flow := &model.Flow{
-		Source:      "192.168.1.1:1234",
-		Destination: "192.168.1.2:80",
-		Protocol:    "TCP",
-		Packets:     1,
-		Bytes:       100,
-		FirstSeen:   ts,
-		LastSeen:    ts,
-		PacketRefs:  []int64{1},
+		Source:           "192.168.1.1:1234",
+		Destination:      "192.168.1.2:80",
+		Protocol:         "TCP",
+		Packets:          1,
+		Bytes:            100,
+		FirstSeen:        ts,
+		LastSeen:         ts,
+		PacketRefs:       []int64{1},
+		SourcePorts:      model.NewSet(),
+		DestinationPorts: model.NewSet(),
 	}
 	err = repo.AddFlow(flow)
 	if err != nil {
