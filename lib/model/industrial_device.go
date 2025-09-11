@@ -238,3 +238,43 @@ func isValidCriticality(criticality string) bool {
 		return false
 	}
 }
+
+// IndustrialDeviceClassification represents a device classification result
+type IndustrialDeviceClassification struct {
+	DeviceID      string               `json:"device_id"`
+	DeviceType    IndustrialDeviceType `json:"device_type"`
+	Role          IndustrialDeviceRole `json:"role"`
+	Confidence    float64              `json:"confidence"`
+	Protocols     []string             `json:"protocols"`
+	SecurityLevel SecurityLevel        `json:"security_level"`
+	LastUpdated   time.Time            `json:"last_updated"`
+}
+
+// Validate validates the IndustrialDeviceClassification struct
+func (idc *IndustrialDeviceClassification) Validate() error {
+	if idc.DeviceID == "" {
+		return errors.New("device ID must not be empty")
+	}
+	if idc.DeviceType == "" {
+		return errors.New("device type must not be empty")
+	}
+	if !isValidIndustrialDeviceType(idc.DeviceType) {
+		return errors.New("invalid device type")
+	}
+	if idc.Role == "" {
+		return errors.New("role must not be empty")
+	}
+	if !isValidIndustrialDeviceRole(idc.Role) {
+		return errors.New("invalid device role")
+	}
+	if idc.Confidence < 0.0 || idc.Confidence > 1.0 {
+		return errors.New("confidence must be between 0.0 and 1.0")
+	}
+	if !isValidSecurityLevel(idc.SecurityLevel) {
+		return errors.New("invalid security level")
+	}
+	if idc.LastUpdated.IsZero() {
+		return errors.New("last updated time must not be zero")
+	}
+	return nil
+}

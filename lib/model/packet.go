@@ -158,6 +158,7 @@ type Device struct {
 	MACAddressSet     *MACAddressSet
 	AdditionalData    string // JSON string for additional data
 	IsOnlyDestination bool
+	IndustrialInfo    *IndustrialDeviceInfo // Industrial device information
 }
 
 // Service represents a network service.

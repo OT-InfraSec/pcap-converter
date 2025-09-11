@@ -285,7 +285,7 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 	return flow
 }
 
-// updateDeviceWithIndustrialInfo updates a device with industrial protocol information
+// updateDeviceWithIndustrialInfo updates a device with industrial protocol information and performs classification
 func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protocolInfo IndustrialProtocolInfo, isDestination bool) {
 	deviceKey := "IP:" + deviceIP
 	device, exists := p.devices[deviceKey]
@@ -311,9 +311,10 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 
 	industrialProtocols := additionalData["industrial_protocols"].(map[string]interface{})
 
-	// Store protocol-specific information
+	// Store protocol-specific information with enhanced data
 	protocolData := map[string]interface{}{
 		"protocol":         protocolInfo.Protocol,
+		"port":             protocolInfo.Port,
 		"direction":        protocolInfo.Direction,
 		"service_type":     protocolInfo.ServiceType,
 		"message_type":     protocolInfo.MessageType,
@@ -322,6 +323,7 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 		"is_configuration": protocolInfo.IsConfiguration,
 		"confidence":       protocolInfo.Confidence,
 		"last_seen":        protocolInfo.Timestamp,
+		"is_destination":   isDestination,
 	}
 
 	// Add device identity information if available
@@ -339,14 +341,55 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 		protocolData["additional_data"] = protocolInfo.AdditionalData
 	}
 
+	// Update or merge protocol data (handle multiple packets of same protocol)
+	if existingProtocolData, exists := industrialProtocols[protocolInfo.Protocol]; exists {
+		if existingMap, ok := existingProtocolData.(map[string]interface{}); ok {
+			// Merge device identity information
+			if len(protocolInfo.DeviceIdentity) > 0 {
+				if existingIdentity, exists := existingMap["device_identity"]; exists {
+					if existingIdentityMap, ok := existingIdentity.(map[string]interface{}); ok {
+						for k, v := range protocolInfo.DeviceIdentity {
+							existingIdentityMap[k] = v
+						}
+						protocolData["device_identity"] = existingIdentityMap
+					}
+				}
+			}
+
+			// Update last seen timestamp
+			if existingTimestamp, exists := existingMap["last_seen"]; exists {
+				if existingTime, ok := existingTimestamp.(time.Time); ok {
+					if protocolInfo.Timestamp.After(existingTime) {
+						protocolData["last_seen"] = protocolInfo.Timestamp
+					} else {
+						protocolData["last_seen"] = existingTime
+					}
+				}
+			}
+
+			// Merge additional data
+			if len(protocolInfo.AdditionalData) > 0 {
+				if existingAdditional, exists := existingMap["additional_data"]; exists {
+					if existingAdditionalMap, ok := existingAdditional.(map[string]interface{}); ok {
+						for k, v := range protocolInfo.AdditionalData {
+							existingAdditionalMap[k] = v
+						}
+						protocolData["additional_data"] = existingAdditionalMap
+					}
+				}
+			}
+		}
+	}
+
 	industrialProtocols[protocolInfo.Protocol] = protocolData
 
-	// Perform device type classification based on accumulated protocol information
+	// Perform comprehensive device classification based on accumulated protocol information
 	var allProtocols []IndustrialProtocolInfo
 	for _, protoData := range industrialProtocols {
 		if protoMap, ok := protoData.(map[string]interface{}); ok {
 			protocol := IndustrialProtocolInfo{
 				Protocol:        getString(protoMap, "protocol"),
+				Port:            uint16(getFloat64(protoMap, "port")),
 				Direction:       getString(protoMap, "direction"),
 				ServiceType:     getString(protoMap, "service_type"),
 				MessageType:     getString(protoMap, "message_type"),
@@ -355,16 +398,73 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 				IsConfiguration: getBool(protoMap, "is_configuration"),
 				Confidence:      getFloat64(protoMap, "confidence"),
 			}
+
+			// Add device identity if available
+			if deviceIdentity, exists := protoMap["device_identity"]; exists {
+				if deviceIdentityMap, ok := deviceIdentity.(map[string]interface{}); ok {
+					protocol.DeviceIdentity = deviceIdentityMap
+				}
+			}
+
+			// Add security info if available
+			if securityInfo, exists := protoMap["security_info"]; exists {
+				if securityInfoMap, ok := securityInfo.(map[string]interface{}); ok {
+					protocol.SecurityInfo = securityInfoMap
+				}
+			}
+
+			// Add additional data if available
+			if additionalDataInfo, exists := protoMap["additional_data"]; exists {
+				if additionalDataMap, ok := additionalDataInfo.(map[string]interface{}); ok {
+					protocol.AdditionalData = additionalDataMap
+				}
+			}
+
 			allProtocols = append(allProtocols, protocol)
 		}
 	}
 
-	// Classify device type based on protocol usage patterns
+	// Perform enhanced device classification with communication patterns
 	if len(allProtocols) > 0 {
-		deviceType := p.industrialParser.DetectDeviceType(allProtocols, []model2.Flow{})
+		// Get relevant flows for this device to analyze communication patterns
+		var deviceFlows []model2.Flow
+		for _, flow := range p.flows {
+			if flow.Source == deviceIP || flow.Destination == deviceIP {
+				deviceFlows = append(deviceFlows, *flow)
+			}
+		}
+
+		// Classify device type based on protocol usage patterns and flows
+		deviceType := p.industrialParser.DetectDeviceType(allProtocols, deviceFlows)
 		if deviceType != model2.DeviceTypeUnknown {
 			additionalData["industrial_device_type"] = string(deviceType)
+
+			// Store classification timestamp for tracking changes
+			additionalData["classification_timestamp"] = time.Now()
+
+			// Calculate and store classification confidence
+			// This uses the existing device and protocols for confidence calculation
+			if confidence := p.calculateDeviceClassificationConfidence(*device, allProtocols, deviceFlows); confidence > 0 {
+				additionalData["classification_confidence"] = confidence
+			}
 		}
+
+		// Analyze and store communication patterns
+		if len(deviceFlows) > 0 {
+			patterns := p.industrialParser.AnalyzeCommunicationPatterns(deviceFlows)
+			if len(patterns) > 0 {
+				additionalData["communication_patterns"] = p.serializeCommunicationPatterns(patterns)
+			}
+		}
+
+		// Store protocol summary for quick access
+		protocolSummary := make(map[string]interface{})
+		protocolSummary["protocols"] = p.extractProtocolNames(allProtocols)
+		protocolSummary["primary_protocol"] = p.determinePrimaryProtocol(allProtocols)
+		protocolSummary["has_real_time_data"] = p.hasRealTimeData(allProtocols)
+		protocolSummary["has_discovery"] = p.hasDiscovery(allProtocols)
+		protocolSummary["has_configuration"] = p.hasConfiguration(allProtocols)
+		additionalData["protocol_summary"] = protocolSummary
 	}
 
 	// Update device additional data
@@ -372,6 +472,151 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 	if err == nil {
 		device.AdditionalData = string(updatedAdditionalData)
 	}
+}
+
+// Helper methods for enhanced device classification
+
+// calculateDeviceClassificationConfidence calculates confidence score for device classification
+func (p *GopacketParser) calculateDeviceClassificationConfidence(device model2.Device, protocols []IndustrialProtocolInfo, flows []model2.Flow) float64 {
+	if len(protocols) == 0 {
+		return 0.0
+	}
+
+	// Calculate average protocol confidence
+	totalConfidence := 0.0
+	for _, protocol := range protocols {
+		totalConfidence += protocol.Confidence
+	}
+	avgProtocolConfidence := totalConfidence / float64(len(protocols))
+
+	// Factor in number of protocols (more protocols = higher confidence)
+	protocolFactor := 1.0
+	if len(protocols) > 1 {
+		protocolFactor = 1.2
+	}
+	if len(protocols) > 3 {
+		protocolFactor = 1.5
+	}
+
+	// Factor in communication patterns (more flows = higher confidence)
+	flowFactor := 1.0
+	if len(flows) > 5 {
+		flowFactor = 1.1
+	}
+	if len(flows) > 20 {
+		flowFactor = 1.3
+	}
+
+	// Factor in device identity information
+	identityFactor := 1.0
+	for _, protocol := range protocols {
+		if len(protocol.DeviceIdentity) > 0 {
+			identityFactor = 1.2
+			break
+		}
+	}
+
+	confidence := avgProtocolConfidence * protocolFactor * flowFactor * identityFactor
+
+	// Cap at 1.0
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+
+	return confidence
+}
+
+// serializeCommunicationPatterns converts communication patterns to serializable format
+func (p *GopacketParser) serializeCommunicationPatterns(patterns []model2.CommunicationPattern) []map[string]interface{} {
+	var serialized []map[string]interface{}
+	for _, pattern := range patterns {
+		patternMap := map[string]interface{}{
+			"source_device":      pattern.SourceDevice,
+			"destination_device": pattern.DestinationDevice,
+			"protocol":           pattern.Protocol,
+			"frequency_ms":       pattern.Frequency.Milliseconds(),
+			"data_volume":        pattern.DataVolume,
+			"pattern_type":       pattern.PatternType,
+			"criticality":        pattern.Criticality,
+		}
+		serialized = append(serialized, patternMap)
+	}
+	return serialized
+}
+
+// extractProtocolNames extracts protocol names from protocol info list
+func (p *GopacketParser) extractProtocolNames(protocols []IndustrialProtocolInfo) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, protocol := range protocols {
+		if !seen[protocol.Protocol] {
+			names = append(names, protocol.Protocol)
+			seen[protocol.Protocol] = true
+		}
+	}
+	return names
+}
+
+// determinePrimaryProtocol determines the primary protocol based on usage patterns
+func (p *GopacketParser) determinePrimaryProtocol(protocols []IndustrialProtocolInfo) string {
+	if len(protocols) == 0 {
+		return ""
+	}
+
+	// Count protocol occurrences and find highest confidence
+	protocolCounts := make(map[string]int)
+	protocolConfidence := make(map[string]float64)
+
+	for _, protocol := range protocols {
+		protocolCounts[protocol.Protocol]++
+		if protocol.Confidence > protocolConfidence[protocol.Protocol] {
+			protocolConfidence[protocol.Protocol] = protocol.Confidence
+		}
+	}
+
+	// Find protocol with highest combined score (count * confidence)
+	var primaryProtocol string
+	var highestScore float64
+
+	for protocol, count := range protocolCounts {
+		score := float64(count) * protocolConfidence[protocol]
+		if score > highestScore {
+			highestScore = score
+			primaryProtocol = protocol
+		}
+	}
+
+	return primaryProtocol
+}
+
+// hasRealTimeData checks if any protocol has real-time data
+func (p *GopacketParser) hasRealTimeData(protocols []IndustrialProtocolInfo) bool {
+	for _, protocol := range protocols {
+		if protocol.IsRealTimeData {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDiscovery checks if any protocol has discovery messages
+func (p *GopacketParser) hasDiscovery(protocols []IndustrialProtocolInfo) bool {
+	for _, protocol := range protocols {
+		if protocol.IsDiscovery {
+			return true
+		}
+	}
+	return false
+}
+
+// hasConfiguration checks if any protocol has configuration messages
+func (p *GopacketParser) hasConfiguration(protocols []IndustrialProtocolInfo) bool {
+	for _, protocol := range protocols {
+		if protocol.IsConfiguration {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper functions for type conversion
@@ -1456,29 +1701,54 @@ func (p *GopacketParser) ParseFile() error {
 		}
 
 		// Industrial protocol parsing and device classification
-		if p.industrialParser.IsIndustrialProtocol(packet) {
-			industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
-			if err == nil && len(industrialProtocols) > 0 {
-				// Update devices with industrial protocol information
-				for _, protocolInfo := range industrialProtocols {
-					// Update source device with industrial protocol info
-					if srcIP != "" {
-						p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
-					}
-					// Update destination device with industrial protocol info
-					if dstIP != "" {
-						p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
+		// Always attempt industrial protocol parsing for comprehensive analysis
+		industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
+		if err == nil && len(industrialProtocols) > 0 {
+			// Update devices with industrial protocol information
+			for _, protocolInfo := range industrialProtocols {
+				// Update source device with industrial protocol info
+				if srcIP != "" {
+					p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
+
+					// Collect protocol usage statistics for source device
+					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
+						// Store protocol usage statistics in repository
+						if statsErr := p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
+							// Log error but continue processing
+							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", srcIP, statsErr)
+						}
 					}
 				}
+				// Update destination device with industrial protocol info
+				if dstIP != "" {
+					p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
 
-				// Add industrial protocol information to layers map
-				layersMap["industrial_protocols"] = industrialProtocols
-
-				// Update protocols list with industrial protocol names
-				for _, protocolInfo := range industrialProtocols {
-					protocols = append(protocols, protocolInfo.Protocol)
+					// Collect protocol usage statistics for destination device
+					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
+						// Store protocol usage statistics in repository
+						if statsErr := p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
+							// Log error but continue processing
+							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", dstIP, statsErr)
+						}
+					}
 				}
 			}
+
+			// Add industrial protocol information to layers map
+			layersMap["industrial_protocols"] = industrialProtocols
+
+			// Update protocols list with industrial protocol names
+			for _, protocolInfo := range industrialProtocols {
+				protocols = append(protocols, protocolInfo.Protocol)
+
+				// Update flow protocol if it's an industrial protocol
+				if flowProto == "" || flowProto == "tcp" || flowProto == "udp" {
+					flowProto = protocolInfo.Protocol
+				}
+			}
+		} else if err != nil {
+			// Log industrial protocol parsing errors but continue processing
+			fmt.Printf("Warning: Industrial protocol parsing error: %v\n", err)
 		}
 
 		// Flow extraction and storage
@@ -1748,6 +2018,54 @@ func (p *GopacketParser) ParseFile() error {
 		err = p.repo.UpsertSSDPQueries(ssdpQueriesToSave)
 		if err != nil {
 			return fmt.Errorf("failed to add SSDP queries: %w", err)
+		}
+	}
+
+	// Analyze and save communication patterns for industrial devices
+	if err := p.analyzeAndSaveCommunicationPatterns(); err != nil {
+		// Log error but don't fail the entire parsing process
+		fmt.Printf("Warning: Failed to analyze communication patterns: %v\n", err)
+	}
+
+	return nil
+}
+
+// analyzeAndSaveCommunicationPatterns analyzes communication patterns and saves them to the repository
+func (p *GopacketParser) analyzeAndSaveCommunicationPatterns() error {
+	// Collect all flows for communication pattern analysis
+	var allFlows []model2.Flow
+	for _, flow := range p.flows {
+		allFlows = append(allFlows, *flow)
+	}
+
+	if len(allFlows) == 0 {
+		return nil // No flows to analyze
+	}
+
+	// Analyze communication patterns using the industrial parser
+	patterns := p.industrialParser.AnalyzeCommunicationPatterns(allFlows)
+
+	if len(patterns) == 0 {
+		return nil // No patterns found
+	}
+
+	// Convert patterns to model format and save to repository
+	var patternsToSave []*model2.CommunicationPattern
+	for _, pattern := range patterns {
+		patternsToSave = append(patternsToSave, &pattern)
+	}
+
+	// Batch save communication patterns
+	const maxPatternBatchSize = 500
+	for i := 0; i < len(patternsToSave); i += maxPatternBatchSize {
+		end := i + maxPatternBatchSize
+		if end > len(patternsToSave) {
+			end = len(patternsToSave)
+		}
+
+		batch := patternsToSave[i:end]
+		if err := p.repo.SaveCommunicationPatterns(batch); err != nil {
+			return fmt.Errorf("failed to save communication pattern batch: %w", err)
 		}
 	}
 
