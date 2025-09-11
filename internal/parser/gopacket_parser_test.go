@@ -2,10 +2,11 @@ package parser
 
 import (
 	"bytes"
-	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
