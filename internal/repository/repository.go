@@ -95,10 +95,17 @@ type Repository interface {
 	UpsertCommunicationPattern(pattern *model.CommunicationPattern) error
 	DeleteCommunicationPattern(sourceDeviceAddress, destinationDeviceAddress, protocol string) error
 
+	// Industrial protocol info operations
+	SaveIndustrialProtocolInfo(info *model.IndustrialProtocolInfo) error
+	GetIndustrialProtocolInfos(deviceAddress string) ([]*model.IndustrialProtocolInfo, error)
+	GetIndustrialProtocolInfosByProtocol(protocol string) ([]*model.IndustrialProtocolInfo, error)
+	DeleteIndustrialProtocolInfos(deviceAddress string) error
+
 	// Batch operations for industrial data
 	SaveIndustrialDeviceInfos(infos []*model.IndustrialDeviceInfo) error
 	SaveProtocolUsageStatsMultiple(stats []*model.ProtocolUsageStats) error
 	SaveCommunicationPatterns(patterns []*model.CommunicationPattern) error
+	SaveIndustrialProtocolInfos(infos []*model.IndustrialProtocolInfo) error
 
 	// Transaction operations
 	Commit() error

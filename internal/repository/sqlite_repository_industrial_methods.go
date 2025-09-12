@@ -634,3 +634,162 @@ func (r *SQLiteRepository) SaveCommunicationPatterns(patterns []*model2.Communic
 
 	return tx.Commit()
 }
+
+// Industrial Protocol Info Operations
+
+// SaveIndustrialProtocolInfo saves industrial protocol information
+func (r *SQLiteRepository) SaveIndustrialProtocolInfo(info *model2.IndustrialProtocolInfo) error {
+	if err := info.Validate(); err != nil {
+		return err
+	}
+
+	deviceIdentityJSON, err := json.Marshal(info.DeviceIdentity)
+	if err != nil {
+		return err
+	}
+	securityInfoJSON, err := json.Marshal(info.SecurityInfo)
+	if err != nil {
+		return err
+	}
+	additionalDataJSON, err := json.Marshal(info.AdditionalData)
+	if err != nil {
+		return err
+	}
+
+	_, err = r.db.Exec(
+		`INSERT INTO industrial_protocol_info (protocol, port, direction, timestamp, confidence, service_type, message_type, is_real_time, is_discovery, is_configuration, device_identity, security_info, additional_data) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		info.Protocol,
+		info.Port,
+		info.Direction,
+		info.Timestamp.Format(time.RFC3339Nano),
+		info.Confidence,
+		info.ServiceType,
+		info.MessageType,
+		info.IsRealTimeData,
+		info.IsDiscovery,
+		info.IsConfiguration,
+		string(deviceIdentityJSON),
+		string(securityInfoJSON),
+		string(additionalDataJSON),
+	)
+	return err
+}
+
+// GetIndustrialProtocolInfos retrieves industrial protocol information for a device
+func (r *SQLiteRepository) GetIndustrialProtocolInfos(deviceAddress string) ([]*model2.IndustrialProtocolInfo, error) {
+	query := `SELECT protocol, port, direction, timestamp, confidence, service_type, message_type, is_real_time, is_discovery, is_configuration, device_identity, security_info, additional_data 
+			  FROM industrial_protocol_info WHERE device_address = ?`
+	rows, err := r.db.Query(query, deviceAddress)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var infos []*model2.IndustrialProtocolInfo
+	for rows.Next() {
+		var info model2.IndustrialProtocolInfo
+		var timestampStr, deviceIdentityJSON, securityInfoJSON, additionalDataJSON string
+
+		err := rows.Scan(
+			&info.Protocol,
+			&info.Port,
+			&info.Direction,
+			&timestampStr,
+			&info.Confidence,
+			&info.ServiceType,
+			&info.MessageType,
+			&info.IsRealTimeData,
+			&info.IsDiscovery,
+			&info.IsConfiguration,
+			&deviceIdentityJSON,
+			&securityInfoJSON,
+			&additionalDataJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		info.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
+		if err := json.Unmarshal([]byte(deviceIdentityJSON), &info.DeviceIdentity); err != nil {
+			info.DeviceIdentity = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(securityInfoJSON), &info.SecurityInfo); err != nil {
+			info.SecurityInfo = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(additionalDataJSON), &info.AdditionalData); err != nil {
+			info.AdditionalData = make(map[string]interface{})
+		}
+
+		infos = append(infos, &info)
+	}
+
+	return infos, nil
+}
+
+// GetIndustrialProtocolInfosByProtocol retrieves industrial protocol information by protocol type
+func (r *SQLiteRepository) GetIndustrialProtocolInfosByProtocol(protocol string) ([]*model2.IndustrialProtocolInfo, error) {
+	query := `SELECT protocol, port, direction, timestamp, confidence, service_type, message_type, is_real_time, is_discovery, is_configuration, device_identity, security_info, additional_data 
+			  FROM industrial_protocol_info WHERE protocol = ?`
+	rows, err := r.db.Query(query, protocol)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var infos []*model2.IndustrialProtocolInfo
+	for rows.Next() {
+		var info model2.IndustrialProtocolInfo
+		var timestampStr, deviceIdentityJSON, securityInfoJSON, additionalDataJSON string
+
+		err := rows.Scan(
+			&info.Protocol,
+			&info.Port,
+			&info.Direction,
+			&timestampStr,
+			&info.Confidence,
+			&info.ServiceType,
+			&info.MessageType,
+			&info.IsRealTimeData,
+			&info.IsDiscovery,
+			&info.IsConfiguration,
+			&deviceIdentityJSON,
+			&securityInfoJSON,
+			&additionalDataJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		info.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
+		if err := json.Unmarshal([]byte(deviceIdentityJSON), &info.DeviceIdentity); err != nil {
+			info.DeviceIdentity = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(securityInfoJSON), &info.SecurityInfo); err != nil {
+			info.SecurityInfo = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(additionalDataJSON), &info.AdditionalData); err != nil {
+			info.AdditionalData = make(map[string]interface{})
+		}
+
+		infos = append(infos, &info)
+	}
+
+	return infos, nil
+}
+
+// DeleteIndustrialProtocolInfos deletes industrial protocol information for a device
+func (r *SQLiteRepository) DeleteIndustrialProtocolInfos(deviceAddress string) error {
+	_, err := r.db.Exec("DELETE FROM industrial_protocol_info WHERE device_address = ?", deviceAddress)
+	return err
+}
+
+// SaveIndustrialProtocolInfos saves multiple industrial protocol information entries
+func (r *SQLiteRepository) SaveIndustrialProtocolInfos(infos []*model2.IndustrialProtocolInfo) error {
+	for _, info := range infos {
+		if err := r.SaveIndustrialProtocolInfo(info); err != nil {
+			return err
+		}
+	}
+	return nil
+}

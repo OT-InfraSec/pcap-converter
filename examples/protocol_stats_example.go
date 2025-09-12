@@ -26,7 +26,7 @@ func main() {
 	deviceAddress := "192.168.1.100"
 
 	// Example 1: EtherNet/IP real-time I/O data
-	ethernetIPProtocols := []parser.IndustrialProtocolInfo{
+	ethernetIPProtocols := []model.IndustrialProtocolInfo{
 		{
 			Protocol:        "ethernetip",
 			Port:            44818,
@@ -76,7 +76,7 @@ func main() {
 
 	// Example 2: OPC UA discovery and data exchange
 	fmt.Println("\n=== OPC UA Protocol Analysis ===")
-	opcuaProtocols := []parser.IndustrialProtocolInfo{
+	opcuaProtocols := []model.IndustrialProtocolInfo{
 		{
 			Protocol:        "opcua",
 			Port:            4840,
@@ -129,19 +129,6 @@ func main() {
 	for i, stat := range allStats {
 		fmt.Printf("  %d. Protocol: %s, Packets: %d, Bytes: %d, Role: %s\n",
 			i+1, stat.Protocol, stat.PacketCount, stat.ByteCount, stat.CommunicationRole)
-	}
-
-	// Aggregate statistics
-	aggregated, err := industrialParser.AggregateProtocolUsageStats(allStats)
-	if err != nil {
-		log.Fatalf("Failed to aggregate stats: %v", err)
-	}
-
-	if aggregated != nil {
-		fmt.Printf("\nAggregated Statistics (first protocol):\n")
-		fmt.Printf("  Total Packets: %d\n", aggregated.PacketCount)
-		fmt.Printf("  Total Bytes: %d\n", aggregated.ByteCount)
-		fmt.Printf("  Time Span: %s\n", aggregated.LastSeen.Sub(aggregated.FirstSeen))
 	}
 
 	// Example 4: Communication Pattern Analysis

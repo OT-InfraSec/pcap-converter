@@ -281,3 +281,51 @@ func (idc *IndustrialDeviceClassification) Validate() error {
 	}
 	return nil
 }
+
+// IndustrialProtocolInfo represents information extracted from an industrial protocol packet
+type IndustrialProtocolInfo struct {
+	// Basic protocol information
+	Protocol   string    `json:"protocol"`   // Protocol name (e.g., "EtherNet/IP", "OPC UA")
+	Port       uint16    `json:"port"`       // Port number used
+	Direction  string    `json:"direction"`  // "inbound", "outbound", "bidirectional"
+	Timestamp  time.Time `json:"timestamp"`  // When this protocol info was captured
+	Confidence float64   `json:"confidence"` // Confidence level (0.0-1.0) of protocol detection
+
+	// Protocol classification
+	ServiceType     string `json:"service_type"`     // Type of service (e.g., "explicit_messaging", "implicit_io")
+	MessageType     string `json:"message_type"`     // Specific message type within protocol
+	IsRealTimeData  bool   `json:"is_real_time"`     // True if this is real-time I/O data
+	IsDiscovery     bool   `json:"is_discovery"`     // True if this is device discovery
+	IsConfiguration bool   `json:"is_configuration"` // True if this is configuration/setup
+
+	// Device and security information
+	DeviceIdentity map[string]interface{} `json:"device_identity"` // Device identity information
+	SecurityInfo   map[string]interface{} `json:"security_info"`   // Security-related information
+	AdditionalData map[string]interface{} `json:"additional_data"` // Protocol-specific additional data
+}
+
+// Validate validates the IndustrialProtocolInfo
+func (ipi *IndustrialProtocolInfo) Validate() error {
+	if ipi.Protocol == "" {
+		return errors.New("protocol name cannot be empty")
+	}
+	if ipi.Port == 0 {
+		return errors.New("port cannot be zero")
+	}
+	if ipi.Timestamp.IsZero() {
+		return errors.New("timestamp cannot be zero")
+	}
+	if ipi.Confidence < 0.0 || ipi.Confidence > 1.0 {
+		return errors.New("confidence must be between 0.0 and 1.0")
+	}
+	if ipi.DeviceIdentity == nil {
+		ipi.DeviceIdentity = make(map[string]interface{})
+	}
+	if ipi.SecurityInfo == nil {
+		ipi.SecurityInfo = make(map[string]interface{})
+	}
+	if ipi.AdditionalData == nil {
+		ipi.AdditionalData = make(map[string]interface{})
+	}
+	return nil
+}

@@ -286,7 +286,7 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 }
 
 // updateDeviceWithIndustrialInfo updates a device with industrial protocol information and performs classification
-func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protocolInfo IndustrialProtocolInfo, isDestination bool) {
+func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protocolInfo model2.IndustrialProtocolInfo, isDestination bool) {
 	deviceKey := "IP:" + deviceIP
 	device, exists := p.devices[deviceKey]
 	if !exists {
@@ -384,10 +384,10 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 	industrialProtocols[protocolInfo.Protocol] = protocolData
 
 	// Perform comprehensive device classification based on accumulated protocol information
-	var allProtocols []IndustrialProtocolInfo
+	var allProtocols []model2.IndustrialProtocolInfo
 	for _, protoData := range industrialProtocols {
 		if protoMap, ok := protoData.(map[string]interface{}); ok {
-			protocol := IndustrialProtocolInfo{
+			protocol := model2.IndustrialProtocolInfo{
 				Protocol:        getString(protoMap, "protocol"),
 				Port:            uint16(getFloat64(protoMap, "port")),
 				Direction:       getString(protoMap, "direction"),
@@ -477,7 +477,7 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 // Helper methods for enhanced device classification
 
 // calculateDeviceClassificationConfidence calculates confidence score for device classification
-func (p *GopacketParser) calculateDeviceClassificationConfidence(device model2.Device, protocols []IndustrialProtocolInfo, flows []model2.Flow) float64 {
+func (p *GopacketParser) calculateDeviceClassificationConfidence(device model2.Device, protocols []model2.IndustrialProtocolInfo, flows []model2.Flow) float64 {
 	if len(protocols) == 0 {
 		return 0.0
 	}
@@ -545,7 +545,7 @@ func (p *GopacketParser) serializeCommunicationPatterns(patterns []model2.Commun
 }
 
 // extractProtocolNames extracts protocol names from protocol info list
-func (p *GopacketParser) extractProtocolNames(protocols []IndustrialProtocolInfo) []string {
+func (p *GopacketParser) extractProtocolNames(protocols []model2.IndustrialProtocolInfo) []string {
 	var names []string
 	seen := make(map[string]bool)
 	for _, protocol := range protocols {
@@ -558,7 +558,7 @@ func (p *GopacketParser) extractProtocolNames(protocols []IndustrialProtocolInfo
 }
 
 // determinePrimaryProtocol determines the primary protocol based on usage patterns
-func (p *GopacketParser) determinePrimaryProtocol(protocols []IndustrialProtocolInfo) string {
+func (p *GopacketParser) determinePrimaryProtocol(protocols []model2.IndustrialProtocolInfo) string {
 	if len(protocols) == 0 {
 		return ""
 	}
@@ -590,7 +590,7 @@ func (p *GopacketParser) determinePrimaryProtocol(protocols []IndustrialProtocol
 }
 
 // hasRealTimeData checks if any protocol has real-time data
-func (p *GopacketParser) hasRealTimeData(protocols []IndustrialProtocolInfo) bool {
+func (p *GopacketParser) hasRealTimeData(protocols []model2.IndustrialProtocolInfo) bool {
 	for _, protocol := range protocols {
 		if protocol.IsRealTimeData {
 			return true
@@ -600,7 +600,7 @@ func (p *GopacketParser) hasRealTimeData(protocols []IndustrialProtocolInfo) boo
 }
 
 // hasDiscovery checks if any protocol has discovery messages
-func (p *GopacketParser) hasDiscovery(protocols []IndustrialProtocolInfo) bool {
+func (p *GopacketParser) hasDiscovery(protocols []model2.IndustrialProtocolInfo) bool {
 	for _, protocol := range protocols {
 		if protocol.IsDiscovery {
 			return true
@@ -610,7 +610,7 @@ func (p *GopacketParser) hasDiscovery(protocols []IndustrialProtocolInfo) bool {
 }
 
 // hasConfiguration checks if any protocol has configuration messages
-func (p *GopacketParser) hasConfiguration(protocols []IndustrialProtocolInfo) bool {
+func (p *GopacketParser) hasConfiguration(protocols []model2.IndustrialProtocolInfo) bool {
 	for _, protocol := range protocols {
 		if protocol.IsConfiguration {
 			return true
@@ -1711,7 +1711,7 @@ func (p *GopacketParser) ParseFile() error {
 					p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
 
 					// Collect protocol usage statistics for source device
-					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
+					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
 						// Store protocol usage statistics in repository
 						if statsErr = p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
 							// Log error but continue processing
@@ -1724,7 +1724,7 @@ func (p *GopacketParser) ParseFile() error {
 					p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
 
 					// Collect protocol usage statistics for destination device
-					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
+					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
 						// Store protocol usage statistics in repository
 						if statsErr := p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
 							// Log error but continue processing

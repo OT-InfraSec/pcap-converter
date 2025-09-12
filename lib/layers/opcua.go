@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -721,4 +722,388 @@ func RegisterOPCUA() {
 // InitLayerOPCUA initializes the OPC UA layer for gopacket
 func InitLayerOPCUA() {
 	RegisterOPCUA()
+}
+
+// Validate performs comprehensive validation of the OPC UA packet
+func (o *OPCUA) Validate() error {
+	if err := o.validateHeader(); err != nil {
+		return fmt.Errorf("header validation failed: %w", err)
+	}
+
+	if err := o.validateSecurityInfo(); err != nil {
+		return fmt.Errorf("security info validation failed: %w", err)
+	}
+
+	if err := o.validateServiceInfo(); err != nil {
+		return fmt.Errorf("service info validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateHeader validates the OPC UA message header
+func (o *OPCUA) validateHeader() error {
+	// Validate message type
+	validMessageTypes := map[string]bool{
+		OPCUAMessageTypeHello:        true,
+		OPCUAMessageTypeAcknowledge:  true,
+		OPCUAMessageTypeError:        true,
+		OPCUAMessageTypeReverseHello: true,
+		OPCUAMessageTypeOpenChannel:  true,
+		OPCUAMessageTypeCloseChannel: true,
+		OPCUAMessageTypeMessage:      true,
+	}
+
+	if !validMessageTypes[o.MessageType] {
+		return fmt.Errorf("invalid message type: %s", o.MessageType)
+	}
+
+	// Validate chunk type
+	validChunkTypes := map[string]bool{
+		OPCUAChunkTypeFinal:        true,
+		OPCUAChunkTypeIntermediate: true,
+		OPCUAChunkTypeAbort:        true,
+	}
+
+	if o.ChunkType != "" && !validChunkTypes[o.ChunkType] {
+		return fmt.Errorf("invalid chunk type: %s", o.ChunkType)
+	}
+
+	// Validate message size (should be reasonable)
+	const maxReasonableSize = 16 * 1024 * 1024 // 16MB max
+	if o.MessageSize > maxReasonableSize {
+		return fmt.Errorf("message size too large: %d", o.MessageSize)
+	}
+
+	// Message size should not be zero for valid messages
+	if o.MessageSize == 0 {
+		return fmt.Errorf("message size cannot be zero")
+	}
+
+	return nil
+}
+
+// validateSecurityInfo validates OPC UA security information
+func (o *OPCUA) validateSecurityInfo() error {
+	// Validate security policy if present
+	if o.SecurityPolicy != "" {
+		validPolicies := map[string]bool{
+			SecurityPolicyNone:           true,
+			SecurityPolicyBasic128Rsa15:  true,
+			SecurityPolicyBasic256:       true,
+			SecurityPolicyBasic256Sha256: true,
+			SecurityPolicyAes128Sha256:   true,
+			SecurityPolicyAes256Sha256:   true,
+		}
+
+		if !validPolicies[o.SecurityPolicy] {
+			// Not necessarily an error, might be a custom policy
+			if o.ConfigurationData == nil {
+				o.ConfigurationData = make(map[string]interface{})
+			}
+			o.ConfigurationData["unknown_security_policy"] = o.SecurityPolicy
+		}
+	}
+
+	// Validate security mode if present
+	if o.SecurityMode != "" {
+		validModes := map[string]bool{
+			SecurityModeNone:           true,
+			SecurityModeSign:           true,
+			SecurityModeSignAndEncrypt: true,
+		}
+
+		if !validModes[o.SecurityMode] {
+			return fmt.Errorf("invalid security mode: %s", o.SecurityMode)
+		}
+	}
+
+	return nil
+}
+
+// validateServiceInfo validates OPC UA service information
+func (o *OPCUA) validateServiceInfo() error {
+	// Validate service type if present
+	if o.ServiceType != "" {
+		// Common OPC UA service types - not exhaustive, but covers main ones
+		knownServices := map[string]bool{
+			"CreateSession":         true,
+			"ActivateSession":       true,
+			"CloseSession":          true,
+			"CreateSubscription":    true,
+			"DeleteSubscription":    true,
+			"CreateMonitoredItems":  true,
+			"DeleteMonitoredItems":  true,
+			"ModifyMonitoredItems":  true,
+			"SetMonitoringMode":     true,
+			"Publish":               true,
+			"Republish":             true,
+			"TransferSubscriptions": true,
+			"Browse":                true,
+			"BrowseNext":            true,
+			"Read":                  true,
+			"Write":                 true,
+			"Call":                  true,
+			"GetEndpoints":          true,
+			"FindServers":           true,
+			"RegisterServer":        true,
+			"RegisterServer2":       true,
+		}
+
+		if !knownServices[o.ServiceType] {
+			// Not an error, might be a vendor-specific service
+			if o.ConfigurationData == nil {
+				o.ConfigurationData = make(map[string]interface{})
+			}
+			o.ConfigurationData["unknown_service_type"] = o.ServiceType
+		}
+	}
+
+	// Validate service node ID if present
+	if o.ServiceNodeID > 0 {
+		// Check if it's a known service node ID
+		knownServiceNodeIDs := map[uint32]bool{
+			ServiceTypeCreateSession:        true,
+			ServiceTypeActivateSession:      true,
+			ServiceTypeCloseSession:         true,
+			ServiceTypeBrowse:               true,
+			ServiceTypeBrowseNext:           true,
+			ServiceTypeRead:                 true,
+			ServiceTypeWrite:                true,
+			ServiceTypeCall:                 true,
+			ServiceTypeCreateSubscription:   true,
+			ServiceTypeModifySubscription:   true,
+			ServiceTypeDeleteSubscription:   true,
+			ServiceTypeCreateMonitoredItems: true,
+			ServiceTypeModifyMonitoredItems: true,
+			ServiceTypeDeleteMonitoredItems: true,
+			ServiceTypePublish:              true,
+			ServiceTypeRepublish:            true,
+		}
+
+		if !knownServiceNodeIDs[o.ServiceNodeID] {
+			// Not necessarily an error, might be a vendor-specific service
+			if o.ConfigurationData == nil {
+				o.ConfigurationData = make(map[string]interface{})
+			}
+			o.ConfigurationData["unknown_service_node_id"] = o.ServiceNodeID
+		}
+	}
+
+	return nil
+}
+
+// IsValidForClassification returns true if the packet contains sufficient information for device classification
+func (o *OPCUA) IsValidForClassification() bool {
+	// Must have valid message type
+	if o.MessageType == "" {
+		return false
+	}
+
+	// Error messages are less useful for classification
+	if o.MessageType == OPCUAMessageTypeError {
+		return false
+	}
+
+	// For classification, we need either security info, service info, or endpoint info
+	hasSecurityInfo := o.SecurityPolicy != "" || o.SecurityMode != ""
+	hasServiceInfo := o.ServiceType != "" || o.ServiceNodeID > 0
+	hasEndpointInfo := o.EndpointURL != "" || o.ApplicationName != ""
+
+	return hasSecurityInfo || hasServiceInfo || hasEndpointInfo
+}
+
+// ExtractSecurityInfo safely extracts security-related information
+func (o *OPCUA) ExtractSecurityInfo() map[string]interface{} {
+	security := make(map[string]interface{})
+
+	// Extract security policy
+	if o.SecurityPolicy != "" {
+		security["security_policy"] = o.SecurityPolicy
+	}
+
+	// Extract security mode
+	if o.SecurityMode != "" {
+		security["security_mode"] = o.SecurityMode
+	}
+
+	// Extract secure channel information
+	if o.SecureChannelID > 0 {
+		security["secure_channel_id"] = o.SecureChannelID
+	}
+
+	// Extract session information
+	if len(o.SessionID) > 0 {
+		security["has_session"] = true
+	}
+
+	if len(o.AuthenticationToken) > 0 {
+		security["has_auth_token"] = true
+	}
+
+	// Determine security level based on policy and mode
+	securityLevel := "none"
+	if o.SecurityPolicy != "" && o.SecurityPolicy != SecurityPolicyNone {
+		securityLevel = "basic"
+		if o.SecurityMode == SecurityModeSignAndEncrypt {
+			securityLevel = "high"
+		} else if o.SecurityMode == SecurityModeSign {
+			securityLevel = "medium"
+		}
+	}
+	security["security_level"] = securityLevel
+
+	// Include any additional security-related data
+	if o.ConfigurationData != nil {
+		for k, v := range o.ConfigurationData {
+			if strings.Contains(strings.ToLower(k), "security") ||
+				strings.Contains(strings.ToLower(k), "auth") ||
+				strings.Contains(strings.ToLower(k), "encrypt") ||
+				strings.Contains(strings.ToLower(k), "sign") {
+				security[k] = v
+			}
+		}
+	}
+
+	return security
+}
+
+// ExtractServiceInfo safely extracts service-related information
+func (o *OPCUA) ExtractServiceInfo() map[string]interface{} {
+	service := make(map[string]interface{})
+
+	// Extract service type
+	if o.ServiceType != "" {
+		service["service_type"] = o.ServiceType
+	}
+
+	// Extract service node ID
+	if o.ServiceNodeID > 0 {
+		service["service_node_id"] = o.ServiceNodeID
+	}
+
+	// Extract endpoint information
+	if o.EndpointURL != "" {
+		service["endpoint_url"] = o.EndpointURL
+	}
+
+	if o.ApplicationName != "" {
+		service["application_name"] = o.ApplicationName
+	}
+
+	if o.ApplicationURI != "" {
+		service["application_uri"] = o.ApplicationURI
+	}
+
+	if o.ProductURI != "" {
+		service["product_uri"] = o.ProductURI
+	}
+
+	// Extract session information
+	if len(o.SessionID) > 0 {
+		service["has_session"] = true
+	}
+
+	if o.SubscriptionID > 0 {
+		service["subscription_id"] = o.SubscriptionID
+	}
+
+	if o.RequestHandle > 0 {
+		service["request_handle"] = o.RequestHandle
+	}
+
+	// Extract communication patterns
+	service["is_handshake"] = o.IsHandshake
+	service["is_session_mgmt"] = o.IsSessionMgmt
+	service["is_subscription"] = o.IsSubscription
+	service["is_data_access"] = o.IsDataAccess
+	service["is_method_call"] = o.IsMethodCall
+	service["is_browse"] = o.IsBrowse
+	service["is_security_exchange"] = o.IsSecurityExchange
+
+	// Include any additional service-related data
+	if o.ConfigurationData != nil {
+		for k, v := range o.ConfigurationData {
+			service[k] = v
+		}
+	}
+
+	return service
+}
+
+// ExtractDeviceIdentityInfo safely extracts device identity information
+func (o *OPCUA) ExtractDeviceIdentityInfo() map[string]interface{} {
+	identity := make(map[string]interface{})
+
+	// Extract application information
+	if o.ApplicationName != "" {
+		identity["application_name"] = o.ApplicationName
+	}
+
+	if o.ApplicationURI != "" {
+		identity["application_uri"] = o.ApplicationURI
+	}
+
+	if o.ProductURI != "" {
+		identity["product_uri"] = o.ProductURI
+	}
+
+	if o.ApplicationType != "" {
+		identity["application_type"] = o.ApplicationType
+	}
+
+	// Extract endpoint information
+	if o.EndpointURL != "" {
+		identity["endpoint_url"] = o.EndpointURL
+	}
+
+	if o.GatewayServerURI != "" {
+		identity["gateway_server_uri"] = o.GatewayServerURI
+	}
+
+	if len(o.DiscoveryURLs) > 0 {
+		identity["discovery_urls"] = o.DiscoveryURLs
+	}
+
+	// Include server/client role based on message patterns
+	if o.ServiceType != "" {
+		// Determine role based on service patterns
+		serverServices := map[string]bool{
+			"GetEndpoints":    true,
+			"FindServers":     true,
+			"RegisterServer":  true,
+			"RegisterServer2": true,
+		}
+
+		clientServices := map[string]bool{
+			"CreateSession":      true,
+			"ActivateSession":    true,
+			"CreateSubscription": true,
+			"Browse":             true,
+			"Read":               true,
+			"Write":              true,
+		}
+
+		if serverServices[o.ServiceType] {
+			identity["inferred_role"] = "server"
+		} else if clientServices[o.ServiceType] {
+			identity["inferred_role"] = "client"
+		}
+	}
+
+	// Infer role from application type
+	if o.ApplicationType != "" {
+		switch o.ApplicationType {
+		case "Server":
+			identity["inferred_role"] = "server"
+		case "Client":
+			identity["inferred_role"] = "client"
+		case "ClientAndServer":
+			identity["inferred_role"] = "client_and_server"
+		case "DiscoveryServer":
+			identity["inferred_role"] = "discovery_server"
+		}
+	}
+
+	return identity
 }

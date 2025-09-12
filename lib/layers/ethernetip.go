@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -555,4 +556,227 @@ func RegisterEtherNetIP() {
 // InitLayerEtherNetIP initializes the EtherNet/IP layer for gopacket
 func InitLayerEtherNetIP() {
 	RegisterEtherNetIP()
+}
+
+// Validate performs comprehensive validation of the EtherNet/IP packet
+func (e *EtherNetIP) Validate() error {
+	if err := e.validateHeader(); err != nil {
+		return fmt.Errorf("header validation failed: %w", err)
+	}
+
+	if err := e.validateCIPData(); err != nil {
+		return fmt.Errorf("CIP data validation failed: %w", err)
+	}
+
+	if err := e.validateDeviceIdentity(); err != nil {
+		return fmt.Errorf("device identity validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateHeader validates the EtherNet/IP header fields
+func (e *EtherNetIP) validateHeader() error {
+	// Validate command field
+	validCommands := map[uint16]bool{
+		EtherNetIPCommandNOP:               true,
+		EtherNetIPCommandListServices:      true,
+		EtherNetIPCommandListIdentity:      true,
+		EtherNetIPCommandListInterfaces:    true,
+		EtherNetIPCommandRegisterSession:   true,
+		EtherNetIPCommandUnregisterSession: true,
+		EtherNetIPCommandSendRRData:        true,
+		EtherNetIPCommandSendUnitData:      true,
+		EtherNetIPCommandIndicateStatus:    true,
+		EtherNetIPCommandCancel:            true,
+	}
+
+	if !validCommands[e.Command] {
+		return fmt.Errorf("invalid command code: 0x%04X", e.Command)
+	}
+
+	// Validate length field (should not exceed reasonable limits)
+	const maxReasonableLength = 65535
+	if e.Length > maxReasonableLength {
+		return fmt.Errorf("length field too large: %d", e.Length)
+	}
+
+	// Validate status field for known status codes
+	if e.Status != EtherNetIPStatusSuccess {
+		validStatuses := map[uint32]bool{
+			EtherNetIPStatusInvalidCommand:       true,
+			EtherNetIPStatusInsufficientMemory:   true,
+			EtherNetIPStatusIncorrectData:        true,
+			EtherNetIPStatusInvalidSessionHandle: true,
+			EtherNetIPStatusInvalidLength:        true,
+			EtherNetIPStatusUnsupportedProtocol:  true,
+		}
+		if !validStatuses[e.Status] {
+			// Not a fatal error, but worth noting
+			if e.ConfigurationData == nil {
+				e.ConfigurationData = make(map[string]interface{})
+			}
+			e.ConfigurationData["unknown_status"] = fmt.Sprintf("0x%08X", e.Status)
+		}
+	}
+
+	// Validate sender context length
+	if len(e.SenderContext) != 8 {
+		return fmt.Errorf("sender context must be 8 bytes, got %d", len(e.SenderContext))
+	}
+
+	return nil
+}
+
+// validateCIPData validates the Common Industrial Protocol data
+func (e *EtherNetIP) validateCIPData() error {
+	// Validate service code if present
+	if e.Service != 0 {
+		validServices := map[uint8]bool{
+			CIPServiceGetAttributesAll:   true,
+			CIPServiceSetAttributesAll:   true,
+			CIPServiceGetAttributeSingle: true,
+			CIPServiceSetAttributeSingle: true,
+			CIPServiceReset:              true,
+			CIPServiceStart:              true,
+			CIPServiceStop:               true,
+			CIPServiceCreate:             true,
+			CIPServiceDelete:             true,
+			CIPServiceMultipleServiceReq: true,
+			CIPServiceApplyAttributes:    true,
+			CIPServiceGetAttributeList:   true,
+			CIPServiceSetAttributeList:   true,
+		}
+		if !validServices[e.Service] {
+			// Not necessarily an error, might be a vendor-specific service
+			if e.ConfigurationData == nil {
+				e.ConfigurationData = make(map[string]interface{})
+			}
+			e.ConfigurationData["unknown_service"] = fmt.Sprintf("0x%02X", e.Service)
+		}
+	}
+
+	// CIP IDs are uint16, so they're automatically within valid range
+
+	return nil
+}
+
+// validateDeviceIdentity validates device identity information extracted from packets
+func (e *EtherNetIP) validateDeviceIdentity() error {
+	// Validate vendor ID
+	if e.VendorID > 0 {
+		// Vendor IDs are typically well-defined ranges
+		const maxVendorID = 0xFFFF
+		if e.VendorID > maxVendorID {
+			return fmt.Errorf("vendor ID out of range: %d", e.VendorID)
+		}
+	}
+
+	// Validate product name length and content
+	if e.ProductName != "" {
+		const maxProductNameLength = 256
+		if len(e.ProductName) > maxProductNameLength {
+			return fmt.Errorf("product name too long: %d characters", len(e.ProductName))
+		}
+
+		// Check for reasonable ASCII content
+		for i, r := range e.ProductName {
+			if r < 0x20 || r > 0x7E {
+				return fmt.Errorf("invalid character in product name at position %d: 0x%02X", i, r)
+			}
+		}
+	}
+
+	// DeviceState is uint8, so it's automatically within valid range
+
+	return nil
+}
+
+// IsValidForClassification returns true if the packet contains sufficient information for device classification
+func (e *EtherNetIP) IsValidForClassification() bool {
+	// Must have valid command
+	if e.Command == 0 {
+		return false
+	}
+
+	// Must have successful status or be a request
+	if e.Status != EtherNetIPStatusSuccess && e.Command != EtherNetIPCommandListIdentity {
+		return false
+	}
+
+	// For classification, we need either device identity or service information
+	hasDeviceIdentity := e.VendorID > 0 || e.ProductName != "" || e.SerialNumber > 0
+	hasServiceInfo := e.Service > 0 || e.ClassID > 0
+
+	return hasDeviceIdentity || hasServiceInfo
+}
+
+// ExtractDeviceIdentityInfo safely extracts device identity information
+func (e *EtherNetIP) ExtractDeviceIdentityInfo() map[string]interface{} {
+	identity := make(map[string]interface{})
+
+	// Only include fields that have been validated and are present
+	if e.VendorID > 0 {
+		identity["vendor_id"] = e.VendorID
+	}
+
+	if e.ProductCode > 0 {
+		identity["product_code"] = e.ProductCode
+	}
+
+	if e.SerialNumber > 0 {
+		identity["serial_number"] = e.SerialNumber
+	}
+
+	if e.ProductName != "" {
+		identity["product_name"] = e.ProductName
+	}
+
+	if e.DeviceType != "" {
+		identity["device_type"] = e.DeviceType
+	}
+
+	if e.DeviceState > 0 {
+		identity["device_state"] = e.DeviceState
+	}
+
+	// Add any additional configuration data that passed validation
+	if e.ConfigurationData != nil {
+		for k, v := range e.ConfigurationData {
+			identity[k] = v
+		}
+	}
+
+	return identity
+}
+
+// ExtractSecurityInfo safely extracts security-related information
+func (e *EtherNetIP) ExtractSecurityInfo() map[string]interface{} {
+	security := make(map[string]interface{})
+
+	// EtherNet/IP doesn't have built-in security, but we can infer some information
+	// Check if this appears to be encrypted or secured communication
+	if e.SessionHandle > 0 {
+		security["has_session"] = true
+		security["session_handle"] = e.SessionHandle
+	}
+
+	// Check for any security-related configuration data
+	if e.ConfigurationData != nil {
+		for k, v := range e.ConfigurationData {
+			if strings.Contains(strings.ToLower(k), "security") ||
+				strings.Contains(strings.ToLower(k), "auth") ||
+				strings.Contains(strings.ToLower(k), "encrypt") {
+				security[k] = v
+			}
+		}
+	}
+
+	// Infer security level based on protocol usage
+	security["security_level"] = "none" // EtherNet/IP typically has no security
+	if e.SessionHandle > 0 {
+		security["security_level"] = "basic" // At least has session management
+	}
+
+	return security
 }

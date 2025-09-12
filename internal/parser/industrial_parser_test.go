@@ -55,7 +55,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		protocols    []IndustrialProtocolInfo
+		protocols    []model.IndustrialProtocolInfo
 		flows        []model.Flow
 		expectedType model.IndustrialDeviceType
 	}{

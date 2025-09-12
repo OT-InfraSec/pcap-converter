@@ -14,13 +14,13 @@ type MockIndustrialProtocolParser struct {
 }
 
 // ParseIndustrialProtocols mocks the ParseIndustrialProtocols method
-func (m *MockIndustrialProtocolParser) ParseIndustrialProtocols(packet gopacket.Packet) ([]IndustrialProtocolInfo, error) {
+func (m *MockIndustrialProtocolParser) ParseIndustrialProtocols(packet gopacket.Packet) ([]model.IndustrialProtocolInfo, error) {
 	args := m.Called(packet)
-	return args.Get(0).([]IndustrialProtocolInfo), args.Error(1)
+	return args.Get(0).([]model.IndustrialProtocolInfo), args.Error(1)
 }
 
 // DetectDeviceType mocks the DetectDeviceType method
-func (m *MockIndustrialProtocolParser) DetectDeviceType(protocols []IndustrialProtocolInfo, flows []model.Flow) model.IndustrialDeviceType {
+func (m *MockIndustrialProtocolParser) DetectDeviceType(protocols []model.IndustrialProtocolInfo, flows []model.Flow) model.IndustrialDeviceType {
 	args := m.Called(protocols, flows)
 	return args.Get(0).(model.IndustrialDeviceType)
 }
@@ -32,7 +32,7 @@ func (m *MockIndustrialProtocolParser) AnalyzeCommunicationPatterns(flows []mode
 }
 
 // CollectProtocolUsageStats mocks the CollectProtocolUsageStats method
-func (m *MockIndustrialProtocolParser) CollectProtocolUsageStats(deviceID string, protocols []IndustrialProtocolInfo) (*model.ProtocolUsageStats, error) {
+func (m *MockIndustrialProtocolParser) CollectProtocolUsageStats(deviceID string, protocols []model.IndustrialProtocolInfo) (*model.ProtocolUsageStats, error) {
 	args := m.Called(deviceID, protocols)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -47,9 +47,9 @@ func NewMockIndustrialProtocolParser() *MockIndustrialProtocolParser {
 
 // Helper methods for creating test data
 
-// CreateTestIndustrialProtocolInfo creates a test IndustrialProtocolInfo for testing
-func CreateTestIndustrialProtocolInfo(protocol string, port uint16) IndustrialProtocolInfo {
-	return IndustrialProtocolInfo{
+// CreateTestIndustrialProtocolInfo creates a test model.IndustrialProtocolInfo for testing
+func CreateTestIndustrialProtocolInfo(protocol string, port uint16) model.IndustrialProtocolInfo {
+	return model.IndustrialProtocolInfo{
 		Protocol:        protocol,
 		Port:            port,
 		Direction:       "bidirectional",
@@ -67,7 +67,7 @@ func CreateTestIndustrialProtocolInfo(protocol string, port uint16) IndustrialPr
 }
 
 // CreateTestEtherNetIPInfo creates test EtherNet/IP protocol info
-func CreateTestEtherNetIPInfo() IndustrialProtocolInfo {
+func CreateTestEtherNetIPInfo() model.IndustrialProtocolInfo {
 	info := CreateTestIndustrialProtocolInfo("EtherNet/IP", 44818)
 	info.ServiceType = "explicit_messaging"
 	info.IsRealTimeData = true
@@ -78,7 +78,7 @@ func CreateTestEtherNetIPInfo() IndustrialProtocolInfo {
 }
 
 // CreateTestOPCUAInfo creates test OPC UA protocol info
-func CreateTestOPCUAInfo() IndustrialProtocolInfo {
+func CreateTestOPCUAInfo() model.IndustrialProtocolInfo {
 	info := CreateTestIndustrialProtocolInfo("OPC UA", 4840)
 	info.ServiceType = "service_call"
 	info.MessageType = "CreateSession"
@@ -89,7 +89,7 @@ func CreateTestOPCUAInfo() IndustrialProtocolInfo {
 }
 
 // CreateTestModbusInfo creates test Modbus TCP protocol info
-func CreateTestModbusInfo() IndustrialProtocolInfo {
+func CreateTestModbusInfo() model.IndustrialProtocolInfo {
 	info := CreateTestIndustrialProtocolInfo("Modbus TCP", 502)
 	info.ServiceType = "modbus_request"
 	info.IsRealTimeData = true
@@ -128,7 +128,7 @@ func CreateTestFlows(sourceIP, destIP string, protocol string, packetCount int, 
 // SetupMockIndustrialParserForPLC sets up mock expectations for PLC device classification
 func SetupMockIndustrialParserForPLC(mockParser *MockIndustrialProtocolParser) {
 	ethernetIPInfo := CreateTestEtherNetIPInfo()
-	protocols := []IndustrialProtocolInfo{ethernetIPInfo}
+	protocols := []model.IndustrialProtocolInfo{ethernetIPInfo}
 
 	mockParser.On("ParseIndustrialProtocols", gopacket.Packet(nil)).Return(protocols, nil)
 	mockParser.On("DetectDeviceType", protocols, mock.AnythingOfType("[]model.Flow")).Return(model.DeviceTypePLC)
@@ -140,7 +140,7 @@ func SetupMockIndustrialParserForPLC(mockParser *MockIndustrialProtocolParser) {
 // SetupMockIndustrialParserForHMI sets up mock expectations for HMI device classification
 func SetupMockIndustrialParserForHMI(mockParser *MockIndustrialProtocolParser) {
 	opcuaInfo := CreateTestOPCUAInfo()
-	protocols := []IndustrialProtocolInfo{opcuaInfo}
+	protocols := []model.IndustrialProtocolInfo{opcuaInfo}
 
 	mockParser.On("ParseIndustrialProtocols", gopacket.Packet(nil)).Return(protocols, nil)
 	mockParser.On("DetectDeviceType", protocols, mock.AnythingOfType("[]model.Flow")).Return(model.DeviceTypeHMI)
@@ -152,7 +152,7 @@ func SetupMockIndustrialParserForHMI(mockParser *MockIndustrialProtocolParser) {
 // SetupMockIndustrialParserForIODevice sets up mock expectations for I/O device classification
 func SetupMockIndustrialParserForIODevice(mockParser *MockIndustrialProtocolParser) {
 	modbusInfo := CreateTestModbusInfo()
-	protocols := []IndustrialProtocolInfo{modbusInfo}
+	protocols := []model.IndustrialProtocolInfo{modbusInfo}
 
 	mockParser.On("ParseIndustrialProtocols", gopacket.Packet(nil)).Return(protocols, nil)
 	mockParser.On("DetectDeviceType", protocols, mock.AnythingOfType("[]model.Flow")).Return(model.DeviceTypeIODevice)

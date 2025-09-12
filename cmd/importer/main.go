@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -179,13 +180,106 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 
 // performIndustrialAnalysis performs industrial device analysis on imported data
 func performIndustrialAnalysis(repo repository.Repository) error {
-	// This is a placeholder for industrial analysis logic
-	// In a full implementation, this would:
-	// 1. Analyze devices and flows for industrial protocols
-	// 2. Classify devices based on protocol usage patterns
-	// 3. Generate protocol usage statistics
-	// 4. Identify communication patterns
-	log.Printf("Industrial analysis placeholder - would analyze devices and protocols")
+	log.Printf("Starting industrial device analysis...")
+
+	// Create industrial protocol parser
+	industrialParser := parser.NewIndustrialProtocolParser()
+
+	// Get all flows to analyze for industrial protocols
+	flows, err := repo.GetFlows(make(map[string]interface{}))
+	if err != nil {
+		return fmt.Errorf("failed to get flows for industrial analysis: %w", err)
+	}
+
+	log.Printf("Analyzing %d flows for industrial protocols...", len(flows))
+
+	// Process flows to extract industrial protocol information
+	deviceProtocols := make(map[string][]model.IndustrialProtocolInfo)
+
+	for _, flow := range flows {
+		// Simulate packet analysis for industrial protocols
+		// In a real implementation, this would analyze actual packets
+		protocols := analyzeFlowForIndustrialProtocols(flow)
+
+		// Group by source device
+		if len(protocols) > 0 {
+			srcAddr := flow.Source
+			deviceProtocols[srcAddr] = append(deviceProtocols[srcAddr], protocols...)
+		}
+	}
+
+	log.Printf("Found industrial protocols in %d devices", len(deviceProtocols))
+
+	// Perform device classification and save results
+	for deviceAddr, protocols := range deviceProtocols {
+		// Convert flows slice for device classification
+		flowsForDevice := make([]model.Flow, len(flows))
+		for i, flow := range flows {
+			flowsForDevice[i] = *flow
+		}
+
+		// Classify device type based on protocol usage
+		deviceType := industrialParser.DetectDeviceType(protocols, flowsForDevice)
+
+		// Create industrial device info
+		deviceInfo := &model.IndustrialDeviceInfo{
+			DeviceAddress: deviceAddr,
+			DeviceType:    deviceType,
+			Role:          determineDeviceRole(deviceType, protocols),
+			Confidence:    calculateConfidence(protocols),
+			Protocols:     extractProtocolNames(protocols),
+			SecurityLevel: model.SecurityLevelUnknown, // Would be determined from security analysis
+			LastSeen:      time.Now(),
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+
+		// Save device info
+		if err := repo.UpsertIndustrialDeviceInfo(deviceInfo); err != nil {
+			log.Printf("Failed to save device info for %s: %v", deviceAddr, err)
+			continue
+		}
+
+		// Generate and save protocol usage statistics
+		stats, err := industrialParser.CollectProtocolUsageStats(deviceAddr, protocols)
+		if err != nil {
+			log.Printf("Failed to collect protocol stats for %s: %v", deviceAddr, err)
+			continue
+		}
+
+		if err := repo.UpsertProtocolUsageStats(stats); err != nil {
+			log.Printf("Failed to save protocol stats for %s: %v", deviceAddr, err)
+		}
+
+		// Save individual protocol info entries
+		protocolInfos := make([]*model.IndustrialProtocolInfo, len(protocols))
+		for i := range protocols {
+			protocolInfos[i] = &protocols[i]
+		}
+
+		if err := repo.SaveIndustrialProtocolInfos(protocolInfos); err != nil {
+			log.Printf("Failed to save protocol infos for %s: %v", deviceAddr, err)
+		}
+	}
+
+	// Analyze communication patterns
+	flowsForAnalysis := make([]model.Flow, len(flows))
+	for i, flow := range flows {
+		flowsForAnalysis[i] = *flow
+	}
+	patterns := industrialParser.AnalyzeCommunicationPatterns(flowsForAnalysis)
+
+	// Convert patterns to pointer slice
+	patternPtrs := make([]*model.CommunicationPattern, len(patterns))
+	for i := range patterns {
+		patternPtrs[i] = &patterns[i]
+	}
+
+	if err := repo.SaveCommunicationPatterns(patternPtrs); err != nil {
+		log.Printf("Failed to save communication patterns: %v", err)
+	}
+
+	log.Printf("Industrial analysis completed successfully")
 	return nil
 }
 
@@ -392,6 +486,137 @@ func formatProtocolStats(stats []*model.ProtocolUsageStats, format string) error
 		w.Flush()
 	}
 	return nil
+}
+
+// Helper functions for industrial analysis
+
+// analyzeFlowForIndustrialProtocols analyzes a flow for industrial protocol usage
+func analyzeFlowForIndustrialProtocols(flow *model.Flow) []model.IndustrialProtocolInfo {
+	var protocols []model.IndustrialProtocolInfo
+
+	// Check for common industrial protocol ports
+	industrialPorts := map[string]string{
+		"44818": "ethernetip", // EtherNet/IP
+		"2222":  "ethernetip", // EtherNet/IP UDP
+		"4840":  "opcua",      // OPC UA
+		"502":   "modbus",     // Modbus TCP
+		"102":   "s7",         // Siemens S7
+		"20000": "dnp3",       // DNP3
+	}
+
+	// Check destination ports for protocol detection
+	if flow.DestinationPorts != nil {
+		for _, portStr := range flow.DestinationPorts.List() {
+			if protocolName, exists := industrialPorts[portStr]; exists {
+				protocol := model.IndustrialProtocolInfo{
+					Protocol:       protocolName,
+					Port:           parsePort(portStr),
+					Direction:      "outbound",
+					Timestamp:      time.Now(),
+					Confidence:     0.7, // Medium confidence from port-based detection
+					ServiceType:    determineServiceType(protocolName, portStr),
+					DeviceIdentity: make(map[string]interface{}),
+					SecurityInfo:   make(map[string]interface{}),
+					AdditionalData: make(map[string]interface{}),
+				}
+				protocols = append(protocols, protocol)
+			}
+		}
+	}
+
+	// Check source ports for protocol detection (server responses)
+	if flow.SourcePorts != nil {
+		for _, portStr := range flow.SourcePorts.List() {
+			if protocolName, exists := industrialPorts[portStr]; exists {
+				protocol := model.IndustrialProtocolInfo{
+					Protocol:       protocolName,
+					Port:           parsePort(portStr),
+					Direction:      "inbound",
+					Timestamp:      time.Now(),
+					Confidence:     0.7,
+					ServiceType:    determineServiceType(protocolName, portStr),
+					DeviceIdentity: make(map[string]interface{}),
+					SecurityInfo:   make(map[string]interface{}),
+					AdditionalData: make(map[string]interface{}),
+				}
+				protocols = append(protocols, protocol)
+			}
+		}
+	}
+
+	return protocols
+}
+
+// parsePort converts port string to uint16
+func parsePort(portStr string) uint16 {
+	if port, err := strconv.ParseUint(portStr, 10, 16); err == nil {
+		return uint16(port)
+	}
+	return 0
+}
+
+// determineServiceType determines the service type based on protocol and port
+func determineServiceType(protocol string, port string) string {
+	switch protocol {
+	case "ethernetip":
+		if port == "44818" {
+			return "explicit_messaging"
+		}
+		return "implicit_io"
+	case "opcua":
+		return "secure_channel"
+	case "modbus":
+		return "register_access"
+	default:
+		return "unknown"
+	}
+}
+
+// determineDeviceRole determines the role of a device based on its type and protocols
+func determineDeviceRole(deviceType model.IndustrialDeviceType, protocols []model.IndustrialProtocolInfo) model.IndustrialDeviceRole {
+	switch deviceType {
+	case model.DeviceTypePLC:
+		return model.RoleController
+	case model.DeviceTypeHMI, model.DeviceTypeSCADA:
+		return model.RoleOperator
+	case model.DeviceTypeEngWorkstation:
+		return model.RoleEngineer
+	case model.DeviceTypeHistorian:
+		return model.RoleDataCollector
+	case model.DeviceTypeSensor, model.DeviceTypeActuator, model.DeviceTypeIODevice:
+		return model.RoleFieldDevice
+	default:
+		return model.RoleFieldDevice
+	}
+}
+
+// calculateConfidence calculates confidence level based on protocol detection
+func calculateConfidence(protocols []model.IndustrialProtocolInfo) float64 {
+	if len(protocols) == 0 {
+		return 0.0
+	}
+
+	var totalConfidence float64
+	for _, protocol := range protocols {
+		totalConfidence += protocol.Confidence
+	}
+
+	return totalConfidence / float64(len(protocols))
+}
+
+// extractProtocolNames extracts protocol names from protocol info list
+func extractProtocolNames(protocols []model.IndustrialProtocolInfo) []string {
+	seen := make(map[string]bool)
+	var names []string
+
+	for _, protocol := range protocols {
+		if !seen[protocol.Protocol] {
+			names = append(names, protocol.Protocol)
+			seen[protocol.Protocol] = true
+		}
+	}
+
+	return names
 }
 
 // formatCommunicationPatterns formats communication patterns for output
