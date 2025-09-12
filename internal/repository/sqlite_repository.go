@@ -159,8 +159,7 @@ func (r *SQLiteRepository) createTables() error {
 			deviation_data_volume REAL NOT NULL,
 			pattern_type TEXT NOT NULL,
 			criticality TEXT NOT NULL,
-			created_at DATETIME NOT NULL,
-			UNIQUE (source_device_address, destination_device_address, protocol)
+			created_at DATETIME NOT NULL
 		);`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,

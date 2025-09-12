@@ -1713,7 +1713,7 @@ func (p *GopacketParser) ParseFile() error {
 					// Collect protocol usage statistics for source device
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
 						// Store protocol usage statistics in repository
-						if statsErr := p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
+						if statsErr = p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
 							// Log error but continue processing
 							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", srcIP, statsErr)
 						}

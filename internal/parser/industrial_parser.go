@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
@@ -559,6 +560,9 @@ func (p *IndustrialProtocolParserImpl) safeIsRealTimeData(layer interface{}) boo
 
 // Port detection methods
 func (p *IndustrialProtocolParserImpl) isEtherNetIPPort(packet gopacket.Packet) bool {
+	if p.isLikelyEtherNetIPPayload(packet) {
+		return true
+	}
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
 		return tcp.SrcPort == 44818 || tcp.DstPort == 44818
@@ -566,6 +570,27 @@ func (p *IndustrialProtocolParserImpl) isEtherNetIPPort(packet gopacket.Packet) 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
 		return udp.SrcPort == 2222 || udp.DstPort == 2222
+	}
+	return false
+}
+
+// isLikelyEtherNetIPPayload returns true if application payload looks like an ENIP encapsulation header.
+func (p *IndustrialProtocolParserImpl) isLikelyEtherNetIPPayload(packet gopacket.Packet) bool {
+	if app := packet.TransportLayer(); app != nil {
+		b := app.LayerContents()
+		if len(b) < 24 { // ENIP encapsulation header is 24 bytes
+			return false
+		}
+		cmd := binary.LittleEndian.Uint16(b[0:2])
+		length := int(binary.LittleEndian.Uint16(b[2:4]))
+		// basic sanity checks: non\-zero command and length consistent with total payload
+		if cmd == 0 || length < 0 {
+			return false
+		}
+		// ensure claimed length fits in the remaining payload
+		if length <= len(b)-24 {
+			return true
+		}
 	}
 	return false
 }
