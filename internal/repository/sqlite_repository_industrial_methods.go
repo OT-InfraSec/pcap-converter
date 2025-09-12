@@ -353,13 +353,16 @@ func (r *SQLiteRepository) SaveCommunicationPattern(pattern *model2.Communicatio
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, pattern_type, criticality, created_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		pattern.SourceDevice,
 		pattern.DestinationDevice,
 		pattern.Protocol,
 		pattern.Frequency.Milliseconds(),
 		pattern.DataVolume,
+		pattern.FlowCount,
+		pattern.DeviationFrequency,
+		pattern.DeviationDataVolume,
 		pattern.PatternType,
 		pattern.Criticality,
 		time.Now().Format(time.RFC3339Nano),
@@ -369,7 +372,7 @@ func (r *SQLiteRepository) SaveCommunicationPattern(pattern *model2.Communicatio
 
 // GetCommunicationPatterns retrieves communication patterns for a device
 func (r *SQLiteRepository) GetCommunicationPatterns(deviceAddress string) ([]*model2.CommunicationPattern, error) {
-	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, pattern_type, criticality, created_at 
+	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at 
 			  FROM communication_patterns WHERE source_device_address = ? OR destination_device_address = ?`
 	rows, err := r.db.Query(query, deviceAddress, deviceAddress)
 	if err != nil {
@@ -391,6 +394,9 @@ func (r *SQLiteRepository) GetCommunicationPatterns(deviceAddress string) ([]*mo
 			&pattern.Protocol,
 			&frequencyMs,
 			&pattern.DataVolume,
+			&pattern.FlowCount,
+			&pattern.DeviationFrequency,
+			&pattern.DeviationDataVolume,
 			&pattern.PatternType,
 			&pattern.Criticality,
 			&createdAtStr,
@@ -409,7 +415,7 @@ func (r *SQLiteRepository) GetCommunicationPatterns(deviceAddress string) ([]*mo
 
 // GetCommunicationPatternsByProtocol retrieves communication patterns by protocol
 func (r *SQLiteRepository) GetCommunicationPatternsByProtocol(protocol string) ([]*model2.CommunicationPattern, error) {
-	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, pattern_type, criticality, created_at 
+	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at 
 			  FROM communication_patterns WHERE protocol = ?`
 	rows, err := r.db.Query(query, protocol)
 	if err != nil {
@@ -431,6 +437,9 @@ func (r *SQLiteRepository) GetCommunicationPatternsByProtocol(protocol string) (
 			&pattern.Protocol,
 			&frequencyMs,
 			&pattern.DataVolume,
+			&pattern.FlowCount,
+			&pattern.DeviationFrequency,
+			&pattern.DeviationDataVolume,
 			&pattern.PatternType,
 			&pattern.Criticality,
 			&createdAtStr,
@@ -454,10 +463,13 @@ func (r *SQLiteRepository) UpdateCommunicationPattern(pattern *model2.Communicat
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE communication_patterns SET frequency_ms = ?, data_volume = ?, pattern_type = ?, criticality = ? 
+		`UPDATE communication_patterns SET frequency_ms = ?, data_volume = ?, flow_count = ?, deviation_frequency = ?, deviation_data_volume = ?, pattern_type = ?, criticality = ? 
 		WHERE source_device_address = ? AND destination_device_address = ? AND protocol = ?;`,
 		pattern.Frequency.Milliseconds(),
 		pattern.DataVolume,
+		pattern.FlowCount,
+		pattern.DeviationFrequency,
+		pattern.DeviationDataVolume,
 		pattern.PatternType,
 		pattern.Criticality,
 		pattern.SourceDevice,
@@ -591,14 +603,14 @@ func (r *SQLiteRepository) SaveCommunicationPatterns(patterns []*model2.Communic
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, pattern_type, criticality, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, pattern := range patterns {
-		if err := pattern.Validate(); err != nil {
+		if err = pattern.Validate(); err != nil {
 			return err
 		}
 
@@ -608,6 +620,9 @@ func (r *SQLiteRepository) SaveCommunicationPatterns(patterns []*model2.Communic
 			pattern.Protocol,
 			pattern.Frequency.Milliseconds(),
 			pattern.DataVolume,
+			pattern.FlowCount,
+			pattern.DeviationFrequency,
+			pattern.DeviationDataVolume,
 			pattern.PatternType,
 			pattern.Criticality,
 			time.Now().Format(time.RFC3339Nano),

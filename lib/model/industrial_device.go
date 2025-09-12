@@ -73,13 +73,16 @@ type ProtocolUsageStats struct {
 
 // CommunicationPattern represents communication patterns between devices
 type CommunicationPattern struct {
-	SourceDevice      string        `json:"source_device"`
-	DestinationDevice string        `json:"destination_device"`
-	Protocol          string        `json:"protocol"`
-	Frequency         time.Duration `json:"frequency"`
-	DataVolume        int64         `json:"data_volume"`
-	PatternType       string        `json:"pattern_type"` // "periodic", "event-driven", "continuous"
-	Criticality       string        `json:"criticality"`  // "low", "medium", "high", "critical"
+	SourceDevice        string        `json:"source_device"`
+	DestinationDevice   string        `json:"destination_device"`
+	Protocol            string        `json:"protocol"`
+	Frequency           time.Duration `json:"frequency"`
+	DataVolume          int64         `json:"data_volume"`
+	FlowCount           int64         `json:"flow_count"`
+	DeviationFrequency  float64       `json:"deviation_frequency"`
+	DeviationDataVolume float64       `json:"deviation_data_volume"`
+	PatternType         string        `json:"pattern_type"` // "periodic", "event-driven", "continuous"
+	Criticality         string        `json:"criticality"`  // "low", "medium", "high", "critical"
 }
 
 // Validate validates the IndustrialDeviceInfo struct
@@ -160,7 +163,7 @@ func (cp *CommunicationPattern) Validate() error {
 	if cp.DestinationDevice == "" {
 		return errors.New("destination device must not be empty")
 	}
-	if cp.SourceDevice == cp.DestinationDevice {
+	if cp.SourceDevice == cp.DestinationDevice && cp.Protocol != "arp" {
 		return errors.New("source and destination devices must be different")
 	}
 	if cp.Protocol == "" {

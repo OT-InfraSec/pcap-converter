@@ -14,23 +14,16 @@ type ErrorHandler interface {
 	// HandleProtocolError handles an error encountered while parsing a protocol
 	// Returns an error if the handler itself encounters an error
 	HandleProtocolError(err *IndustrialProtocolError) error
-
-	// HandleClassificationError handles errors that occur during device classification
-	HandleClassificationError(deviceID string, err error) error
-
-	// HandleValidationError handles errors that occur during data validation
-	HandleValidationError(data interface{}, err error) error
+	HandleClassificationError(deviceId string, err error) error
+	HandleValidationError(data map[string]interface{}, err error) error
 	// SetErrorThreshold sets the maximum number of errors before stopping processing
 	SetErrorThreshold(threshold int)
 	// GetErrorCount returns the current error count
 	GetErrorCount() int
 	// IsThresholdExceeded checks if the error threshold has been exceeded
 	IsThresholdExceeded() bool
-	// IsErrorThresholdExceeded returns true if error threshold has been exceeded
-	IsErrorThresholdExceeded() bool
+	// Reset resets the error handler state
 	Reset()
-	// ResetErrorCount resets the error counter
-	ResetErrorCount()
 }
 
 // IndustrialProtocolError represents an error that occurred during industrial protocol parsing
@@ -39,9 +32,8 @@ type IndustrialProtocolError struct {
 	Packet      gopacket.Packet // The packet that caused the error (optional, may be nil)
 	Err         error           // The underlying error
 	Context     string          // Additional context about where the error occurred
-	Timestamp   time.Time       // When the error occurred
 	Recoverable bool            // Whether the error is recoverable
-	PacketData  []byte          // Raw packet data for debugging (optional)
+	Timestamp   time.Time       // When the error occurred
 }
 
 // Error implements the error interface
@@ -64,51 +56,50 @@ func (e *IndustrialProtocolError) IsRecoverable() bool {
 	return e.Recoverable
 }
 
-// GetPacketInfo returns packet information for debugging
+// GetPacketInfo returns information about the packet that caused the error
 func (e *IndustrialProtocolError) GetPacketInfo() map[string]interface{} {
-	info := make(map[string]interface{})
 	if e.Packet != nil {
-		metadata := e.Packet.Metadata()
-		info["timestamp"] = metadata.Timestamp
-		info["length"] = metadata.Length
-		info["truncated"] = metadata.Truncated
-		info["interface_index"] = metadata.InterfaceIndex
-	}
-	if len(e.PacketData) > 0 {
-		info["raw_data_length"] = len(e.PacketData)
-		// Include first 64 bytes for debugging (avoid logging sensitive data)
-		if len(e.PacketData) > 64 {
-			info["raw_data_preview"] = fmt.Sprintf("%x...", e.PacketData[:64])
-		} else {
-			info["raw_data_preview"] = fmt.Sprintf("%x", e.PacketData)
+		dataPreviewBytes := e.Packet.Data()[54:]
+		dataPreview := ""
+		for i, b := range dataPreviewBytes {
+			if i >= 32 { // Limit preview to first 32 bytes
+				break
+			}
+			dataPreview += fmt.Sprintf("%02x", b)
+		}
+		// limit raw_data_preview to raw_data_length
+		rawDataLength := len(e.Packet.Data())
+		dataLength := rawDataLength - 56 + 4
+		sliceEnd := min(dataLength, len(dataPreview)) // +4 to account for the last byte
+		dataPreview = dataPreview[:sliceEnd]
+		if dataLength > sliceEnd {
+			dataPreview += "..."
+		}
+		return map[string]interface{}{
+			"length":           e.Packet.Metadata().Length,
+			"timestamp":        e.Packet.Metadata().Timestamp,
+			"truncated":        e.Packet.Metadata().Truncated,
+			"interface_index":  e.Packet.Metadata().InterfaceIndex,
+			"raw_data_length":  rawDataLength,
+			"raw_data_preview": dataPreview,
 		}
 	}
-	return info
+	return map[string]interface{}{}
 }
 
 // NoOpErrorHandler is an error handler that does nothing
 type NoOpErrorHandler struct{}
 
+func (h *NoOpErrorHandler) HandleClassificationError(deviceId string, err error) error {
+	return nil
+}
+
+func (h *NoOpErrorHandler) HandleValidationError(data map[string]interface{}, err error) error {
+	return nil
+}
+
 func NewNoOpErrorHandler() ErrorHandler {
 	return &NoOpErrorHandler{}
-}
-
-// HandleClassificationError does nothing and returns nil
-func (h *NoOpErrorHandler) HandleClassificationError(deviceID string, err error) error {
-	return nil
-}
-
-// HandleValidationError does nothing and returns nil
-func (h *NoOpErrorHandler) HandleValidationError(data interface{}, err error) error {
-	return nil
-}
-
-// ResetErrorCount does nothing
-func (h *NoOpErrorHandler) ResetErrorCount() {}
-
-// IsErrorThresholdExceeded always returns false
-func (h *NoOpErrorHandler) IsErrorThresholdExceeded() bool {
-	return false
 }
 
 func (h *NoOpErrorHandler) HandleProtocolError(err *IndustrialProtocolError) error {
@@ -152,29 +143,19 @@ func (h *DefaultErrorHandler) HandleProtocolError(err *IndustrialProtocolError) 
 
 	h.errorCount++
 
-	// Log the error with appropriate level based on recoverability
-	if err.IsRecoverable() {
-		h.logger.Printf("WARN: Recoverable protocol error: %s", err.Error())
-
-		// Log packet info for debugging if available
-		if packetInfo := err.GetPacketInfo(); len(packetInfo) > 0 {
-			h.logger.Printf("DEBUG: Packet info: %+v", packetInfo)
-		}
-	} else {
-		h.logger.Printf("ERROR: Non-recoverable protocol error: %s", err.Error())
-
-		// Log detailed packet info for non-recoverable errors
-		if packetInfo := err.GetPacketInfo(); len(packetInfo) > 0 {
-			h.logger.Printf("ERROR: Packet info: %+v", packetInfo)
-		}
-
-		// For non-recoverable errors, we might want to stop processing
-		if h.IsErrorThresholdExceeded() {
-			return fmt.Errorf("error threshold exceeded (%d errors), stopping processing", h.errorThreshold)
-		}
+	if h.errorCount > h.errorThreshold {
+		h.thresholdExceeded = true
+		return fmt.Errorf("error threshold exceeded (%d): %w", h.errorThreshold, err)
 	}
 
-	return nil
+	// Log the error with appropriate level based on recoverability
+	if err.Recoverable {
+		h.logger.Printf("WARN: Recoverable protocol error: %s", err.Error())
+		return nil
+	}
+	h.logger.Printf("ERROR: Non-recoverable protocol error: %s", err.Error())
+
+	return err
 }
 
 func (h *DefaultErrorHandler) SetErrorThreshold(threshold int) {
@@ -202,30 +183,33 @@ func (h *DefaultErrorHandler) Reset() {
 	h.thresholdExceeded = false
 }
 
-// HandleClassificationError handles device classification errors
-func (h *DefaultErrorHandler) HandleClassificationError(deviceID string, err error) error {
-	h.errorCount++
-	h.logger.Printf("WARN: Device classification error for device %s: %s", deviceID, err.Error())
-
-	// Classification errors are generally recoverable
-	return nil
-}
-
-// HandleValidationError handles data validation errors
-func (h *DefaultErrorHandler) HandleValidationError(data interface{}, err error) error {
-	h.errorCount++
-	h.logger.Printf("WARN: Data validation error: %s (data type: %T)", err.Error(), data)
-
-	// Validation errors are generally recoverable - we just skip the invalid data
-	return nil
-}
-
-// ResetErrorCount resets the error counter
+// ResetErrorCount resets just the error count (alias for Reset for backward compatibility)
 func (h *DefaultErrorHandler) ResetErrorCount() {
-	h.errorCount = 0
+	h.Reset()
 }
 
-// IsErrorThresholdExceeded returns true if error threshold has been exceeded
-func (h *DefaultErrorHandler) IsErrorThresholdExceeded() bool {
-	return h.errorCount >= h.errorThreshold
+func (h *DefaultErrorHandler) HandleClassificationError(deviceId string, err error) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.errorCount++
+	h.logger.Printf("ERROR: Classification error for device %s: %s", deviceId, err.Error())
+	if h.errorCount > h.errorThreshold {
+		h.thresholdExceeded = true
+		return fmt.Errorf("error threshold exceeded (%d): %w", h.errorThreshold, err)
+	}
+	return nil
+}
+
+func (h *DefaultErrorHandler) HandleValidationError(data map[string]interface{}, err error) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.errorCount++
+	h.logger.Printf("ERROR: Validation error for data %v: %s", data, err.Error())
+	if h.errorCount > h.errorThreshold {
+		h.thresholdExceeded = true
+		return fmt.Errorf("error threshold exceeded (%d): %w", h.errorThreshold, err)
+	}
+	return nil
 }

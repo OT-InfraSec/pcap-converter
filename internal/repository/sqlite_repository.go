@@ -154,6 +154,9 @@ func (r *SQLiteRepository) createTables() error {
 			protocol TEXT NOT NULL,
 			frequency_ms INTEGER NOT NULL,
 			data_volume INTEGER NOT NULL,
+			flow_count INTEGER NOT NULL,
+			deviation_frequency REAL NOT NULL,
+			deviation_data_volume REAL NOT NULL,
 			pattern_type TEXT NOT NULL,
 			criticality TEXT NOT NULL,
 			created_at DATETIME NOT NULL,
@@ -2163,4 +2166,3 @@ func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error 
 	}
 	return tx.Commit()
 }
-

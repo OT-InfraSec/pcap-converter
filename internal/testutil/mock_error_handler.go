@@ -9,7 +9,7 @@ type MockErrorHandler struct {
 	mock.Mock
 }
 
-func (m *MockErrorHandler) HandleProtocolError(err *error) error {
+func (m *MockErrorHandler) HandleProtocolError(err interface{}) error {
 	args := m.Called(err)
 	return args.Error(0)
 }

@@ -11,15 +11,12 @@ import (
 
 // NewMalformedPacketError creates an error for malformed packets
 func NewMalformedPacketError(protocol string, packet gopacket.Packet, err error, context string) *IndustrialProtocolError {
-	var packetData []byte
 	if packet != nil && packet.Data() != nil {
 		// Copy packet data for debugging (limit to 256 bytes to avoid memory issues)
 		dataLen := len(packet.Data())
 		if dataLen > 256 {
 			dataLen = 256
 		}
-		packetData = make([]byte, dataLen)
-		copy(packetData, packet.Data()[:dataLen])
 	}
 
 	return &IndustrialProtocolError{
@@ -29,7 +26,6 @@ func NewMalformedPacketError(protocol string, packet gopacket.Packet, err error,
 		Context:     context,
 		Timestamp:   time.Now(),
 		Recoverable: true, // Malformed packets are generally recoverable
-		PacketData:  packetData,
 	}
 }
 

@@ -1,8 +1,6 @@
 package testutil
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/internal/parser"
-	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/mock"
 )
@@ -12,25 +10,31 @@ type MockIndustrialProtocolParser struct {
 	mock.Mock
 }
 
-func (m *MockIndustrialProtocolParser) ParseIndustrialProtocols(packet gopacket.Packet) ([]parser.IndustrialProtocolInfo, error) {
+func (m *MockIndustrialProtocolParser) ParseIndustrialProtocols(packet gopacket.Packet) (interface{}, error) {
 	args := m.Called(packet)
-	return args.Get(0).([]parser.IndustrialProtocolInfo), args.Error(1)
+	return args.Get(0), args.Error(1)
 }
 
-func (m *MockIndustrialProtocolParser) DetectDeviceType(protocols []parser.IndustrialProtocolInfo, flows []model.Flow) model.IndustrialDeviceType {
+func (m *MockIndustrialProtocolParser) DetectDeviceType(protocols interface{}, flows interface{}) interface{} {
 	args := m.Called(protocols, flows)
-	return args.Get(0).(model.IndustrialDeviceType)
+	return args.Get(0)
 }
 
-func (m *MockIndustrialProtocolParser) AnalyzeCommunicationPatterns(flows []model.Flow) []model.CommunicationPattern {
+func (m *MockIndustrialProtocolParser) AnalyzeCommunicationPatterns(flows interface{}) interface{} {
 	args := m.Called(flows)
-	return args.Get(0).([]model.CommunicationPattern)
+	return args.Get(0)
 }
 
-func (m *MockIndustrialProtocolParser) CollectProtocolUsageStats(deviceID string, protocols []parser.IndustrialProtocolInfo) (*model.ProtocolUsageStats, error) {
+func (m *MockIndustrialProtocolParser) CollectProtocolUsageStats(deviceID string, protocols interface{}) (interface{}, error) {
 	args := m.Called(deviceID, protocols)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*model.ProtocolUsageStats), args.Error(1)
+	return args.Get(0), args.Error(1)
+}
+
+func (m *MockIndustrialProtocolParser) SetErrorHandler(handler interface{}) {
+	m.Called(handler)
+}
+
+func (m *MockIndustrialProtocolParser) GetErrorHandler() interface{} {
+	args := m.Called()
+	return args.Get(0)
 }
