@@ -118,3 +118,14 @@ The ultimate objective is to enable comprehensive IEC 62443 compliance audits us
 - IEC 62443-2-1 security management compliance validation
 - IEC 62443-3-3 system security requirements validation
 - Zone-specific security recommendations
+
+## Database Management
+
+### Database Schema Evolution
+The project uses **database regeneration** rather than migrations for schema changes. When database schema modifications are required:
+
+- **Development**: Delete existing `database.sqlite` and regenerate with new schema
+- **Production**: Export essential data, regenerate database with updated schema, re-import data if needed
+- **Testing**: Always use fresh database generation for consistent test environments
+
+This approach simplifies development and ensures clean schema consistency across all environments

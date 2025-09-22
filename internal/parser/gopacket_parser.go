@@ -224,14 +224,17 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 
 // updateFlow updates or creates a flow
 func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
+	// Create flow key based on addresses (which may include ports)
 	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
 
 	sourcePortsSet := model2.NewSet()
 	destinationPortsSet := model2.NewSet()
 
-	if srcPort != "" && dstPort != "" {
-		flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", src, srcPort, dst, dstPort, protocol)
+	// Add ports to sets if available
+	if srcPort != "" {
 		sourcePortsSet.Add(srcPort)
+	}
+	if dstPort != "" {
 		destinationPortsSet.Add(dstPort)
 	}
 
@@ -268,18 +271,12 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 		if packetSize > flow.MaxPacketSize {
 			flow.MaxPacketSize = packetSize
 		}
-		if srcPort != "" && dstPort != "" {
+		// Add ports to existing sets
+		if srcPort != "" {
 			flow.SourcePorts.Add(srcPort)
+		}
+		if dstPort != "" {
 			flow.DestinationPorts.Add(dstPort)
-		} else {
-			// If ports are not specified, we still want to keep the flow
-			// but without port information
-			if flow.SourcePorts == nil {
-				flow.SourcePorts = model2.NewSet()
-			}
-			if flow.DestinationPorts == nil {
-				flow.DestinationPorts = model2.NewSet()
-			}
 		}
 	}
 	return flow
@@ -879,7 +876,7 @@ func (p *GopacketParser) ParseFile() error {
 			srcPort, dstPort       string
 			srcPortNum, dstPortNum uint16
 			flowProto              string
-			isHTTPResponse         bool
+			isResponse             bool
 		)
 
 		// Ethernet
@@ -1031,7 +1028,6 @@ func (p *GopacketParser) ParseFile() error {
 					}
 
 					if httpLayer.IsRequest {
-						isHTTPResponse = true
 						httpData["method"] = string(httpLayer.Method)
 						httpData["request_uri"] = httpLayer.RequestURI
 						httpData["query_params"] = httpLayer.QueryParams
@@ -1099,6 +1095,7 @@ func (p *GopacketParser) ParseFile() error {
 						timestamp := packet.Metadata().Timestamp
 						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
 					} else { // IsResponse
+						isResponse = true
 						var request *liblayers.HTTP
 						var index int
 						for _, httpL := range p.httpRingBuffer.GetAllLIFO() {
@@ -1154,7 +1151,6 @@ func (p *GopacketParser) ParseFile() error {
 					if err = tls.DecodeFromBytes(tcp.Payload, nil); err == nil {
 						for _, handshake := range tls.Handshake {
 							if handshake.Type == liblayers.TLSHandshakeTypeClientHello && handshake.ClientHello != nil {
-								isHTTPResponse = true
 								servernames := ""
 								alpnProtocols := ""
 								if handshake.ClientHello.SNI != nil && handshake.ClientHello.SNI.ServerNames != nil {
@@ -1373,6 +1369,7 @@ func (p *GopacketParser) ParseFile() error {
 
 			// If request is a Reply, we can extract more information about the network and its servers
 			if dhcpv4.Operation == layers.DHCPOpReply {
+				isResponse = true
 				serverInfo := make(map[string]interface{})
 				for _, option := range dhcpv4.Options {
 					dataLen := len(option.Data)
@@ -1755,31 +1752,10 @@ func (p *GopacketParser) ParseFile() error {
 		if srcIP != "" && dstIP != "" && flowProto != "" {
 			var source, destination string
 
-			// For protocols like TCP/UDP that have ports
-			/*if srcPort != "" && dstPort != "" {
-				// Format source and destination with ports
-				if strings.Count(srcIP, ":") > 1 {
-					// IPv6 with port
-					source = fmt.Sprintf("[%s]:%s", srcIP, srcPort)
-				} else {
-					// IPv4 with port
-					source = fmt.Sprintf("%s:%s", srcIP, srcPort)
-				}
-
-				if strings.Count(dstIP, ":") > 1 {
-					// IPv6 with port
-					destination = fmt.Sprintf("[%s]:%s", dstIP, dstPort)
-				} else {
-					// IPv4 with port
-					destination = fmt.Sprintf("%s:%s", dstIP, dstPort)
-				}
-			} else {*/
-			// For protocols like ICMP, ARP that don't have ports
 			source = srcIP
 			destination = dstIP
-			//}
 
-			if !isHTTPResponse {
+			if !isResponse {
 				p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
 			}
 		}

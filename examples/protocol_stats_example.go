@@ -197,6 +197,91 @@ func main() {
 			pattern.SourceDevice, pattern.DestinationDevice, pattern.PatternType, pattern.Criticality)
 	}
 
+	// Example 6: Bidirectional Flow Aggregation
+	fmt.Println("\n=== Bidirectional Flow Aggregation ===")
+
+	// Create devices first
+	clientDevice := &model.Device{
+		Address: "192.168.1.10", AddressType: "IPv4", FirstSeen: now, LastSeen: now,
+		MACAddressSet: model.NewMACAddressSet(), IsOnlyDestination: false,
+	}
+	serverDevice := &model.Device{
+		Address: "192.168.1.20", AddressType: "IPv4", FirstSeen: now, LastSeen: now,
+		MACAddressSet: model.NewMACAddressSet(), IsOnlyDestination: false,
+	}
+	err = repo.AddDevice(clientDevice)
+	if err != nil {
+		log.Printf("Failed to create client device: %v", err)
+	}
+	err = repo.AddDevice(serverDevice)
+	if err != nil {
+		log.Printf("Failed to create server device: %v", err)
+	}
+
+	// Demonstrate how request-response flows are automatically merged
+	// Simulate HTTP request (client -> server)
+	httpRequest := &model.Flow{
+		Source:      "192.168.1.10:34567",
+		Destination: "192.168.1.20:80",
+		Protocol:    "HTTP",
+		Packets:     1,
+		Bytes:       200,
+		FirstSeen:   now,
+		LastSeen:    now,
+		PacketRefs:  []int64{1},
+	}
+	httpRequest.SourcePorts = model.NewSet()
+	httpRequest.SourcePorts.Add("34567")
+	httpRequest.DestinationPorts = model.NewSet()
+	httpRequest.DestinationPorts.Add("80")
+
+	err = repo.UpsertFlow(httpRequest)
+	if err != nil {
+		log.Printf("Failed to save HTTP request flow: %v", err)
+	} else {
+		fmt.Println("✓ HTTP request flow saved")
+	}
+
+	// Simulate HTTP response (server -> client)
+	httpResponse := &model.Flow{
+		Source:      "192.168.1.20:80",
+		Destination: "192.168.1.10:34567",
+		Protocol:    "HTTP",
+		Packets:     1,
+		Bytes:       1500,
+		FirstSeen:   now.Add(time.Second),
+		LastSeen:    now.Add(time.Second),
+		PacketRefs:  []int64{2},
+	}
+	httpResponse.SourcePorts = model.NewSet()
+	httpResponse.SourcePorts.Add("80")
+	httpResponse.DestinationPorts = model.NewSet()
+	httpResponse.DestinationPorts.Add("34567")
+
+	err = repo.UpsertFlow(httpResponse)
+	if err != nil {
+		log.Printf("Failed to save HTTP response flow: %v", err)
+	} else {
+		fmt.Println("✓ HTTP response flow saved")
+	}
+
+	// Query flows to see the merged bidirectional flow
+	allFlows, err := repo.GetFlows(nil)
+	if err != nil {
+		log.Printf("Failed to query flows: %v", err)
+	} else {
+		fmt.Printf("Total flows in database: %d\n", len(allFlows))
+		for _, flow := range allFlows {
+			if flow.Protocol == "HTTP" {
+				fmt.Printf("  HTTP Flow: %s -> %s\n", flow.Source, flow.Destination)
+				fmt.Printf("    Total Packets: %d, Total Bytes: %d\n", flow.Packets, flow.Bytes)
+				fmt.Printf("    Client->Server: %d packets, %d bytes\n", flow.PacketsClientToServer, flow.BytesClientToServer)
+				fmt.Printf("    Server->Client: %d packets, %d bytes\n", flow.PacketsServerToClient, flow.BytesServerToClient)
+				fmt.Printf("    Duration: %v\n", flow.LastSeen.Sub(flow.FirstSeen))
+			}
+		}
+	}
+
 	fmt.Println("\n=== Example Complete ===")
 	fmt.Println("This example demonstrated:")
 	fmt.Println("1. Protocol usage statistics collection from industrial protocol information")
@@ -204,4 +289,5 @@ func main() {
 	fmt.Println("3. Statistics aggregation across multiple protocols")
 	fmt.Println("4. Communication pattern analysis from network flows")
 	fmt.Println("5. Protocol-specific pattern queries")
+	fmt.Println("6. Bidirectional flow aggregation (request-response merging)")
 }

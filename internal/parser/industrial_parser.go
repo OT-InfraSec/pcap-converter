@@ -14,6 +14,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Allow tests in this package to use IndustrialProtocolInfo without model qualifier
+type IndustrialProtocolInfo = model.IndustrialProtocolInfo
+
 // IndustrialProtocolParser defines the interface for parsing industrial protocols
 // and performing device classification based on protocol usage patterns
 type IndustrialProtocolParser interface {

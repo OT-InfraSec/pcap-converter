@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"net"
 	"strconv"
 	"strings"
@@ -50,4 +51,59 @@ func GetAddressScope(address string, addressType string) string {
 		return "unicast"
 	}
 	return ""
+}
+
+// ParseAddress extracts IP and port from an address string. If port is missing, returns port 0.
+// Supports IPv4, IPv6 ([::1]:80) and plain IP without port.
+func ParseAddress(addr string) (string, uint16, error) {
+	if addr == "" {
+		return "", 0, errors.New("empty address")
+	}
+
+	// IPv6 with brackets [::1]:80
+	if strings.HasPrefix(addr, "[") {
+		// expect format [ipv6]:port
+		parts := strings.Split(addr, "]:")
+		if len(parts) == 2 {
+			ip := strings.TrimPrefix(parts[0], "[")
+			if net.ParseIP(ip) == nil {
+				return "", 0, errors.New("invalid IPv6 address")
+			}
+			p, err := strconv.Atoi(parts[1])
+			if err != nil {
+				return ip, 0, nil // treat as missing port
+			}
+			return ip, uint16(p), nil
+		}
+	}
+
+	// IPv4 or IPv6 without brackets or with single colon (ip:port)
+	if strings.Count(addr, ":") == 1 {
+		parts := strings.Split(addr, ":")
+		ip := parts[0]
+		portStr := parts[1]
+		if net.ParseIP(ip) == nil {
+			return "", 0, errors.New("invalid IP address")
+		}
+		p, err := strconv.Atoi(portStr)
+		if err != nil {
+			return ip, 0, nil
+		}
+		return ip, uint16(p), nil
+	}
+
+	// No port present or IPv6 without brackets
+	if net.ParseIP(addr) != nil {
+		return addr, 0, nil
+	}
+
+	// Try to strip a trailing annotation like (something)
+	if idx := strings.Index(addr, "("); idx != -1 {
+		candidate := strings.TrimSpace(addr[:idx])
+		if net.ParseIP(candidate) != nil {
+			return candidate, 0, nil
+		}
+	}
+
+	return "", 0, errors.New("could not parse address")
 }

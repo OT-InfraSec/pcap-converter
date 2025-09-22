@@ -5,6 +5,7 @@ A high-performance, testable, and extensible tool for importing PCAP files into 
 ## Features
 - **CLI tool** for importing PCAP files into SQLite (or other SQL DBs via repository pattern)
 - **Packet, device, and flow extraction** (MAC, IP, 5-tuple, etc.)
+- **Bidirectional flow aggregation**: Automatically merges request-response pairs into single flows with separate statistics for each direction
 - **DNS post-processing**: matches DNS requests and responses, stores DNS queries
 - **Industrial protocol support**: EtherNet/IP, OPC UA, Modbus TCP with IEC 62443 device classification
 - **Device classification and security analysis**: Automatic industrial device detection and security assessment

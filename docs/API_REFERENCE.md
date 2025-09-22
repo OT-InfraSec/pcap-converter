@@ -354,6 +354,52 @@ func NewConfigurationError(field string, value interface{}) *IndustrialProtocolE
 
 ## Models
 
+### Flow Models
+
+```go
+type Flow struct {
+    ID                  int64
+    Source              string
+    Destination         string
+    Protocol            string
+    Packets             int
+    Bytes               int
+    FirstSeen           time.Time
+    LastSeen            time.Time
+    SourceDeviceID      int64
+    DestinationDeviceID int64
+    PacketRefs          []int64
+    MinPacketSize       int
+    MaxPacketSize       int
+    SourcePorts         *Set
+    DestinationPorts    *Set
+
+    // Bidirectional statistics
+    PacketsClientToServer int `json:"packets_client_to_server"`
+    PacketsServerToClient int `json:"packets_server_to_client"`
+    BytesClientToServer   int `json:"bytes_client_to_server"`
+    BytesServerToClient   int `json:"bytes_server_to_client"`
+}
+
+// Validate validates the flow data
+func (f *Flow) Validate() error
+```
+
+#### Bidirectional Flow Aggregation
+
+The system automatically aggregates bidirectional network flows by canonicalizing flow direction based on service ports. Request-response pairs (e.g., HTTP, OPC UA) are merged into single flow records with separate statistics for each direction.
+
+**Canonicalization Rules:**
+- Flows to well-known service ports (80/HTTP, 443/HTTPS, 4840/OPC UA, etc.) are stored with client as source
+- Flows between unknown ports use lexicographic ordering of `ip:port` addresses
+- Reverse-direction packets update the existing canonical flow with server-to-client statistics
+
+**Example:** HTTP request (192.168.1.10:12345 → 192.168.1.20:80) and response (192.168.1.20:80 → 192.168.1.10:12345) are merged into one flow record with:
+- Source: "192.168.1.10:12345" (client)
+- Destination: "192.168.1.20:80" (server)
+- PacketsClientToServer: 1, BytesClientToServer: 200
+- PacketsServerToClient: 1, BytesServerToClient: 1500
+
 ### Device Information Models
 
 ```go
