@@ -227,3 +227,44 @@ func TestGopacketParser_ParseFile_ErrorHandling(t *testing.T) {
 		t.Errorf("expected error for nonexistent file, got nil")
 	}
 }
+
+func TestGopacketParser_ParseFile_RDPUDP(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := pcapgo.NewWriter(buf)
+	w.WriteFileHeader(65536, layers.LinkTypeEthernet)
+
+	eth := &layers.Ethernet{
+		SrcMAC:       []byte{0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11},
+		DstMAC:       []byte{0x12, 0x13, 0x14, 0x15, 0x16, 0x17},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{
+		SrcIP:    []byte{10, 2, 2, 1},
+		DstIP:    []byte{10, 2, 2, 2},
+		Protocol: layers.IPProtocolUDP,
+	}
+	udp := &layers.UDP{
+		SrcPort: 40000,
+		DstPort: 3389, // RDP over UDP
+	}
+	udp.SetNetworkLayerForChecksum(ip)
+	buf1 := gopacket.NewSerializeBuffer()
+	gopacket.SerializeLayers(buf1, gopacket.SerializeOptions{}, eth, ip, udp)
+	w.WritePacket(gopacket.CaptureInfo{Timestamp: time.Now(), Length: len(buf1.Bytes()), CaptureLength: len(buf1.Bytes())}, buf1.Bytes())
+
+	fname := "test_rdpudp.pcap"
+	file, err := os.Create(fname)
+	if err != nil {
+		t.Fatalf("failed to create temp pcap: %v", err)
+	}
+	file.Write(buf.Bytes())
+	file.Close()
+	defer os.Remove(fname)
+
+	repo := &testutil.MockRepository{}
+	parser := NewGopacketParser(fname, repo)
+	err = parser.ParseFile()
+	if err != nil {
+		t.Fatalf("ParseFile failed for RDP UDP packet: %v", err)
+	}
+}

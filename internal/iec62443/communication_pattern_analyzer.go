@@ -856,7 +856,7 @@ func (cpa *CommunicationPatternAnalyzerImpl) comparePatterns(oldPattern, newPatt
 			NewPattern:         &newPattern,
 			ChangeSignificance: cpa.calculateCriticalityChangeSignificance(oldPattern.Criticality, newPattern.Criticality),
 			DetectedAt:         time.Now(),
-			Impact:             cpa.determineCriticalityChangeImpact(oldPattern.Criticality, newPattern.Criticality),
+			Impact:             cpa.DetermineCriticalityChangeImpact(oldPattern.Criticality, newPattern.Criticality),
 			Reason:             fmt.Sprintf("Communication criticality changed from %s to %s", oldPattern.Criticality, newPattern.Criticality),
 			RequiresAction:     newPattern.Criticality == "critical" || (oldPattern.Criticality == "critical" && newPattern.Criticality != "critical"),
 		}
@@ -937,7 +937,7 @@ func (cpa *CommunicationPatternAnalyzerImpl) determineFrequencyChangeImpact(oldP
 	return "medium"
 }
 
-func (cpa *CommunicationPatternAnalyzerImpl) determineCriticalityChangeImpact(oldCrit, newCrit string) string {
+func (cpa *CommunicationPatternAnalyzerImpl) DetermineCriticalityChangeImpact(oldCrit, newCrit string) string {
 	// Impact based on the higher of the two criticality levels
 	if oldCrit == "critical" || newCrit == "critical" {
 		return "critical"

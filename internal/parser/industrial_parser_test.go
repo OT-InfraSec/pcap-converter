@@ -382,7 +382,7 @@ func TestIndustrialProtocolParserImpl_DetermineCriticality(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			criticality := parser.determineCriticality(tt.protocol, tt.dataVolume, tt.flowCount)
+			criticality := parser.DetermineCriticality(tt.protocol, tt.dataVolume, tt.flowCount)
 			assert.Equal(t, tt.expectedCriticality, criticality)
 		})
 	}
@@ -422,7 +422,7 @@ func TestIndustrialProtocolParserImpl_DeterminePatternType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pattern := parser.determinePatternType(tt.flows)
+			pattern := parser.DeterminePatternType(tt.flows)
 			assert.Equal(t, tt.expectedPattern, pattern)
 		})
 	}

@@ -1200,3 +1200,11 @@ func (p *IndustrialProtocolParserImpl) classifyOPCUAMessage(opcua *lib_layers.OP
 		info.SecurityInfo["secure_communication"] = false
 	}
 }
+
+func (p *IndustrialProtocolParserImpl) DetermineCriticality(protocol string, volume int64, count int) interface{} {
+	return nil
+}
+
+func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) interface{} {
+	return nil
+}

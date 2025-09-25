@@ -1206,15 +1206,22 @@ func (p *GopacketParser) ParseFile() error {
 			sb.WriteString(strconv.FormatUint(uint64(dstPortNum), 10))
 			dstPort = sb.String()
 
-			flowProto = "udp"
+			// Default UDP protocol, but detect special cases (e.g., RDP over UDP)
+			detectedProto := "udp"
+			// RDP (Remote Desktop) commonly uses TCP/3389; some RDP implementations also use UDP on 3389
+			if srcPortNum == 3389 || dstPortNum == 3389 {
+				detectedProto = "rdpudp"
+			}
+
+			flowProto = detectedProto
 			layersMap["udp"] = map[string]interface{}{
 				"src_port": udp.SrcPort.String(),
 				"dst_port": udp.DstPort.String(),
 			}
-			protocols = append(protocols, "udp")
-			// Update service for UDP
+			protocols = append(protocols, detectedProto)
+			// Update service for UDP (use detected protocol)
 			timestamp := packet.Metadata().Timestamp
-			p.updateService(srcIP, int(srcPortNum), "udp", timestamp)
+			p.updateService(srcIP, int(srcPortNum), detectedProto, timestamp)
 		}
 
 		// DNS
