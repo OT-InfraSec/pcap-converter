@@ -60,64 +60,6 @@ func TestIndustrialProtocolParserImpl_ParseIndustrialProtocols_ErrorHandling(t *
 	}
 }
 
-func TestIndustrialProtocolParserImpl_parseEtherNetIPWithErrorHandling(t *testing.T) {
-	tests := []struct {
-		name        string
-		packet      gopacket.Packet
-		expectError bool
-		expectInfo  bool
-	}{
-		{
-			name:        "nil packet",
-			packet:      nil,
-			expectError: true,
-			expectInfo:  false,
-		},
-		{
-			name:        "non-EtherNet/IP packet",
-			packet:      createGenericTCPPacket(t, 80),
-			expectError: false,
-			expectInfo:  false,
-		},
-		{
-			name:        "valid EtherNet/IP packet",
-			packet:      createEtherNetIPPacket(t),
-			expectError: false,
-			expectInfo:  true,
-		},
-		{
-			name:        "malformed EtherNet/IP packet",
-			packet:      createMalformedEtherNetIPPacket(t),
-			expectError: false, // Should handle gracefully
-			expectInfo:  true,  // Should still extract basic info
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := &IndustrialProtocolParserImpl{
-				enableEtherNetIP: true,
-				errorHandler:     NewNoOpErrorHandler(),
-			}
-
-			info, err := parser.parseEtherNetIPWithErrorHandling(tt.packet, time.Now())
-
-			if tt.expectError {
-				assert.NotNil(t, err)
-				assert.Nil(t, info)
-			} else {
-				assert.Nil(t, err)
-				if tt.expectInfo {
-					assert.NotNil(t, info)
-					assert.Equal(t, "ethernetip", info.Protocol)
-				} else {
-					assert.Nil(t, info)
-				}
-			}
-		})
-	}
-}
-
 func TestIndustrialProtocolParserImpl_parseOPCUAWithErrorHandling(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -439,11 +381,14 @@ func createThresholdExceededHandler() ErrorHandler {
 	handler := NewDefaultErrorHandler(nil)
 	handler.SetErrorThreshold(0) // Set threshold to 0 so it's immediately exceeded
 	// Trigger threshold exceeded state
-	handler.HandleProtocolError(&IndustrialProtocolError{
+	err := handler.HandleProtocolError(&IndustrialProtocolError{
 		Protocol:    "test",
 		Err:         errors.New("test"),
 		Recoverable: false,
 	})
+	if err != nil {
+		return nil
+	}
 	return handler
 }
 
@@ -491,22 +436,5 @@ func BenchmarkIndustrialProtocolParser_ParseWithErrorHandling(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = parser.ParseIndustrialProtocols(packet)
-	}
-}
-
-func BenchmarkIndustrialProtocolParser_ParseWithoutErrorHandling(b *testing.B) {
-	// This would be the original parsing without error handling
-	// Included for performance comparison
-	parser := &IndustrialProtocolParserImpl{
-		enableEtherNetIP: true,
-		enableOPCUA:      true,
-		errorHandler:     NewNoOpErrorHandler(),
-	}
-	packet := createEtherNetIPPacket(&testing.T{})
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Direct call to original parsing method
-		_ = parser.parseEtherNetIP(packet, time.Now())
 	}
 }

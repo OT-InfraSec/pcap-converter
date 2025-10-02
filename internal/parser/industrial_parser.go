@@ -348,7 +348,7 @@ func (p *IndustrialProtocolParserImpl) parseOPCUAWithErrorHandling(packet gopack
 	info := &model.IndustrialProtocolInfo{
 		Protocol:       "opcua",
 		Timestamp:      timestamp,
-		Confidence:     0.7,
+		Confidence:     0.7, // Start with medium confidence
 		DeviceIdentity: make(map[string]interface{}),
 		SecurityInfo:   make(map[string]interface{}),
 		AdditionalData: make(map[string]interface{}),
@@ -362,9 +362,9 @@ func (p *IndustrialProtocolParserImpl) parseOPCUAWithErrorHandling(packet gopack
 	// Try to extract OPC UA specific information
 	if err := p.extractOPCUADetails(packet, info); err != nil {
 		// Log error but continue with basic info
-		info.Confidence = 0.5
+		info.Confidence = 0.5 // Lower confidence due to extraction issues
 	} else {
-		info.Confidence = 0.9
+		info.Confidence = 0.9 // High confidence for successful extraction
 	}
 
 	return info, nil

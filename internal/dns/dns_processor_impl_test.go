@@ -1,14 +1,145 @@
 package dns
 
 import (
-	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"testing"
 	"time"
+
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 )
 
 type mockRepo struct {
 	dnsQueries []*model.DNSQuery
 	packets    []*model.Packet
+}
+
+func (m *mockRepo) SaveIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetIndustrialDeviceInfo(deviceAddress string) (*model.IndustrialDeviceInfo, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetIndustrialDevicesByType(deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpdateIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpsertIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) DeleteIndustrialDeviceInfo(deviceAddress string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveProtocolUsageStats(stats *model.ProtocolUsageStats) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetProtocolUsageStats(deviceAddress string) ([]*model.ProtocolUsageStats, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetProtocolUsageStatsByProtocol(protocol string) ([]*model.ProtocolUsageStats, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpdateProtocolUsageStats(stats *model.ProtocolUsageStats) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpsertProtocolUsageStats(stats *model.ProtocolUsageStats) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) DeleteProtocolUsageStats(deviceAddress, protocol string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveCommunicationPattern(pattern *model.CommunicationPattern) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetCommunicationPatterns(deviceAddress string) ([]*model.CommunicationPattern, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetCommunicationPatternsByProtocol(protocol string) ([]*model.CommunicationPattern, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpdateCommunicationPattern(pattern *model.CommunicationPattern) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) UpsertCommunicationPattern(pattern *model.CommunicationPattern) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) DeleteCommunicationPattern(sourceDeviceAddress, destinationDeviceAddress, protocol string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveIndustrialProtocolInfo(info *model.IndustrialProtocolInfo) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetIndustrialProtocolInfos(deviceAddress string) ([]*model.IndustrialProtocolInfo, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) GetIndustrialProtocolInfosByProtocol(protocol string) ([]*model.IndustrialProtocolInfo, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) DeleteIndustrialProtocolInfos(deviceAddress string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveIndustrialDeviceInfos(infos []*model.IndustrialDeviceInfo) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveProtocolUsageStatsMultiple(stats []*model.ProtocolUsageStats) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveCommunicationPatterns(patterns []*model.CommunicationPattern) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockRepo) SaveIndustrialProtocolInfos(infos []*model.IndustrialProtocolInfo) error {
+	//TODO implement me
+	panic("implement me")
 }
 
 // AddSSDPQuery implements repository.Repository.
