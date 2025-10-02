@@ -816,7 +816,6 @@ func (p *GopacketParser) ParseFile() error {
 	liblayers.InitLayerSSDP()
 	liblayers.InitLayerMDNS()
 	liblayers.InitLayerHTTP()
-	liblayers.InitLayerEtherNetIP()
 	liblayers.InitLayerOPCUA()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())

@@ -305,25 +305,6 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 	var protocols []model.IndustrialProtocolInfo
 	timestamp := packet.Metadata().Timestamp
 
-	// Check for EtherNet/IP protocol
-	if p.config.EnableEtherNetIP {
-		if ethernetIPInfo, err := p.parseEtherNetIPWithErrorHandling(packet, timestamp); err != nil {
-			protocolErr := &IndustrialProtocolError{
-				Protocol:    "ethernetip",
-				Packet:      packet,
-				Err:         err,
-				Context:     "parseEtherNetIP",
-				Recoverable: true,
-				Timestamp:   timestamp,
-			}
-			if handlerErr := p.errorHandler.HandleProtocolError(protocolErr); handlerErr != nil && !p.config.ContinueOnError {
-				return nil, handlerErr
-			}
-		} else if ethernetIPInfo != nil && ethernetIPInfo.Confidence >= p.config.ConfidenceThreshold {
-			protocols = append(protocols, *ethernetIPInfo)
-		}
-	}
-
 	// Check for OPC UA protocol
 	if p.config.EnableOPCUA {
 		if opcuaInfo, err := p.parseOPCUAWithErrorHandling(packet, timestamp); err != nil {
@@ -351,42 +332,6 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 	}
 
 	return protocols, nil
-}
-
-// parseEtherNetIPWithErrorHandling parses EtherNet/IP with comprehensive error handling
-func (p *IndustrialProtocolParserImpl) parseEtherNetIPWithErrorHandling(packet gopacket.Packet, timestamp time.Time) (*model.IndustrialProtocolInfo, error) {
-	if packet == nil {
-		return nil, errors.New("packet is nil")
-	}
-
-	// First check if this looks like EtherNet/IP based on ports
-	if !p.isEtherNetIPPort(packet) {
-		return nil, nil // Not an error, just not EtherNet/IP
-	}
-
-	info := &model.IndustrialProtocolInfo{
-		Protocol:       "ethernetip",
-		Timestamp:      timestamp,
-		Confidence:     0.7, // Start with medium confidence
-		DeviceIdentity: make(map[string]interface{}),
-		SecurityInfo:   make(map[string]interface{}),
-		AdditionalData: make(map[string]interface{}),
-	}
-
-	// Extract port information
-	if err := p.extractPortInfo(packet, info, []uint16{44818, 2222}); err != nil {
-		return nil, fmt.Errorf("failed to extract port info: %w", err)
-	}
-
-	// Try to extract EtherNet/IP specific information
-	if err := p.extractEtherNetIPDetails(packet, info); err != nil {
-		// Log error but continue with basic info
-		info.Confidence = 0.5 // Lower confidence due to extraction issues
-	} else {
-		info.Confidence = 0.9 // High confidence for successful extraction
-	}
-
-	return info, nil
 }
 
 // parseOPCUAWithErrorHandling parses OPC UA with comprehensive error handling
@@ -832,12 +777,6 @@ func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet
 
 // Protocol-specific parsing methods
 
-// parseEtherNetIP parses EtherNet/IP protocol (backward compatibility)
-func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
-	info, _ := p.parseEtherNetIPWithErrorHandling(packet, timestamp)
-	return info
-}
-
 // parseOPCUA parses OPC UA protocol (backward compatibility)
 func (p *IndustrialProtocolParserImpl) parseOPCUA(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
 	info, _ := p.parseOPCUAWithErrorHandling(packet, timestamp)
@@ -865,43 +804,6 @@ func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, ti
 
 	info.Confidence = 0.8
 	return info
-}
-
-// extractEtherNetIPDetails extracts EtherNet/IP specific information
-func (p *IndustrialProtocolParserImpl) extractEtherNetIPDetails(packet gopacket.Packet, info *model.IndustrialProtocolInfo) error {
-	// Look for EtherNet/IP layer in the packet
-	ethernetIPLayer := packet.Layer(lib_layers.LayerTypeEtherNetIP)
-	if ethernetIPLayer == nil {
-		// Try to parse from raw application data
-		return p.parseRawEtherNetIPData(packet, info)
-	}
-
-	ethernetIP, ok := ethernetIPLayer.(*lib_layers.EtherNetIP)
-	if !ok {
-		return fmt.Errorf("failed to cast layer to EtherNet/IP")
-	}
-
-	// Validate the EtherNet/IP layer data
-	if err := ethernetIP.Validate(); err != nil {
-		return fmt.Errorf("EtherNet/IP validation failed: %w", err)
-	}
-
-	// Extract device identity information
-	if err := p.extractEtherNetIPDeviceIdentity(ethernetIP, info); err != nil {
-		// Log but don't fail completely
-		info.AdditionalData["identity_extraction_error"] = err.Error()
-	}
-
-	// Extract CIP information
-	if err := p.extractEtherNetIPCIPInfo(ethernetIP, info); err != nil {
-		// Log but don't fail completely
-		info.AdditionalData["cip_extraction_error"] = err.Error()
-	}
-
-	// Classify message type and service
-	p.classifyEtherNetIPMessage(ethernetIP, info)
-
-	return nil
 }
 
 // extractOPCUADetails extracts OPC UA specific information
@@ -939,125 +841,6 @@ func (p *IndustrialProtocolParserImpl) extractOPCUADetails(packet gopacket.Packe
 	p.classifyOPCUAMessage(opcua, info)
 
 	return nil
-}
-
-// parseRawEtherNetIPData attempts to parse EtherNet/IP from raw packet data
-func (p *IndustrialProtocolParserImpl) parseRawEtherNetIPData(packet gopacket.Packet, info *model.IndustrialProtocolInfo) error {
-	// Look for TCP/UDP layer
-	var payload []byte
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		if tcp, ok := tcpLayer.(*layers.TCP); ok {
-			payload = tcp.Payload
-		}
-	} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		if udp, ok := udpLayer.(*layers.UDP); ok {
-			payload = udp.Payload
-		}
-	}
-
-	if len(payload) < 24 { // Minimum EtherNet/IP header size
-		return fmt.Errorf("payload too short for EtherNet/IP")
-	}
-
-	// Try to parse as EtherNet/IP
-	ethernetIP := &lib_layers.EtherNetIP{}
-	if err := ethernetIP.DecodeFromBytes(payload, nil); err != nil {
-		return fmt.Errorf("failed to decode EtherNet/IP: %w", err)
-	}
-
-	// Validate the parsed data
-	if err := ethernetIP.Validate(); err != nil {
-		return fmt.Errorf("EtherNet/IP validation failed: %w", err)
-	}
-
-	// Extract information from the parsed layer
-	if err := p.extractEtherNetIPDeviceIdentity(ethernetIP, info); err != nil {
-		info.AdditionalData["identity_extraction_error"] = err.Error()
-	}
-
-	if err := p.extractEtherNetIPCIPInfo(ethernetIP, info); err != nil {
-		info.AdditionalData["cip_extraction_error"] = err.Error()
-	}
-
-	p.classifyEtherNetIPMessage(ethernetIP, info)
-
-	return nil
-}
-
-// extractEtherNetIPDeviceIdentity extracts device identity information from EtherNet/IP
-func (p *IndustrialProtocolParserImpl) extractEtherNetIPDeviceIdentity(ethernetIP *lib_layers.EtherNetIP, info *model.IndustrialProtocolInfo) error {
-	if ethernetIP.VendorID != 0 {
-		info.DeviceIdentity["vendor_id"] = ethernetIP.VendorID
-	}
-	if ethernetIP.ProductCode != 0 {
-		info.DeviceIdentity["product_code"] = ethernetIP.ProductCode
-	}
-	if ethernetIP.SerialNumber != 0 {
-		info.DeviceIdentity["serial_number"] = ethernetIP.SerialNumber
-	}
-	if ethernetIP.ProductName != "" {
-		info.DeviceIdentity["product_name"] = ethernetIP.ProductName
-	}
-	if ethernetIP.DeviceType != "" {
-		info.DeviceIdentity["device_type"] = ethernetIP.DeviceType
-	}
-
-	return nil
-}
-
-// extractEtherNetIPCIPInfo extracts CIP information from EtherNet/IP
-func (p *IndustrialProtocolParserImpl) extractEtherNetIPCIPInfo(ethernetIP *lib_layers.EtherNetIP, info *model.IndustrialProtocolInfo) error {
-	if ethernetIP.Service != 0 {
-		info.AdditionalData["cip_service"] = ethernetIP.Service
-	}
-	if ethernetIP.ClassID != 0 {
-		info.AdditionalData["cip_class_id"] = ethernetIP.ClassID
-	}
-	if ethernetIP.InstanceID != 0 {
-		info.AdditionalData["cip_instance_id"] = ethernetIP.InstanceID
-	}
-	if ethernetIP.AttributeID != 0 {
-		info.AdditionalData["cip_attribute_id"] = ethernetIP.AttributeID
-	}
-
-	return nil
-}
-
-// classifyEtherNetIPMessage classifies EtherNet/IP message type and service
-func (p *IndustrialProtocolParserImpl) classifyEtherNetIPMessage(ethernetIP *lib_layers.EtherNetIP, info *model.IndustrialProtocolInfo) {
-	// Classify based on command
-	switch ethernetIP.Command {
-	case 0x006F: // SendRRData
-		info.ServiceType = "explicit_messaging"
-		info.MessageType = "request_response"
-	case 0x0070: // SendUnitData
-		info.ServiceType = "implicit_messaging"
-		info.MessageType = "io_data"
-		info.IsRealTimeData = true
-	case 0x0063: // ListIdentity
-		info.ServiceType = "discovery"
-		info.MessageType = "identity_request"
-		info.IsDiscovery = true
-	case 0x0065: // RegisterSession
-		info.ServiceType = "session_management"
-		info.MessageType = "session_registration"
-		info.IsConfiguration = true
-	default:
-		info.ServiceType = "unknown"
-		info.MessageType = "unknown"
-	}
-
-	// Additional classification based on CIP service
-	switch ethernetIP.Service {
-	case 0x01: // GetAttributesAll
-		info.MessageType = "get_attributes_all"
-		info.IsConfiguration = true
-	case 0x0E: // GetAttributeSingle
-		info.MessageType = "get_attribute_single"
-	case 0x10: // SetAttributeSingle
-		info.MessageType = "set_attribute_single"
-		info.IsConfiguration = true
-	}
 }
 
 // parseRawOPCUAData attempts to parse OPC UA from raw packet data
