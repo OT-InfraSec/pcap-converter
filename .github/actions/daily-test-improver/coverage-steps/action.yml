@@ -1,0 +1,92 @@
+name: 'Test Coverage Steps'
+description: 'Build, test, and generate coverage report for pcap-converter'
+
+runs:
+  using: "composite"
+  steps:
+    # Step 1: Install system dependencies
+    # libpcap-dev is required for gopacket to build
+    - name: Install libpcap-dev
+      shell: bash
+      run: |
+        echo "=== Installing libpcap-dev ===" | tee -a coverage-steps.log
+        sudo apt-get update -qq 2>&1 | tee -a coverage-steps.log
+        sudo apt-get install -y libpcap-dev 2>&1 | tee -a coverage-steps.log
+        echo "libpcap-dev installed successfully" | tee -a coverage-steps.log
+
+    # Step 2: Set up Go
+    # Using Go 1.24 as specified in go.mod
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+    
+    # Step 3: Download dependencies
+    - name: Download Go modules
+      shell: bash
+      run: |
+        echo "=== Downloading Go modules ===" | tee -a coverage-steps.log
+        go mod download 2>&1 | tee -a coverage-steps.log
+        echo "Dependencies downloaded successfully" | tee -a coverage-steps.log
+
+    # Step 4: Build the project
+    # This ensures the code compiles before running tests
+    - name: Build project
+      shell: bash
+      run: |
+        echo "=== Building project ===" | tee -a coverage-steps.log
+        go build -v ./cmd/importer 2>&1 | tee -a coverage-steps.log
+        echo "Build completed successfully" | tee -a coverage-steps.log
+
+    # Step 5: Run all tests with coverage
+    # Uses -coverprofile to generate coverage data
+    # Coverage report will be saved to coverage.out in the repository root
+    - name: Run tests with coverage
+      shell: bash
+      run: |
+        echo "=== Running tests with coverage ===" | tee -a coverage-steps.log
+        go test ./... -v -coverprofile=coverage.out -covermode=count 2>&1 | tee -a coverage-steps.log
+        echo "Tests completed" | tee -a coverage-steps.log
+
+    # Step 6: Generate human-readable coverage report
+    # This creates a summary showing coverage per function
+    # Coverage summary will be saved to coverage-summary.txt
+    - name: Generate coverage summary
+      shell: bash
+      run: |
+        echo "=== Generating coverage summary ===" | tee -a coverage-steps.log
+        go tool cover -func=coverage.out > coverage-summary.txt 2>&1
+        cat coverage-summary.txt | tee -a coverage-steps.log
+        echo "Coverage summary saved to coverage-summary.txt" | tee -a coverage-steps.log
+
+    # Step 7: Generate HTML coverage report
+    # This creates a detailed, browsable HTML report
+    # HTML report will be saved to coverage.html
+    - name: Generate HTML coverage report
+      shell: bash
+      run: |
+        echo "=== Generating HTML coverage report ===" | tee -a coverage-steps.log
+        go tool cover -html=coverage.out -o coverage.html 2>&1 | tee -a coverage-steps.log
+        echo "HTML coverage report saved to coverage.html" | tee -a coverage-steps.log
+
+    # Step 8: Display overall coverage percentage
+    - name: Display overall coverage
+      shell: bash
+      run: |
+        echo "=== Overall Coverage ===" | tee -a coverage-steps.log
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+        echo "Total coverage: $COVERAGE" | tee -a coverage-steps.log
+
+    # Step 9: Upload coverage artifacts
+    # Uploads coverage.out, coverage-summary.txt, and coverage.html as artifacts
+    # These can be downloaded from the GitHub Actions run page
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage
+        path: |
+          coverage.out
+          coverage-summary.txt
+          coverage.html
+          coverage-steps.log
+        retention-days: 30
