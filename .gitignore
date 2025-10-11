@@ -32,3 +32,6 @@ go.work.sum
 .vsc
 
 web_visualizer
+*.sqlite
+*.log
+pcap-importer
