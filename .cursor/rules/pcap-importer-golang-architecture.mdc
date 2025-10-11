@@ -1,0 +1,31 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Go Migration Architecture and Structure
+
+This project is a Go rewrite of the Python PCAP importer. The main entry point is [cmd/importer/main.go](mdc:../pcap-importer-golang/cmd/importer/main.go), which provides a CLI for importing PCAP files into a database.
+
+## Directory Structure
+- [cmd/importer/](mdc:../pcap-importer-golang/cmd/importer/) — CLI entry point (Cobra-based)
+- [internal/model/](mdc:../pcap-importer-golang/internal/model/) — Data models: Packet, Device, Flow, DNSQuery
+- [internal/repository/](mdc:../pcap-importer-golang/internal/repository/) — Repository interface and implementations (e.g., SQLite). Unit tests for repository are present and provide high coverage.
+- [internal/parser/](mdc:../pcap-importer-golang/internal/parser/) — Packet parsing logic (using gopacket). Parser tests are planned or in progress.
+- [internal/dns/](mdc:../pcap-importer-golang/internal/dns/) — DNS post-processing logic. DNS processor tests are planned or in progress.
+- [internal/testutil/](mdc:../pcap-importer-golang/internal/testutil/) — Mocks and test helpers
+
+## Key Interfaces
+- `Repository` ([repository.go](mdc:../pcap-importer-golang/internal/repository/repository.go)): Abstracts DB operations for packets, devices, flows, and DNS queries.
+- `PacketParser` ([parser.go](mdc:../pcap-importer-golang/internal/parser/parser.go)): Parses PCAP files and stores results in a repository.
+- `DNSProcessor` ([dns_processor.go](mdc:../pcap-importer-golang/internal/dns/dns_processor.go)): Extracts and stores DNS transactions after import.
+
+## Testing
+- Mocks for all interfaces are in [internal/testutil/](mdc:../pcap-importer-golang/internal/testutil/).
+- Tests follow London TDD: interface-first, mock-driven, with end-to-end tests for core flows.
+- **Repository unit tests are present and provide high coverage.**
+- **Parser and DNS processor tests are planned or in progress.**
+- **Test files must be placed in the correct Go module directory (e.g., `internal/repository/`) for coverage to be detected.**
+
+## Extensibility
+- The parser and repository are designed for easy extension to support more protocols and database backends.
