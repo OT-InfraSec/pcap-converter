@@ -10,7 +10,7 @@
 name: "Daily Test Coverage Improver"
 on:
   schedule:
-  - cron: 0 2 * * 1-5
+  - cron: 18 3 * * 1-5
   workflow_dispatch: null
 
 permissions: {}
@@ -170,7 +170,10 @@ jobs:
   agent:
     needs: activation
     runs-on: ubuntu-latest
-    permissions: read-all
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     concurrency:
       group: "gh-aw-copilot"
     env:
@@ -185,6 +188,7 @@ jobs:
       - id: check_coverage_steps_file
         name: Check if action.yml exists
         run: |
+
 
           if [ -f ".github/actions/daily-test-improver/coverage-steps/action.yml" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT

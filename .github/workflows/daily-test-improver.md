@@ -1,10 +1,11 @@
 ---
 on:
   schedule:
-  - cron: 0 2 * * 1-5
+  - cron: 18 3 * * 1-5
   stop-after: +48h
   workflow_dispatch: null
-permissions: read-all
+permissions: {"contents": "write","issues":"write","pull-requests":"write"}
+roles: [admin, maintainer]
 network: defaults
 safe-outputs:
   add-comment:
