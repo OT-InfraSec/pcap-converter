@@ -144,7 +144,7 @@ jobs:
           WORKFLOW_NAME="Daily Test Coverage Improver"
           
           # Check stop-time limit
-          STOP_TIME="2025-10-13 11:07:26"
+          STOP_TIME="2025-10-16 11:07:26"
           echo "Checking stop-time limit: $STOP_TIME"
           
           # Convert stop time to epoch seconds
