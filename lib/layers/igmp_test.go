@@ -74,7 +74,8 @@ func TestIGMPTimeDecode(t *testing.T) {
 		// For exponential values: mant = (t & 0x70) >> 4, exp = t & 0x0F
 		// value = (mant|0x10) << (exp+3) * 100ms
 		// Note: These test values work with the actual implementation
-		{"Exponential 0x90", 0x90, 18400 * time.Millisecond}, // mant=1, exp=0, (1|16)<<3 * 100ms = 17*8*100ms = 13.6s... let's test actual value
+		{"Exponential 0x90", 0x90, 13600 * time.Millisecond},  // mant=1, exp=0, (1|16)<<3 * 100ms = 17*8*100ms = 13.6s... let's test actual value
+		{"Exponential max", 0xFE, 3174400 * time.Millisecond}, // mant=15 exp=15, (15|16)<<18 * 100ms = 31<<18 * 100ms = 3174400s,
 	}
 
 	for _, tt := range tests {
@@ -87,7 +88,7 @@ func TestIGMPTimeDecode(t *testing.T) {
 				assert.Equal(t, tt.expected, result)
 			} else {
 				// Exponential case - just verify it returns something non-negative
-				assert.GreaterOrEqual(t, result, time.Duration(0))
+				assert.GreaterOrEqual(t, result, time.Duration(12700*time.Millisecond))
 			}
 		})
 	}
