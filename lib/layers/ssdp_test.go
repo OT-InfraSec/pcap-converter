@@ -3,6 +3,7 @@ package lib_layers
 import (
 	"testing"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -459,26 +460,26 @@ func TestSSDP_BaseLayer(t *testing.T) {
 func TestSSDP_DecodeSSDP(t *testing.T) {
 	data := []byte("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n\r\n")
 
-	mockBuilder := &mockPacketBuilder{
-		layers: []gopacket.Layer{},
+	mockBuilder := &helper.TestPacketBuilder{
+		Layers: []gopacket.Layer{},
 	}
 
 	err := decodeSSDP(data, mockBuilder)
 	require.NoError(t, err)
 
 	// Check that the layer was added
-	assert.Len(t, mockBuilder.layers, 1)
+	assert.Len(t, mockBuilder.Layers, 1)
 
 	// Check that NextDecoder was called with the right layer type
-	assert.Equal(t, gopacket.LayerTypePayload, mockBuilder.nextDecoderType)
+	assert.Equal(t, gopacket.LayerTypePayload, mockBuilder.NextDecoderType)
 }
 
 // TestSSDP_DecodeSSDP_Error tests decodeSSDP with invalid data
 func TestSSDP_DecodeSSDP_Error(t *testing.T) {
 	data := []byte{} // Empty data should cause error
 
-	mockBuilder := &mockPacketBuilder{
-		layers: []gopacket.Layer{},
+	mockBuilder := &helper.TestPacketBuilder{
+		Layers: []gopacket.Layer{},
 	}
 
 	err := decodeSSDP(data, mockBuilder)
@@ -514,54 +515,4 @@ func TestSSDP_CompletePacketWithMultipleHeaders(t *testing.T) {
 	assert.Equal(t, "urn:schemas-upnp-org:device:MediaRenderer:1", ssdp.Headers["ST"])
 	assert.Equal(t, "1", ssdp.Headers["BOOTID.UPNP.ORG"])
 	assert.Equal(t, "1337", ssdp.Headers["CONFIGID.UPNP.ORG"])
-}
-
-// mockPacketBuilder is a mock implementation of gopacket.PacketBuilder for testing
-type mockPacketBuilder struct {
-	layers          []gopacket.Layer
-	nextDecoderType gopacket.LayerType
-}
-
-func (m *mockPacketBuilder) AddLayer(l gopacket.Layer) {
-	m.layers = append(m.layers, l)
-}
-
-func (m *mockPacketBuilder) NextDecoder(next gopacket.Decoder) error {
-	// Store the layer type if it's a LayerType
-	if lt, ok := next.(gopacket.LayerType); ok {
-		m.nextDecoderType = lt
-	}
-	return nil
-}
-
-func (m *mockPacketBuilder) SetTruncated() {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) DecodeOptions() *gopacket.DecodeOptions {
-	return &gopacket.DecodeOptions{}
-}
-
-func (m *mockPacketBuilder) DumpPacketData() {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) SetApplicationLayer(l gopacket.ApplicationLayer) {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) SetErrorLayer(l gopacket.ErrorLayer) {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) SetLinkLayer(l gopacket.LinkLayer) {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) SetNetworkLayer(l gopacket.NetworkLayer) {
-	// Not implemented for this test
-}
-
-func (m *mockPacketBuilder) SetTransportLayer(l gopacket.TransportLayer) {
-	// Not implemented for this test
 }

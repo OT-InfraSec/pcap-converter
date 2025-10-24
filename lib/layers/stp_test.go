@@ -3,6 +3,7 @@ package lib_layers
 import (
 	"testing"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -119,7 +120,7 @@ func TestDecodeSTP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pb := gopacket.NewPacket(tt.data, layers.LayerTypeEthernet, gopacket.Default)
-			builder := &testPacketBuilder{packet: pb}
+			builder := &helper.TestPacketBuilder{Packet: pb}
 
 			err := decodeSTP(tt.data, builder)
 
@@ -127,10 +128,10 @@ func TestDecodeSTP(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, builder.addedLayer, "Should have added a layer")
+				assert.NotNil(t, builder.AddedLayer, "Should have added a layer")
 
-				if builder.addedLayer != nil {
-					stpLayer, ok := builder.addedLayer.(*STP)
+				if builder.AddedLayer != nil {
+					stpLayer, ok := builder.AddedLayer.(*STP)
 					assert.True(t, ok, "Added layer should be of type *STP")
 					if ok {
 						assert.Equal(t, tt.data, stpLayer.Contents, "Contents should match input data")
@@ -154,13 +155,13 @@ func TestSTP_BaseLayerImplementation(t *testing.T) {
 	// Test BaseLayer methods are accessible
 	// These methods come from the embedded layers.BaseLayer
 	pb := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
-	builder := &testPacketBuilder{packet: pb}
+	builder := &helper.TestPacketBuilder{Packet: pb}
 
 	err = decodeSTP(data, builder)
 	assert.NoError(t, err)
 
-	if builder.addedLayer != nil {
-		stpLayer := builder.addedLayer.(*STP)
+	if builder.AddedLayer != nil {
+		stpLayer := builder.AddedLayer.(*STP)
 		assert.NotNil(t, stpLayer.Contents)
 		assert.NotNil(t, stpLayer.LayerContents())
 	}
@@ -201,58 +202,14 @@ func TestSTP_EdgeCases(t *testing.T) {
 func TestSTP_LayerIntegration(t *testing.T) {
 	data := []byte{0x00, 0x00, 0x00, 0x00}
 	pb := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
-	builder := &testPacketBuilder{packet: pb}
+	builder := &helper.TestPacketBuilder{Packet: pb}
 
 	err := decodeSTP(data, builder)
 	assert.NoError(t, err)
-	assert.NotNil(t, builder.addedLayer)
+	assert.NotNil(t, builder.AddedLayer)
 
 	// Verify layer type matches
-	if builder.addedLayer != nil {
-		assert.Equal(t, layers.LayerTypeSTP, builder.addedLayer.LayerType())
+	if builder.AddedLayer != nil {
+		assert.Equal(t, layers.LayerTypeSTP, builder.AddedLayer.LayerType())
 	}
-}
-
-// testPacketBuilder is a mock implementation of gopacket.PacketBuilder for testing
-type testPacketBuilder struct {
-	packet          gopacket.Packet
-	addedLayer      gopacket.Layer
-	nextDecoderType gopacket.LayerType
-}
-
-func (pb *testPacketBuilder) AddLayer(l gopacket.Layer) {
-	pb.addedLayer = l
-}
-
-func (pb *testPacketBuilder) NextDecoder(next gopacket.Decoder) error {
-	// Store the layer type if it's a LayerType
-	if lt, ok := next.(gopacket.LayerType); ok {
-		pb.nextDecoderType = lt
-	}
-	return nil
-}
-
-func (pb *testPacketBuilder) DumpPacketData() {
-}
-
-func (pb *testPacketBuilder) SetTruncated() {
-}
-
-func (pb *testPacketBuilder) DecodeOptions() *gopacket.DecodeOptions {
-	return &gopacket.DecodeOptions{}
-}
-
-func (pb *testPacketBuilder) SetApplicationLayer(l gopacket.ApplicationLayer) {
-}
-
-func (pb *testPacketBuilder) SetErrorLayer(l gopacket.ErrorLayer) {
-}
-
-func (pb *testPacketBuilder) SetLinkLayer(l gopacket.LinkLayer) {
-}
-
-func (pb *testPacketBuilder) SetNetworkLayer(l gopacket.NetworkLayer) {
-}
-
-func (pb *testPacketBuilder) SetTransportLayer(l gopacket.TransportLayer) {
 }
