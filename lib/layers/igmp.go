@@ -10,10 +10,11 @@ package lib_layers
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/google/gopacket/layers"
-	"github.com/rs/zerolog/log"
 	"net"
 	"time"
+
+	"github.com/google/gopacket/layers"
+	"github.com/rs/zerolog/log"
 
 	"github.com/google/gopacket"
 )
@@ -251,13 +252,26 @@ func (i *IGMP) decodeIGMPv3MembershipQuery(data []byte) error {
 
 // igmpTimeDecode decodes the duration created by the given byte, using the
 // algorithm in http://www.rfc-base.org/txt/rfc-3376.txt section 4.1.1.
+//
+//	0 1 2 3 4 5 6 7
+//
+// +-+-+-+-+-+-+-+-+
+// |1| exp | mant  |
+// +-+-+-+-+-+-+-+-+
+//
+// Max Resp Time = (mant | 0x10) << (exp + 3)
 func igmpTimeDecode(t uint8) time.Duration {
 	if t&0x80 == 0 {
 		return time.Millisecond * 100 * time.Duration(t)
 	}
-	mant := (t & 0x70) >> 4
-	exp := t & 0x0F
-	return time.Millisecond * 100 * time.Duration((mant|0x10)<<(exp+3))
+	mant := t & 0xF0       // 0x70
+	exp := (t & 0x8F) >> 4 // 0x0F
+	var mantu, expo uint32
+	mantu = uint32((mant | 0x10))
+	expo = uint32((exp + 3))
+	result := mantu*2 ^ expo
+	return time.Millisecond * 100 * time.Duration(result)
+
 }
 
 // LayerType returns LayerTypeIGMP for the V1,2,3 message protocol formats.
