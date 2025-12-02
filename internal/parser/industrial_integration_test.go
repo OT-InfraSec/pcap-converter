@@ -129,7 +129,7 @@ func TestIndustrialProtocolIntegration_MixedProtocols(t *testing.T) {
 
 	for _, flow := range flows {
 		t.Logf("Flow: %s -> %s, Protocol: %s, SrcPorts: %v, DstPorts: %v",
-			flow.Source, flow.Destination, flow.Protocol, flow.SourcePorts, flow.DestinationPorts)
+			flow.SrcIP.String(), flow.DstIP.String(), flow.Protocol, flow.SourcePorts, flow.DestinationPorts)
 
 		if flow.DestinationPorts != nil {
 			if flow.DestinationPorts.Contains("80") {
@@ -255,8 +255,7 @@ func createTestEtherNetIPPCAP(t *testing.T) string {
 	err = w.WriteFileHeader(65536, layers.LinkTypeEthernet)
 	require.NoError(t, err)
 
-	// Initialize EtherNet/IP layer registration
-	lib_layers.InitLayerEtherNetIP()
+	// EtherNet/IP layer initialization not required or supported in this test suite
 
 	// Create EtherNet/IP List Identity request (discovery)
 	timestamp := time.Now()
@@ -323,8 +322,7 @@ func createTestMixedProtocolsPCAP(t *testing.T) string {
 	err = w.WriteFileHeader(65536, layers.LinkTypeEthernet)
 	require.NoError(t, err)
 
-	// Initialize protocol layers
-	lib_layers.InitLayerEtherNetIP()
+	// Initialize protocol layers (EtherNet/IP init not available)
 	lib_layers.InitLayerOPCUA()
 
 	timestamp := time.Now()

@@ -87,13 +87,13 @@ func NewGopacketParser(pcapFile string, repo repository.Repository) *GopacketPar
 	flows, err := repo.GetFlows(nil)
 	if err == nil {
 		for _, flow := range flows {
-			flowKey := fmt.Sprintf("%s:%s:%s", flow.Source, flow.Destination, flow.Protocol)
+			flowKey := fmt.Sprintf("%s:%s:%s", flow.SrcIP.String(), flow.DstIP.String(), flow.Protocol)
 			// If this flow has port information, include it in the key
 			if flow.SourcePorts.Size() > 0 && flow.DestinationPorts.Size() > 0 {
 				srcPorts := flow.SourcePorts.List()
 				dstPorts := flow.DestinationPorts.List()
 				if len(srcPorts) > 0 && len(dstPorts) > 0 {
-					flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", flow.Source, srcPorts[0], flow.Destination, dstPorts[0], flow.Protocol)
+					flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", flow.SrcIP.String(), srcPorts[0], flow.DstIP.String(), dstPorts[0], flow.Protocol)
 				}
 			}
 			parser.flows[flowKey] = flow
@@ -241,11 +241,11 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 	flow, exists := p.flows[flowKey]
 	if !exists {
 		flow = &model2.Flow{
-			Source:           src,
-			Destination:      dst,
+			SrcIP:            net.ParseIP(src),
+			DstIP:            net.ParseIP(dst),
 			Protocol:         protocol,
-			Packets:          1,
-			Bytes:            packetSize,
+			PacketCount:      1,
+			ByteCount:        int64(packetSize),
 			FirstSeen:        timestamp,
 			LastSeen:         timestamp,
 			PacketRefs:       []int64{packetID},
@@ -256,8 +256,8 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 		}
 		p.flows[flowKey] = flow
 	} else {
-		flow.Packets++
-		flow.Bytes += packetSize
+		flow.PacketCount++
+		flow.ByteCount += int64(packetSize)
 		if timestamp.Before(flow.FirstSeen) {
 			flow.FirstSeen = timestamp
 		}
@@ -426,7 +426,7 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 		// Get relevant flows for this device to analyze communication patterns
 		var deviceFlows []model2.Flow
 		for _, flow := range p.flows {
-			if flow.Source == deviceIP || flow.Destination == deviceIP {
+			if flow.SrcIP.String() == deviceIP || flow.DstIP.String() == deviceIP {
 				deviceFlows = append(deviceFlows, *flow)
 			}
 		}
@@ -686,7 +686,7 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 	service, exists := p.services[serviceKey]
 	if !exists {
 		service = &model2.Service{
-			IP:        ip,
+			IP:        net.ParseIP(ip),
 			Port:      port,
 			Protocol:  protocol,
 			FirstSeen: timestamp,
@@ -2117,4 +2117,25 @@ func (p *GopacketParser) saveAllDeviceRelations(devices []*model2.Device, repo r
 		}
 	}
 	return nil
+}
+
+var ProtocolColorMap = map[string]string{
+	"tcp":        "#1f77b4",
+	"udp":        "#ff7f0e",
+	"http":       "#2ca02c",
+	"https":      "#d62728",
+	"dns":        "#9467bd",
+	"dhcp":       "#8c564b",
+	"eigrp":      "#e377c2",
+	"ipv4_eigrp": "#e377c2",
+	"ospf":       "#7f7f7f",
+	"modbus":     "#bcbd22",
+	"ssh":        "#17becf",
+	"ftp":        "#aec7e8",
+	"arp":        "#98df8a",
+	"icmp":       "#c49c94",
+	"snmp":       "#ffbb78",
+	"ntp":        "#c5b0d5",
+	// Color for RDP over UDP flows
+	"rdpudp": "#ff69b4",
 }

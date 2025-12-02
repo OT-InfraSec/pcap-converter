@@ -1,9 +1,11 @@
 package iec62443
 
 import (
+	"net"
 	"testing"
 	"time"
 
+	addressHelper "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/stretchr/testify/assert"
 )
@@ -452,13 +454,15 @@ func createPeriodicFlows(sourceAddr, destAddr, protocol string, interval time.Du
 		jitterOffset := time.Duration(i%3-1) * jitter
 		timestamp := baseTime.Add(time.Duration(i) * interval).Add(jitterOffset)
 
+		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i] = model.Flow{
 			ID:          int64(i + 1),
-			Source:      sourceAddr,
-			Destination: destAddr,
+			SrcIP:       net.ParseIP(srcIP),
+			DstIP:       net.ParseIP(dstIP),
 			Protocol:    protocol,
-			Packets:     1,
-			Bytes:       64,
+			PacketCount: 1,
+			ByteCount:   int64(64),
 			FirstSeen:   timestamp,
 			LastSeen:    timestamp.Add(10 * time.Millisecond),
 		}
@@ -478,13 +482,15 @@ func createBurstPeriodicFlows(sourceAddr, destAddr, protocol string, burstInterv
 			flowIndex := burst*3 + i
 			timestamp := burstTime.Add(time.Duration(i) * 50 * time.Millisecond)
 
+			srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+			dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 			flows[flowIndex] = model.Flow{
 				ID:          int64(flowIndex + 1),
-				Source:      sourceAddr,
-				Destination: destAddr,
+				SrcIP:       net.ParseIP(srcIP),
+				DstIP:       net.ParseIP(dstIP),
 				Protocol:    protocol,
-				Packets:     1,
-				Bytes:       32,
+				PacketCount: 1,
+				ByteCount:   int64(32),
 				FirstSeen:   timestamp,
 				LastSeen:    timestamp.Add(5 * time.Millisecond),
 			}
@@ -503,25 +509,29 @@ func createRequestResponseFlows(sourceAddr, destAddr, protocol string, latency t
 		responseTime := requestTime.Add(latency)
 
 		// Request flow
+		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i*2] = model.Flow{
 			ID:          int64(i*2 + 1),
-			Source:      sourceAddr,
-			Destination: destAddr,
+			SrcIP:       net.ParseIP(srcIP),
+			DstIP:       net.ParseIP(dstIP),
 			Protocol:    protocol,
-			Packets:     1,
-			Bytes:       32, // Smaller request
+			PacketCount: 1,
+			ByteCount:   int64(32), // Smaller request
 			FirstSeen:   requestTime,
 			LastSeen:    requestTime.Add(5 * time.Millisecond),
 		}
 
 		// Response flow
+		srcIP2, _, _ := addressHelper.ParseAddress(destAddr)
+		dstIP2, _, _ := addressHelper.ParseAddress(sourceAddr)
 		flows[i*2+1] = model.Flow{
 			ID:          int64(i*2 + 2),
-			Source:      destAddr,
-			Destination: sourceAddr,
+			SrcIP:       net.ParseIP(srcIP2),
+			DstIP:       net.ParseIP(dstIP2),
 			Protocol:    protocol,
-			Packets:     1,
-			Bytes:       128, // Larger response
+			PacketCount: 1,
+			ByteCount:   int64(128), // Larger response
 			FirstSeen:   responseTime,
 			LastSeen:    responseTime.Add(10 * time.Millisecond),
 		}
@@ -539,25 +549,29 @@ func createHighFrequencyRequestResponseFlows(sourceAddr, destAddr, protocol stri
 		responseTime := requestTime.Add(latency)
 
 		// Request flow
+		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i*2] = model.Flow{
 			ID:          int64(i*2 + 1),
-			Source:      sourceAddr,
-			Destination: destAddr,
+			SrcIP:       net.ParseIP(srcIP),
+			DstIP:       net.ParseIP(dstIP),
 			Protocol:    protocol,
-			Packets:     1,
-			Bytes:       16,
+			PacketCount: 1,
+			ByteCount:   int64(16),
 			FirstSeen:   requestTime,
 			LastSeen:    requestTime.Add(2 * time.Millisecond),
 		}
 
 		// Response flow
+		srcIP2, _, _ := addressHelper.ParseAddress(destAddr)
+		dstIP2, _, _ := addressHelper.ParseAddress(sourceAddr)
 		flows[i*2+1] = model.Flow{
 			ID:          int64(i*2 + 2),
-			Source:      destAddr,
-			Destination: sourceAddr,
+			SrcIP:       net.ParseIP(srcIP2),
+			DstIP:       net.ParseIP(dstIP2),
 			Protocol:    protocol,
-			Packets:     1,
-			Bytes:       32,
+			PacketCount: 1,
+			ByteCount:   int64(32),
 			FirstSeen:   responseTime,
 			LastSeen:    responseTime.Add(5 * time.Millisecond),
 		}

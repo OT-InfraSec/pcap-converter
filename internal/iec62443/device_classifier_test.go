@@ -1,9 +1,11 @@
 package iec62443
 
 import (
+	"net"
 	"testing"
 	"time"
 
+	addressHelper "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -658,39 +660,45 @@ func TestDeviceClassifierImpl_UpdateClassificationFromPatternChanges(t *testing.
 // Helper functions for creating test flows
 
 func createTestFlow(sourceAddr, destAddr, protocol string, timestamp time.Time) model.Flow {
+	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
 		ID:          1,
-		Source:      sourceAddr,
-		Destination: destAddr,
+		SrcIP:       net.ParseIP(srcIP),
+		DstIP:       net.ParseIP(dstIP),
 		Protocol:    protocol,
-		Packets:     1,
-		Bytes:       64,
+		PacketCount: 1,
+		ByteCount:   int64(64),
 		FirstSeen:   timestamp,
 		LastSeen:    timestamp.Add(10 * time.Millisecond),
 	}
 }
 
 func createTestRequestFlow(sourceAddr, destAddr, protocol string, timestamp time.Time, byteCount int) model.Flow {
+	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
 		ID:          1,
-		Source:      sourceAddr,
-		Destination: destAddr,
+		SrcIP:       net.ParseIP(srcIP),
+		DstIP:       net.ParseIP(dstIP),
 		Protocol:    protocol,
-		Packets:     1,
-		Bytes:       byteCount,
+		PacketCount: 1,
+		ByteCount:   int64(byteCount),
 		FirstSeen:   timestamp,
 		LastSeen:    timestamp.Add(5 * time.Millisecond),
 	}
 }
 
 func createTestResponseFlow(sourceAddr, destAddr, protocol string, timestamp time.Time, byteCount int) model.Flow {
+	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
+	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
 		ID:          2,
-		Source:      sourceAddr,
-		Destination: destAddr,
+		SrcIP:       net.ParseIP(srcIP),
+		DstIP:       net.ParseIP(dstIP),
 		Protocol:    protocol,
-		Packets:     1,
-		Bytes:       byteCount,
+		PacketCount: 1,
+		ByteCount:   int64(byteCount),
 		FirstSeen:   timestamp,
 		LastSeen:    timestamp.Add(10 * time.Millisecond),
 	}

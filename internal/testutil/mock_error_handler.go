@@ -23,7 +23,7 @@ func (m *MockErrorHandler) GetErrorCount() int {
 	return args.Int(0)
 }
 
-func (m *MockErrorHandler) IsThresholdExceeded() bool {
+func (m *MockErrorHandler) ThresholdExceeded() bool {
 	args := m.Called()
 	return args.Bool(0)
 }

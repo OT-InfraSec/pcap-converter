@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"net"
 	"time"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
@@ -113,11 +114,11 @@ func CreateTestCommunicationPattern(source, dest, protocol string) model.Communi
 // CreateTestFlows creates test flows for device classification testing
 func CreateTestFlows(sourceIP, destIP string, protocol string, packetCount int, byteCount int) []model.Flow {
 	flow := model.Flow{
-		Source:      sourceIP,
-		Destination: destIP,
+		SrcIP:       net.ParseIP(sourceIP),
+		DstIP:       net.ParseIP(destIP),
 		Protocol:    protocol,
-		Packets:     packetCount,
-		Bytes:       byteCount,
+		PacketCount: packetCount,
+		ByteCount:   int64(byteCount),
 		FirstSeen:   time.Now().Add(-time.Hour),
 		LastSeen:    time.Now(),
 	}

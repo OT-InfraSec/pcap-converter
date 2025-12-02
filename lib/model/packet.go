@@ -140,8 +140,16 @@ func IsValidIPAddressPlusPort(address string) bool {
 // Packet represents a network packet.
 type Packet struct {
 	ID        int64                  // Database ID (optional)
+	FlowID    int64                  // Associated Flow ID
 	Timestamp time.Time              // Packet timestamp
+	SrcIP     net.IP                 // Source IP (converted to/from DB)
+	DstIP     net.IP                 // Destination IP (converted to/from DB)
+	SrcPort   int                    // Source port
+	DstPort   int                    // Destination port
+	Protocol  string                 // Protocol name
 	Length    int                    // Packet length in bytes
+	Flags     string                 // Packet flags (if any)
+	Payload   []byte                 // Packet payload (raw bytes)
 	Layers    map[string]interface{} // Protocol layers and their fields
 	Protocols []string               // List of protocol names
 }
@@ -149,22 +157,33 @@ type Packet struct {
 // Device represents a network device.
 type Device struct {
 	ID                int64
-	Address           string
+	TenantID          string // Optional tenant id (empty string means none)
+	Address           string // IP or MAC address (string)
 	AddressType       string
-	FirstSeen         time.Time
-	LastSeen          time.Time
 	AddressSubType    string
 	AddressScope      string // IPv4 or IPv6
 	MACAddressSet     *MACAddressSet
-	AdditionalData    string // JSON string for additional data
+	AdditionalData    string // JSON string
+	ProtocolList      []string
+	DNSNames          []string
+	Hostname          string
+	DeviceType        string
+	Vendor            string
+	OS                string
+	FirstSeen         time.Time
+	LastSeen          time.Time
+	IsRouter          bool
 	IsOnlyDestination bool
+	IsExternal        bool
+	Confidence        float64
+	Description       string
 	IndustrialInfo    *IndustrialDeviceInfo // Industrial device information
 }
 
 // Service represents a network service.
 type Service struct {
 	ID        int64
-	IP        string
+	IP        net.IP
 	Port      int
 	Protocol  string
 	FirstSeen time.Time
@@ -174,13 +193,17 @@ type Service struct {
 // Flow represents a network flow between devices or services.
 type Flow struct {
 	ID                  int64
-	Source              string
-	Destination         string
+	TenantID            string
+	SrcIP               net.IP
+	DstIP               net.IP
+	SrcPort             int
+	DstPort             int
 	Protocol            string
-	Packets             int
-	Bytes               int
+	PacketCount         int
+	ByteCount           int64
 	FirstSeen           time.Time
 	LastSeen            time.Time
+	Duration            float64
 	SourceDeviceID      int64
 	DestinationDeviceID int64
 	PacketRefs          []int64
@@ -190,10 +213,10 @@ type Flow struct {
 	DestinationPorts    *Set
 
 	// New bidirectional statistics fields
-	PacketsClientToServer int `json:"packets_client_to_server"`
-	PacketsServerToClient int `json:"packets_server_to_client"`
-	BytesClientToServer   int `json:"bytes_client_to_server"`
-	BytesServerToClient   int `json:"bytes_server_to_client"`
+	PacketsClientToServer int   `json:"packets_client_to_server"`
+	PacketsServerToClient int   `json:"packets_server_to_client"`
+	BytesClientToServer   int64 `json:"bytes_client_to_server"`
+	BytesServerToClient   int64 `json:"bytes_server_to_client"`
 }
 
 // DeviceRelation represents a relationship between two devices.
@@ -244,10 +267,10 @@ func (d *Device) Validate() error {
 }
 
 func (s *Service) Validate() error {
-	if s.IP == "" {
+	if s.IP == nil || s.IP.String() == "" {
 		return errors.New("IP must not be empty")
 	}
-	if !IsValidIPAddress(s.IP) {
+	if net.ParseIP(s.IP.String()) == nil {
 		return errors.New("invalid IP address format")
 	}
 	if s.Port < 0 || s.Port > 65535 {
@@ -269,20 +292,20 @@ func (s *Service) Validate() error {
 }
 
 func (f *Flow) Validate() error {
-	if f.Source == "" {
+	if f.SrcIP == nil || f.SrcIP.String() == "" {
 		return errors.New("source must not be empty")
 	}
-	if f.Destination == "" {
+	if f.DstIP == nil || f.DstIP.String() == "" {
 		return errors.New("destination must not be empty")
 	}
 	if f.Protocol == "" {
 		return errors.New("protocol must not be empty")
 	}
-	if !isValidAddress(f.Source, f.Protocol) {
-		return errors.New("invalid source address format for protocol " + f.Protocol + " and source " + f.Source)
+	if !isValidAddress(f.SrcIP.String(), f.Protocol) {
+		return errors.New("invalid source address format for protocol " + f.Protocol + " and source " + f.SrcIP.String())
 	}
-	if !isValidAddress(f.Destination, f.Protocol) {
-		return errors.New("invalid destination address format for protocol " + f.Protocol + " and destination " + f.Destination)
+	if !isValidAddress(f.DstIP.String(), f.Protocol) {
+		return errors.New("invalid destination address format for protocol " + f.Protocol + " and destination " + f.DstIP.String())
 	}
 	if f.FirstSeen.IsZero() {
 		return errors.New("first seen time must not be zero")
@@ -293,10 +316,10 @@ func (f *Flow) Validate() error {
 	if f.LastSeen.Before(f.FirstSeen) {
 		return errors.New("last seen time must not be before first seen time")
 	}
-	if f.Packets < 0 {
+	if f.PacketCount < 0 {
 		return errors.New("packets count must not be negative")
 	}
-	if f.Bytes < 0 {
+	if f.ByteCount < 0 {
 		return errors.New("bytes count must not be negative")
 	}
 	// Validate new directional counters are non-negative

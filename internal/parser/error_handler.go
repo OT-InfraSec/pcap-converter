@@ -20,8 +20,8 @@ type ErrorHandler interface {
 	SetErrorThreshold(threshold int)
 	// GetErrorCount returns the current error count
 	GetErrorCount() int
-	// IsThresholdExceeded checks if the error threshold has been exceeded
-	IsThresholdExceeded() bool
+	// ThresholdExceeded checks if the error threshold has been exceeded
+	ThresholdExceeded() bool
 	// Reset resets the error handler state
 	Reset()
 }
@@ -112,7 +112,7 @@ func (h *NoOpErrorHandler) GetErrorCount() int {
 	return 0
 }
 
-func (h *NoOpErrorHandler) IsThresholdExceeded() bool {
+func (h *NoOpErrorHandler) ThresholdExceeded() bool {
 	return false
 }
 
@@ -170,7 +170,7 @@ func (h *DefaultErrorHandler) GetErrorCount() int {
 	return h.errorCount
 }
 
-func (h *DefaultErrorHandler) IsThresholdExceeded() bool {
+func (h *DefaultErrorHandler) ThresholdExceeded() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.thresholdExceeded

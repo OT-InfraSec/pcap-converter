@@ -359,8 +359,8 @@ func (cpa *CommunicationPatternAnalyzerImpl) groupFlowsByEndpoints(flows []model
 
 	for _, flow := range flows {
 		key := flowGroupKey{
-			sourceAddr: flow.Source,
-			destAddr:   flow.Destination,
+			sourceAddr: flow.SrcIP.String(),
+			destAddr:   flow.DstIP.String(),
 			protocol:   flow.Protocol,
 		}
 
@@ -438,7 +438,7 @@ func (cpa *CommunicationPatternAnalyzerImpl) findRequestResponsePairs(flows []mo
 	for i := 0; i < len(flows)-1; i++ {
 		for j := i + 1; j < len(flows) && j < i+10; j++ { // Look ahead up to 10 flows
 			if cpa.isRequestResponsePair(flows[i], flows[j]) {
-				key := fmt.Sprintf("%s_%s_%s", flows[i].Protocol, flows[i].Source, flows[j].Source)
+				key := fmt.Sprintf("%s_%s_%s", flows[i].Protocol, flows[i].SrcIP.String(), flows[j].SrcIP.String())
 
 				pair := requestResponsePair{
 					request:  flows[i],
@@ -461,7 +461,7 @@ func (cpa *CommunicationPatternAnalyzerImpl) findRequestResponsePairs(flows []mo
 // isRequestResponsePair determines if two flows form a request-response pair
 func (cpa *CommunicationPatternAnalyzerImpl) isRequestResponsePair(flow1, flow2 model.Flow) bool {
 	// Check if flows are in opposite directions
-	if flow1.Source != flow2.Destination || flow1.Destination != flow2.Source {
+	if flow1.SrcIP.String() != flow2.DstIP.String() || flow1.DstIP.String() != flow2.SrcIP.String() {
 		return false
 	}
 
@@ -478,7 +478,7 @@ func (cpa *CommunicationPatternAnalyzerImpl) isRequestResponsePair(flow1, flow2 
 
 	// Check if request is typically smaller than response (common pattern)
 	// This is a heuristic and may need adjustment based on specific protocols
-	return flow1.Bytes <= flow2.Bytes*2 // Allow some tolerance
+	return flow1.ByteCount <= flow2.ByteCount*2 // Allow some tolerance
 }
 
 // analyzeRequestResponseLatency analyzes latency patterns in request-response pairs
@@ -514,8 +514,8 @@ func (cpa *CommunicationPatternAnalyzerImpl) analyzeRequestResponseLatency(pairs
 	serviceType := cpa.inferServiceType(pairs[0].request.Protocol, avgLatency, requestRate)
 
 	return &RequestResponsePattern{
-		InitiatorDevice:  pairs[0].request.Source,
-		ResponderDevice:  pairs[0].request.Destination,
+		InitiatorDevice:  pairs[0].request.SrcIP.String(),
+		ResponderDevice:  pairs[0].request.DstIP.String(),
 		Protocol:         pairs[0].request.Protocol,
 		AverageLatency:   avgLatency,
 		LatencyStdDev:    stdDev,

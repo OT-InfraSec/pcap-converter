@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -190,10 +191,11 @@ func TestIndustrialProtocolParserImpl_AnalyzeCommunicationPatterns(t *testing.T)
 			name: "Single flow - event driven",
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
+					SrcIP:       net.ParseIP("192.168.1.10"),
+					DstIP:       net.ParseIP("192.168.1.100"),
 					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
+					PacketCount: 1,
+					ByteCount:   int64(1024),
 					FirstSeen:   time.Now().Add(-time.Hour),
 					LastSeen:    time.Now(),
 				},
@@ -202,59 +204,16 @@ func TestIndustrialProtocolParserImpl_AnalyzeCommunicationPatterns(t *testing.T)
 			expectedPattern: "event-driven",
 		},
 		{
-			name: "Multiple flows - periodic",
-			flows: []model.Flow{
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-time.Hour),
-					LastSeen:    time.Now().Add(-50 * time.Minute),
-				},
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-40 * time.Minute),
-					LastSeen:    time.Now().Add(-30 * time.Minute),
-				},
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-20 * time.Minute),
-					LastSeen:    time.Now().Add(-10 * time.Minute),
-				},
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-10 * time.Minute),
-					LastSeen:    time.Now(),
-				},
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-5 * time.Minute),
-					LastSeen:    time.Now(),
-				},
-				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
-					FirstSeen:   time.Now().Add(-2 * time.Minute),
-					LastSeen:    time.Now(),
-				},
-			},
+			name:            "Multiple flows - periodic",
+			flows:           createMultipleFlows(6, time.Minute*10),
 			expectedCount:   1,
 			expectedPattern: "periodic",
+		},
+		{
+			name:            "Many flows - continuous",
+			flows:           createMultipleFlows(15, time.Minute*5),
+			expectedCount:   1,
+			expectedPattern: "continuous",
 		},
 	}
 
@@ -400,10 +359,10 @@ func TestIndustrialProtocolParserImpl_DeterminePatternType(t *testing.T) {
 			name: "Single flow",
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.10",
-					Destination: "192.168.1.100",
-					FirstSeen:   time.Now().Add(-time.Hour),
-					LastSeen:    time.Now(),
+					SrcIP:     net.ParseIP("192.168.1.10"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					FirstSeen: time.Now().Add(-time.Hour),
+					LastSeen:  time.Now(),
 				},
 			},
 			expectedPattern: "event-driven",
@@ -422,8 +381,12 @@ func TestIndustrialProtocolParserImpl_DeterminePatternType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pattern := parser.DeterminePatternType(tt.flows)
-			assert.Equal(t, tt.expectedPattern, pattern)
+			patterns := parser.AnalyzeCommunicationPatterns(tt.flows)
+			if len(patterns) == 0 {
+				assert.Equal(t, tt.expectedPattern, "")
+			} else {
+				assert.Equal(t, tt.expectedPattern, patterns[0].PatternType)
+			}
 		})
 	}
 }
@@ -471,12 +434,12 @@ func createMultipleFlows(count int, interval time.Duration) []model.Flow {
 
 	for i := 0; i < count; i++ {
 		flows[i] = model.Flow{
-			Source:      "192.168.1.10",
-			Destination: "192.168.1.100",
-			Protocol:    "EtherNet/IP",
-			Bytes:       1024,
-			FirstSeen:   baseTime.Add(time.Duration(i) * interval),
-			LastSeen:    baseTime.Add(time.Duration(i)*interval + time.Minute),
+			SrcIP:     net.ParseIP("192.168.1.10"),
+			DstIP:     net.ParseIP("192.168.1.100"),
+			Protocol:  "EtherNet/IP",
+			ByteCount: 1024,
+			FirstSeen: baseTime.Add(time.Duration(i) * interval),
+			LastSeen:  baseTime.Add(time.Duration(i)*interval + time.Minute),
 		}
 	}
 

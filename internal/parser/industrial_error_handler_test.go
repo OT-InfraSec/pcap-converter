@@ -202,7 +202,7 @@ func TestDefaultErrorHandler_ErrorThreshold(t *testing.T) {
 			Recoverable: true,
 		}
 		assert.NoError(t, handler.HandleProtocolError(err))
-		assert.False(t, handler.IsThresholdExceeded())
+		assert.False(t, handler.ThresholdExceeded())
 	}
 
 	// Add one more error to reach threshold - this should return error because threshold is reached
@@ -213,7 +213,7 @@ func TestDefaultErrorHandler_ErrorThreshold(t *testing.T) {
 	}
 	result := handler.HandleProtocolError(err)
 	assert.Error(t, result)
-	assert.True(t, handler.IsThresholdExceeded())
+	assert.True(t, handler.ThresholdExceeded())
 	assert.NotNil(t, result)
 	if result != nil {
 		assert.Contains(t, result.Error(), "error threshold exceeded")
@@ -229,11 +229,11 @@ func TestDefaultErrorHandler_ErrorThreshold(t *testing.T) {
 		Recoverable: true,
 	}
 	assert.NoError(t, handler.HandleProtocolError(recoverableErr))
-	assert.False(t, handler.IsThresholdExceeded())
+	assert.False(t, handler.ThresholdExceeded())
 
 	// Even after threshold exceeded, recoverable errors should not return error
 	assert.Error(t, handler.HandleProtocolError(recoverableErr))
-	assert.True(t, handler.IsThresholdExceeded())
+	assert.True(t, handler.ThresholdExceeded())
 }
 
 func TestDefaultErrorHandler_HandleClassificationError(t *testing.T) {
@@ -274,14 +274,14 @@ func TestNoOpErrorHandler(t *testing.T) {
 	assert.NoError(t, handler.HandleClassificationError("device", errors.New("error")))
 	assert.NoError(t, handler.HandleValidationError(nil, errors.New("error")))
 	assert.Equal(t, 0, handler.GetErrorCount())
-	assert.False(t, handler.IsThresholdExceeded())
+	assert.False(t, handler.ThresholdExceeded())
 
 	handler.SetErrorThreshold(100)
 	handler.Reset()
 
 	// Should still return no-op values
 	assert.Equal(t, 0, handler.GetErrorCount())
-	assert.False(t, handler.IsThresholdExceeded())
+	assert.False(t, handler.ThresholdExceeded())
 }
 
 func TestNewMalformedPacketError(t *testing.T) {

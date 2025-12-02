@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -48,22 +49,42 @@ func (r *SQLiteRepository) createTables() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS packets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
+			flow_id INTEGER,
 			timestamp TEXT NOT NULL,
+			src_ip TEXT,
+			dst_ip TEXT,
+			src_port INTEGER,
+			dst_port INTEGER,
+			protocol TEXT,
 			length INTEGER NOT NULL,
+			flags TEXT,
+			payload BLOB,
 			layers TEXT NOT NULL,
 			protocols TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS devices (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			address TEXT NOT NULL,
 			address_type TEXT NOT NULL,
-			first_seen TEXT NOT NULL,
-			last_seen TEXT NOT NULL,
 			address_sub_type TEXT,
 			address_scope TEXT,
 			mac_addresses TEXT,
 			additional_data TEXT,
-			is_only_destination BOOLEAN
+			protocol_list TEXT,
+			dns_names TEXT,
+			hostname TEXT,
+			device_type TEXT,
+			vendor TEXT,
+			os TEXT,
+			first_seen TEXT,
+			last_seen TEXT,
+			is_router BOOLEAN,
+			is_only_destination BOOLEAN,
+			is_external BOOLEAN,
+			confidence REAL,
+			description TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,13 +96,17 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS flows (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			source TEXT NOT NULL,
-			destination TEXT NOT NULL,
+			tenant_id TEXT,
+			src_ip TEXT NOT NULL,
+			dst_ip TEXT NOT NULL,
+			src_port INTEGER,
+			dst_port INTEGER,
 			protocol TEXT NOT NULL,
-			packets INTEGER NOT NULL,
-			bytes INTEGER NOT NULL,
+			packet_count INTEGER NOT NULL,
+			byte_count INTEGER NOT NULL,
 			first_seen TEXT NOT NULL,
 			last_seen TEXT NOT NULL,
+			duration REAL,
 			source_device_id INTEGER,
 			destination_device_id INTEGER,
 			min_packet_size INTEGER,
@@ -193,8 +218,8 @@ func (r *SQLiteRepository) createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_source ON communication_patterns(source_device_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_dest ON communication_patterns(destination_device_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_protocol ON communication_patterns(protocol);`,
-		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(source, destination, protocol);`,
-		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(destination, source, protocol);`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(src_ip, dst_ip, protocol);`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(dst_ip, src_ip, protocol);`,
 	}
 
 	// Enable foreign key constraints
@@ -210,13 +235,49 @@ func (r *SQLiteRepository) createTables() error {
 	return nil
 }
 
+// Helper for converting net.IP to string for DB stores
+func ipToString(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
+}
+
+// Helper for converting DB string to net.IP
+func stringToIP(s string) net.IP {
+	if s == "" {
+		return nil
+	}
+	return net.ParseIP(s)
+}
+
+func sliceToJSON(slice []string) string {
+	if len(slice) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(slice)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 	layersJSON, _ := json.Marshal(packet.Layers)
 	protocolsJSON, _ := json.Marshal(packet.Protocols)
 	_, err := r.db.Exec(
-		`INSERT INTO packets (timestamp, length, layers, protocols) VALUES (?, ?, ?, ?);`,
+		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		nil,
+		packet.FlowID,
 		packet.Timestamp.Format(time.RFC3339Nano),
+		ipToString(packet.SrcIP),
+		ipToString(packet.DstIP),
+		packet.SrcPort,
+		packet.DstPort,
+		packet.Protocol,
 		packet.Length,
+		packet.Flags,
+		packet.Payload,
 		string(layersJSON),
 		string(protocolsJSON),
 	)
@@ -228,35 +289,49 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	if err := device.Validate(); err != nil {
 		return errors.Join(err, errors.New("invalid device data in function AddDevice"))
 	}
-	macAddresses := ""
-	if device.MACAddressSet != nil {
-		macAddresses = device.MACAddressSet.ToString()
-	}
+	macAddressesJSON := ""
+	// Convert MACAddressSet to JSON for storage
+	macAddressesJSON = macSetToJSON(device.MACAddressSet)
 
 	_, err := r.db.Exec(
-		`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		device.TenantID,
 		device.Address,
 		device.AddressType,
 		device.FirstSeen.Format(time.RFC3339Nano),
 		device.LastSeen.Format(time.RFC3339Nano),
 		device.AddressSubType,
 		device.AddressScope,
-		macAddresses,
+		macAddressesJSON,
 		device.AdditionalData,
+		sliceToJSON(device.ProtocolList),
+		sliceToJSON(device.DNSNames),
+		device.Hostname,
+		device.DeviceType,
+		device.Vendor,
+		device.OS,
+		device.IsRouter,
 		device.IsOnlyDestination,
+		device.IsExternal,
+		device.Confidence,
+		device.Description,
 	)
 	return err
 }
 
 func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices WHERE address = ?`
+	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
 	var device model2.Device
-	var firstSeenStr, lastSeenStr, macAddressesStr string
+	var firstSeenStr, lastSeenStr, macAddressesStr, protocolListStr, dnsNamesStr, hostname, deviceType, vendor, os string
+	var tenantID sql.NullString
+	var isRouter, isOnlyDestination, isExternal sql.NullBool
+	var confidence sql.NullFloat64
+	var description sql.NullString
 
-	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination); err != nil {
+	if err := row.Scan(&device.ID, &tenantID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description); err != nil {
 		return nil, err
 	}
 
@@ -264,11 +339,48 @@ func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
 	device.MACAddressSet = model2.NewMACAddressSet()
-
-	for _, mac := range strings.Split(macAddressesStr, ",") {
-		if mac != "" {
+	// Try to unmarshal as JSON array first
+	var macs []string
+	if macAddressesStr != "" {
+		if err := json.Unmarshal([]byte(macAddressesStr), &macs); err != nil {
+			// fallback to comma-separated list
+			macs = strings.Split(macAddressesStr, ",")
+		}
+	}
+	// Convert macs into MACAddressSet in device
+	for _, mac := range macs {
+		if mac != "" && device.MACAddressSet != nil {
 			device.MACAddressSet.Add(mac)
 		}
+	}
+	for _, mac := range macs {
+		if mac != "" && device.MACAddressSet != nil {
+			device.MACAddressSet.Add(mac)
+		}
+	}
+	device.ProtocolList = jsonArrayToSlice(protocolListStr)
+	device.DNSNames = jsonArrayToSlice(dnsNamesStr)
+	device.Hostname = hostname
+	device.DeviceType = deviceType
+	device.Vendor = vendor
+	device.OS = os
+	if tenantID.Valid {
+		device.TenantID = tenantID.String
+	}
+	if isRouter.Valid {
+		device.IsRouter = isRouter.Bool
+	}
+	if isOnlyDestination.Valid {
+		device.IsOnlyDestination = isOnlyDestination.Bool
+	}
+	if isExternal.Valid {
+		device.IsExternal = isExternal.Bool
+	}
+	if confidence.Valid {
+		device.Confidence = confidence.Float64
+	}
+	if description.Valid {
+		device.Description = description.String
 	}
 
 	return &device, nil
@@ -327,12 +439,18 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	}
 
 	// Get source and destination device IDs
-	srcAddress := flow.Source
+	if flow.SrcIP == nil || flow.SrcIP.String() == "" {
+		return errors.New("invalid source address")
+	}
+	srcAddress := flow.SrcIP.String()
 	srcAddress, err := model2.ExtractIPAddress(srcAddress)
 	if srcAddress == "" || err != nil {
 		return errors.New("invalid source address")
 	}
-	destAddress := flow.Destination
+	if flow.DstIP == nil || flow.DstIP.String() == "" {
+		return errors.New("invalid destination address")
+	}
+	destAddress := flow.DstIP.String()
 	destAddress, err = model2.ExtractIPAddress(destAddress)
 	if destAddress == "" || err != nil {
 		return errors.New("invalid destination address")
@@ -353,14 +471,18 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	// AddFlow: include bidirectional columns
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
 	result, err := r.db.Exec(
-		`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		flow.Source,
-		flow.Destination,
+		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count, byte_count, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		flow.TenantID,
+		ipToString(flow.SrcIP),
+		ipToString(flow.DstIP),
+		flow.SrcPort,
+		flow.DstPort,
 		flow.Protocol,
-		flow.Packets,
-		flow.Bytes,
+		flow.PacketCount,
+		flow.ByteCount,
 		flow.FirstSeen.Format(time.RFC3339Nano),
 		flow.LastSeen.Format(time.RFC3339Nano),
+		flow.Duration,
 		srcDevice.ID,
 		destDevice.ID,
 		flow.MinPacketSize,
@@ -385,7 +507,7 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 }
 
 func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.Flow, error) {
-	query := `SELECT id, source, destination, protocol, packets, bytes, first_seen, last_seen, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client FROM flows`
+	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count, byte_count, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client FROM flows`
 	params := []interface{}{}
 
 	if len(filters) > 0 {
@@ -406,9 +528,14 @@ func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.F
 	var flows []*model2.Flow
 	for rows.Next() {
 		var firstSeenStr, lastSeenStr, sourcePortsStr, destinationPortsStr, packetRefsJson string
+		var srcIPStr, dstIPStr string
+		var srcPortInt, dstPortInt sql.NullInt64
+		var packetCountInt, byteCountInt sql.NullInt64
+		var durationFloat sql.NullFloat64
+		var tenantID sql.NullString
 		var flow model2.Flow
 
-		if err := rows.Scan(&flow.ID, &flow.Source, &flow.Destination, &flow.Protocol, &flow.Packets, &flow.Bytes, &firstSeenStr, &lastSeenStr, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr, &flow.PacketsClientToServer, &flow.PacketsServerToClient, &flow.BytesClientToServer, &flow.BytesServerToClient); err != nil {
+		if err := rows.Scan(&flow.ID, &tenantID, &srcIPStr, &dstIPStr, &srcPortInt, &dstPortInt, &flow.Protocol, &packetCountInt, &byteCountInt, &firstSeenStr, &lastSeenStr, &durationFloat, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr, &flow.PacketsClientToServer, &flow.PacketsServerToClient, &flow.BytesClientToServer, &flow.BytesServerToClient); err != nil {
 			return nil, err
 		}
 
@@ -432,6 +559,26 @@ func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.F
 
 		flow.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 		flow.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+		flow.SrcIP = stringToIP(srcIPStr)
+		flow.DstIP = stringToIP(dstIPStr)
+		if srcPortInt.Valid {
+			flow.SrcPort = int(srcPortInt.Int64)
+		}
+		if dstPortInt.Valid {
+			flow.DstPort = int(dstPortInt.Int64)
+		}
+		if packetCountInt.Valid {
+			flow.PacketCount = int(packetCountInt.Int64)
+		}
+		if byteCountInt.Valid {
+			flow.ByteCount = int64(byteCountInt.Int64)
+		}
+		if durationFloat.Valid {
+			flow.Duration = durationFloat.Float64
+		}
+		if tenantID.Valid {
+			flow.TenantID = tenantID.String
+		}
 
 		flows = append(flows, &flow)
 	}
@@ -572,7 +719,7 @@ func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model
 
 		services = append(services, &model2.Service{
 			ID:        elementID,
-			IP:        ip,
+			IP:        net.ParseIP(ip),
 			Port:      port,
 			FirstSeen: firstSeenTime,
 			LastSeen:  lastSeenTime,
@@ -797,14 +944,12 @@ func (r *SQLiteRepository) AddFlows(flows []*model2.Flow) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO flows (source, destination, protocol, packets, bytes, first_seen, last_seen, min_packet_size, max_packet_size, packet_refs, source_ports,
-                   destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client, source_device_id,
-                   destination_device_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
-    SELECT id FROM devices WHERE address = ?
-    ), (
-    SELECT id FROM devices WHERE address = ?
-    ));`)
+	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count, byte_count, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client, source_device_id, destination_device_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+	SELECT id FROM devices WHERE address = ?
+	), (
+	SELECT id FROM devices WHERE address = ?
+	));`)
 	if err != nil {
 		return err
 	}
@@ -826,13 +971,17 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 		minPkt := flow.MinPacketSize
 		maxPkt := flow.MaxPacketSize
 		_, err = stmt.Exec(
-			flow.Source,
-			flow.Destination,
+			flow.TenantID,
+			ipToString(flow.SrcIP),
+			ipToString(flow.DstIP),
+			flow.SrcPort,
+			flow.DstPort,
 			flow.Protocol,
-			flow.Packets,
-			flow.Bytes,
+			flow.PacketCount,
+			flow.ByteCount,
 			flow.FirstSeen.Format(time.RFC3339Nano),
 			flow.LastSeen.Format(time.RFC3339Nano),
+			flow.Duration,
 			minPkt,
 			maxPkt,
 			string(packetRefsJSON),
@@ -842,8 +991,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 			flow.PacketsServerToClient,
 			flow.BytesClientToServer,
 			flow.BytesServerToClient,
-			flow.Source,
-			flow.Destination,
+			ipToString(flow.SrcIP),
+			ipToString(flow.DstIP),
 		)
 		if err != nil {
 			return err
@@ -1244,12 +1393,12 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 	}
 
 	// Get source and destination device IDs
-	srcAddress := flow.Source
+	srcAddress := ipToString(flow.SrcIP)
 	srcAddress, err := model2.ExtractIPAddress(srcAddress)
 	if srcAddress == "" || err != nil {
 		return errors.New("invalid source address")
 	}
-	destAddress := flow.Destination
+	destAddress := ipToString(flow.DstIP)
 	destAddress, err = model2.ExtractIPAddress(destAddress)
 	if destAddress == "" || err != nil {
 		return errors.New("invalid destination address")
@@ -1284,17 +1433,20 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE flows SET source = ?, destination = ?, protocol = ?, packets = ?, bytes = ?,
-		first_seen = ?, last_seen = ?, source_device_id = ?, destination_device_id = ?,
+		`UPDATE flows SET src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?, protocol = ?, packet_count = ?, byte_count = ?,
+		first_seen = ?, last_seen = ?, duration = ?, source_device_id = ?, destination_device_id = ?,
 		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?, packets_client_to_server = ?, packets_server_to_client = ?, bytes_client_to_server = ?, bytes_server_to_client = ?
 		WHERE id = ?;`,
-		flow.Source,
-		flow.Destination,
+		ipToString(flow.SrcIP),
+		ipToString(flow.DstIP),
+		flow.SrcPort,
+		flow.DstPort,
 		flow.Protocol,
-		flow.Packets,
-		flow.Bytes,
+		flow.PacketCount,
+		flow.ByteCount,
 		flow.FirstSeen.Format(time.RFC3339Nano),
 		flow.LastSeen.Format(time.RFC3339Nano),
+		flow.Duration,
 		srcDevice.ID,
 		destDevice.ID,
 		flow.MinPacketSize,
@@ -1775,7 +1927,7 @@ type FlowProcessingError struct {
 }
 
 func (e *FlowProcessingError) Error() string {
-	return fmt.Sprintf("flow processing error [%s:%s]: %s - flow %s -> %s", e.Context, e.Action, e.Err.Error(), e.Flow.Source, e.Flow.Destination)
+	return fmt.Sprintf("flow processing error [%s:%s]: %s - flow %s -> %s", e.Context, e.Action, e.Err.Error(), ipToString(e.Flow.SrcIP), ipToString(e.Flow.DstIP))
 }
 
 func (e *FlowProcessingError) Unwrap() error {
@@ -1796,7 +1948,7 @@ type DefaultFlowErrorHandler struct{}
 // HandleCanonicalizationError handles canonicalization failures by falling back to lexicographic ordering.
 func (h *DefaultFlowErrorHandler) HandleCanonicalizationError(flow *model2.Flow, err error) error {
 	// Log the error but continue with lexicographic fallback
-	log.Printf("Canonicalization failed for flow %s -> %s: %v, falling back to lexicographic ordering", flow.Source, flow.Destination, err)
+	log.Printf("Canonicalization failed for flow %s -> %s: %v, falling back to lexicographic ordering", ipToString(flow.SrcIP), ipToString(flow.DstIP), err)
 
 	// For address parsing failures, we can't create a canonical flow
 	// Return the error to prevent corrupted data
@@ -1815,7 +1967,7 @@ func (h *DefaultFlowErrorHandler) HandleLookupError(flow *model2.Flow, err error
 		return nil
 	}
 
-	log.Printf("Flow lookup failed for flow %s -> %s: %v", flow.Source, flow.Destination, err)
+	log.Printf("Flow lookup failed for flow %s -> %s: %v", ipToString(flow.SrcIP), ipToString(flow.DstIP), err)
 	return &FlowProcessingError{
 		Flow:    flow,
 		Err:     err,
@@ -1828,7 +1980,7 @@ func (h *DefaultFlowErrorHandler) HandleLookupError(flow *model2.Flow, err error
 func (h *DefaultFlowErrorHandler) HandleUpdateError(flow *model2.Flow, err error) error {
 	// Check for constraint violations that might be due to concurrent updates
 	if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
-		log.Printf("Constraint violation during flow update %s -> %s: %v, this may be due to concurrent processing", flow.Source, flow.Destination, err)
+		log.Printf("Constraint violation during flow update %s -> %s: %v, this may be due to concurrent processing", ipToString(flow.SrcIP), ipToString(flow.DstIP), err)
 		return &FlowProcessingError{
 			Flow:    flow,
 			Err:     err,
@@ -1837,7 +1989,7 @@ func (h *DefaultFlowErrorHandler) HandleUpdateError(flow *model2.Flow, err error
 		}
 	}
 
-	log.Printf("Flow update failed for flow %s -> %s: %v", flow.Source, flow.Destination, err)
+	log.Printf("Flow update failed for flow %s -> %s: %v", ipToString(flow.SrcIP), ipToString(flow.DstIP), err)
 	return &FlowProcessingError{
 		Flow:    flow,
 		Err:     err,
@@ -1848,7 +2000,7 @@ func (h *DefaultFlowErrorHandler) HandleUpdateError(flow *model2.Flow, err error
 
 // HandleCreationError handles creation failures.
 func (h *DefaultFlowErrorHandler) HandleCreationError(flow *model2.Flow, err error) error {
-	log.Printf("Flow creation failed for flow %s -> %s: %v", flow.Source, flow.Destination, err)
+	log.Printf("Flow creation failed for flow %s -> %s: %v", ipToString(flow.SrcIP), ipToString(flow.DstIP), err)
 	return &FlowProcessingError{
 		Flow:    flow,
 		Err:     err,
@@ -1874,14 +2026,14 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	}
 
 	// Canonicalize the flow direction
-	canonicalSrc, canonicalDst, isReversed := r.flowCanonicalizer.CanonicalizeFlow(flow.Source, flow.Destination, *flow.SourcePorts, *flow.DestinationPorts, flow.Protocol)
+	canonicalSrc, canonicalDst, isReversed := r.flowCanonicalizer.CanonicalizeFlow(ipToString(flow.SrcIP), ipToString(flow.DstIP), *flow.SourcePorts, *flow.DestinationPorts, flow.Protocol)
 
 	// Check if a canonical flow already exists
 	var existingFlow *model2.Flow
 	existingFlows, err := r.GetFlows(map[string]interface{}{
-		"source":      canonicalSrc,
-		"destination": canonicalDst,
-		"protocol":    flow.Protocol,
+		"src_ip":   canonicalSrc,
+		"dst_ip":   canonicalDst,
+		"protocol": flow.Protocol,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to check for existing flow: %w", err)
@@ -1897,11 +2049,13 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	} else {
 		// Insert new flow in canonical form
 		canonicalFlow := &model2.Flow{
-			Source:                canonicalSrc,
-			Destination:           canonicalDst,
+			SrcIP:                 stringToIP(canonicalSrc),
+			DstIP:                 stringToIP(canonicalDst),
 			Protocol:              flow.Protocol,
-			Packets:               flow.Packets,
-			Bytes:                 flow.Bytes,
+			PacketCount:           flow.PacketCount,
+			ByteCount:             flow.ByteCount,
+			SrcPort:               flow.SrcPort,
+			DstPort:               flow.DstPort,
 			FirstSeen:             flow.FirstSeen,
 			LastSeen:              flow.LastSeen,
 			PacketRefs:            make([]int64, len(flow.PacketRefs)),
@@ -1916,13 +2070,16 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 		}
 		copy(canonicalFlow.PacketRefs, flow.PacketRefs)
 
-		// Set bidirectional stats based on direction
+		// Set bidirectional stats and ports based on direction
 		if isReversed {
-			canonicalFlow.PacketsServerToClient = flow.Packets
-			canonicalFlow.BytesServerToClient = flow.Bytes
+			canonicalFlow.PacketsServerToClient = flow.PacketCount
+			canonicalFlow.BytesServerToClient = flow.ByteCount
+			// For reversed flows, flip ports
+			canonicalFlow.SrcPort = flow.DstPort
+			canonicalFlow.DstPort = flow.SrcPort
 		} else {
-			canonicalFlow.PacketsClientToServer = flow.Packets
-			canonicalFlow.BytesClientToServer = flow.Bytes
+			canonicalFlow.PacketsClientToServer = flow.PacketCount
+			canonicalFlow.BytesClientToServer = flow.ByteCount
 		}
 
 		return r.AddFlow(canonicalFlow)
@@ -1942,6 +2099,35 @@ func (r *SQLiteRepository) copySet(s *model2.Set) *model2.Set {
 }
 
 // parseAddressPort extracts IP and port from an address string like "192.168.1.1:80"
+// NOTE: Keep jsonArrayToSlice above so we can reuse
+
+// Convert a MACAddressSet to JSON string for DB storage
+func macSetToJSON(set *model2.MACAddressSet) string {
+	if set == nil {
+		return ""
+	}
+	list := set.List()
+	if len(list) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(list)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func jsonArrayToSlice(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var result []string
+	if err := json.Unmarshal([]byte(s), &result); err == nil {
+		return result
+	}
+	// fallback
+	return strings.Split(s, ",")
+}
 func (r *SQLiteRepository) parseAddressPort(address string) (ip string, port uint16) {
 	if strings.Contains(address, "[") && strings.Contains(address, "]:") {
 		// IPv6 with port: [2001:db8::1]:80
@@ -1977,16 +2163,16 @@ func (r *SQLiteRepository) updateBidirectionalFlow(existingFlow, newFlow *model2
 	}
 
 	// Update packet/byte counts
-	existingFlow.Packets += newFlow.Packets
-	existingFlow.Bytes += newFlow.Bytes
+	existingFlow.PacketCount += newFlow.PacketCount
+	existingFlow.ByteCount += newFlow.ByteCount
 
 	// Update bidirectional stats
 	if isReversed {
-		existingFlow.PacketsServerToClient += newFlow.Packets
-		existingFlow.BytesServerToClient += newFlow.Bytes
+		existingFlow.PacketsServerToClient += newFlow.PacketCount
+		existingFlow.BytesServerToClient += newFlow.ByteCount
 	} else {
-		existingFlow.PacketsClientToServer += newFlow.Packets
-		existingFlow.BytesClientToServer += newFlow.Bytes
+		existingFlow.PacketsClientToServer += newFlow.PacketCount
+		existingFlow.BytesClientToServer += newFlow.ByteCount
 	}
 
 	// Update packet refs

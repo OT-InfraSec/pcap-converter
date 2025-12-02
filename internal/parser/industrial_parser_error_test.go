@@ -386,9 +386,9 @@ func createThresholdExceededHandler() ErrorHandler {
 		Err:         errors.New("test"),
 		Recoverable: false,
 	})
-	if err != nil {
-		return nil
-	}
+	// We expect an error to be returned here due to threshold being exceeded;
+	// ignore it - we just want the handler in the exceeded state.
+	_ = err
 	return handler
 }
 

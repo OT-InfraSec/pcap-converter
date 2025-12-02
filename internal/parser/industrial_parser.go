@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	lib_layers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
@@ -298,12 +299,19 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 		return []model.IndustrialProtocolInfo{}, nil
 	}
 
-	if p.errorHandler.IsThresholdExceeded() {
+	if p.errorHandler.ThresholdExceeded() {
 		return nil, errors.New("error threshold exceeded, stopping industrial protocol parsing")
 	}
 
 	var protocols []model.IndustrialProtocolInfo
 	timestamp := packet.Metadata().Timestamp
+
+	// Check for EtherNet/IP protocol
+	if p.config.EnableEtherNetIP {
+		if enipInfo := p.parseEtherNetIP(packet, timestamp); enipInfo != nil && enipInfo.Confidence >= p.config.ConfidenceThreshold {
+			protocols = append(protocols, *enipInfo)
+		}
+	}
 
 	// Check for OPC UA protocol
 	if p.config.EnableOPCUA {
@@ -426,7 +434,7 @@ func (p *IndustrialProtocolParserImpl) AnalyzeCommunicationPatterns(flows []mode
 	// Group flows by source-destination pairs
 	flowGroups := make(map[string][]model.Flow)
 	for _, flow := range flows {
-		key := fmt.Sprintf("%s-%s", flow.Source, flow.Destination)
+		key := fmt.Sprintf("%s-%s", flow.SrcIP.String(), flow.DstIP.String())
 		flowGroups[key] = append(flowGroups[key], flow)
 	}
 
@@ -515,8 +523,8 @@ func (p *IndustrialProtocolParserImpl) analyzeFlowGroup(flows []model.Flow) *mod
 
 	firstFlow := flows[0]
 	pattern := &model.CommunicationPattern{
-		SourceDevice:        firstFlow.Source,
-		DestinationDevice:   firstFlow.Destination,
+		SourceDevice:        firstFlow.SrcIP.String(),
+		DestinationDevice:   firstFlow.DstIP.String(),
 		Protocol:            firstFlow.Protocol,
 		Frequency:           time.Duration(0),
 		DataVolume:          0,
@@ -546,7 +554,7 @@ func (p *IndustrialProtocolParserImpl) analyzeFlowGroup(flows []model.Flow) *mod
 	}
 
 	// Calculate deviations and dataVolume
-	totalBytes := int64(sortedFlows[0].Bytes)
+	totalBytes := int64(sortedFlows[0].ByteCount)
 	if pattern.Frequency > 0 {
 		frequencyVarianceSum := float64(0)
 		dataVolumeVarianceSum := float64(0)
@@ -555,10 +563,10 @@ func (p *IndustrialProtocolParserImpl) analyzeFlowGroup(flows []model.Flow) *mod
 			frequencyDeviation := float64(interval - pattern.Frequency)
 			frequencyVarianceSum += frequencyDeviation * frequencyDeviation
 
-			dataVolumeDeviation := float64(int64(sortedFlows[i].Bytes) - (pattern.DataVolume / pattern.FlowCount))
+			dataVolumeDeviation := float64(int64(sortedFlows[i].ByteCount) - (pattern.DataVolume / pattern.FlowCount))
 			dataVolumeVarianceSum += dataVolumeDeviation * dataVolumeDeviation
 
-			totalBytes += int64(sortedFlows[i].Bytes)
+			totalBytes += int64(sortedFlows[i].ByteCount)
 		}
 		pattern.DeviationFrequency = frequencyVarianceSum / float64(flowLen-1)
 		pattern.DeviationDataVolume = dataVolumeVarianceSum / float64(flowLen-1)
@@ -806,6 +814,29 @@ func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, ti
 	return info
 }
 
+// parseEtherNetIP parses EtherNet/IP (ENIP) protocol
+func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
+	if !p.isEtherNetIPPort(packet) {
+		return nil
+	}
+	info := &model.IndustrialProtocolInfo{
+		Protocol:       "EtherNet/IP",
+		Timestamp:      timestamp,
+		Confidence:     0.6,
+		DeviceIdentity: make(map[string]interface{}),
+		SecurityInfo:   make(map[string]interface{}),
+		AdditionalData: make(map[string]interface{}),
+	}
+	// Determine ports and direction
+	if err := p.extractPortInfo(packet, info, []uint16{44818, 2222}); err != nil {
+		// Not necessarily an error; leave default info
+		info.Confidence = 0.5
+	} else {
+		info.Confidence = 0.9
+	}
+	return info
+}
+
 // extractOPCUADetails extracts OPC UA specific information
 func (p *IndustrialProtocolParserImpl) extractOPCUADetails(packet gopacket.Packet, info *model.IndustrialProtocolInfo) error {
 	// Look for OPC UA layer in the packet
@@ -985,9 +1016,35 @@ func (p *IndustrialProtocolParserImpl) classifyOPCUAMessage(opcua *lib_layers.OP
 }
 
 func (p *IndustrialProtocolParserImpl) DetermineCriticality(protocol string, volume int64, count int) interface{} {
-	return nil
+	proto := strings.ToLower(protocol)
+	switch proto {
+	case "ethernetip", "ethernet/ip":
+		if volume > 10000 || count >= 25 {
+			return CRITICALITY_CRITICAL
+		} else if volume > 2000 || count >= 10 {
+			return CRITICALITY_HIGH
+		}
+		return CRITICALITY_MEDIUM
+	case "opc ua", "opcua":
+		if volume > 50000 || count >= 50 {
+			return CRITICALITY_HIGH
+		} else if volume > 20000 || count >= 20 {
+			return CRITICALITY_MEDIUM
+		}
+		return CRITICALITY_LOW
+	default:
+		// Unknown protocols: treat high volumes and counts as medium
+		if volume > 100000 || count > 100 {
+			return CRITICALITY_MEDIUM
+		}
+		return CRITICALITY_LOW
+	}
 }
 
 func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) interface{} {
-	return nil
+	patterns := p.AnalyzeCommunicationPatterns(flows)
+	if len(patterns) == 0 {
+		return ""
+	}
+	return patterns[0].PatternType
 }

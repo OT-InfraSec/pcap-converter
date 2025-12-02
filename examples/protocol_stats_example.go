@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/parser"
@@ -137,20 +138,20 @@ func main() {
 	// Create some sample flows for pattern analysis
 	flows := []model.Flow{
 		{
-			Source:      "192.168.1.100",
-			Destination: "192.168.1.101",
+			SrcIP:       net.ParseIP("192.168.1.100"),
+			DstIP:       net.ParseIP("192.168.1.101"),
 			Protocol:    "ethernetip",
-			Packets:     100,
-			Bytes:       5000,
+			PacketCount: 100,
+			ByteCount:   5000,
 			FirstSeen:   now,
 			LastSeen:    now.Add(time.Minute * 10),
 		},
 		{
-			Source:      "192.168.1.101",
-			Destination: "192.168.1.102",
+			SrcIP:       net.ParseIP("192.168.1.101"),
+			DstIP:       net.ParseIP("192.168.1.102"),
 			Protocol:    "opcua",
-			Packets:     50,
-			Bytes:       2500,
+			PacketCount: 50,
+			ByteCount:   2500,
 			FirstSeen:   now,
 			LastSeen:    now.Add(time.Minute * 5),
 		},
@@ -221,11 +222,13 @@ func main() {
 	// Demonstrate how request-response flows are automatically merged
 	// Simulate HTTP request (client -> server)
 	httpRequest := &model.Flow{
-		Source:      "192.168.1.10:34567",
-		Destination: "192.168.1.20:80",
+		SrcIP:       net.ParseIP("192.168.1.10"),
+		SrcPort:     34567,
+		DstIP:       net.ParseIP("192.168.1.20"),
+		DstPort:     80,
 		Protocol:    "HTTP",
-		Packets:     1,
-		Bytes:       200,
+		PacketCount: 1,
+		ByteCount:   200,
 		FirstSeen:   now,
 		LastSeen:    now,
 		PacketRefs:  []int64{1},
@@ -244,11 +247,13 @@ func main() {
 
 	// Simulate HTTP response (server -> client)
 	httpResponse := &model.Flow{
-		Source:      "192.168.1.20:80",
-		Destination: "192.168.1.10:34567",
+		SrcIP:       net.ParseIP("192.168.1.20"),
+		SrcPort:     80,
+		DstIP:       net.ParseIP("192.168.1.10"),
+		DstPort:     34567,
 		Protocol:    "HTTP",
-		Packets:     1,
-		Bytes:       1500,
+		PacketCount: 1,
+		ByteCount:   1500,
 		FirstSeen:   now.Add(time.Second),
 		LastSeen:    now.Add(time.Second),
 		PacketRefs:  []int64{2},
@@ -273,8 +278,8 @@ func main() {
 		fmt.Printf("Total flows in database: %d\n", len(allFlows))
 		for _, flow := range allFlows {
 			if flow.Protocol == "HTTP" {
-				fmt.Printf("  HTTP Flow: %s -> %s\n", flow.Source, flow.Destination)
-				fmt.Printf("    Total Packets: %d, Total Bytes: %d\n", flow.Packets, flow.Bytes)
+				fmt.Printf("  HTTP Flow: %s:%d -> %s:%d\n", flow.SrcIP.String(), flow.SrcPort, flow.DstIP.String(), flow.DstPort)
+				fmt.Printf("    Total Packets: %d, Total Bytes: %d\n", flow.PacketCount, flow.ByteCount)
 				fmt.Printf("    Client->Server: %d packets, %d bytes\n", flow.PacketsClientToServer, flow.BytesClientToServer)
 				fmt.Printf("    Server->Client: %d packets, %d bytes\n", flow.PacketsServerToClient, flow.BytesServerToClient)
 				fmt.Printf("    Duration: %v\n", flow.LastSeen.Sub(flow.FirstSeen))

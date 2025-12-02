@@ -203,7 +203,7 @@ func performIndustrialAnalysis(repo repository.Repository) error {
 
 		// Group by source device
 		if len(protocols) > 0 {
-			srcAddr := flow.Source
+			srcAddr := flow.SrcIP.String()
 			deviceProtocols[srcAddr] = append(deviceProtocols[srcAddr], protocols...)
 		}
 	}

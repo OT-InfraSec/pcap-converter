@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -41,11 +42,13 @@ func TestFlowStruct(t *testing.T) {
 	minSize := 60
 	f := &Flow{
 		ID:                  3,
-		Source:              "192.168.1.1",
-		Destination:         "192.168.1.2",
+		SrcIP:               net.ParseIP("192.168.1.1"),
+		DstIP:               net.ParseIP("192.168.1.2"),
+		SrcPort:             1234,
+		DstPort:             80,
 		Protocol:            "TCP",
-		Packets:             10,
-		Bytes:               1000,
+		PacketCount:         10,
+		ByteCount:           int64(1000),
 		FirstSeen:           ts,
 		LastSeen:            ts,
 		SourceDeviceID:      id,

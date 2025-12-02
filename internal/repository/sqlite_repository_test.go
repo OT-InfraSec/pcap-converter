@@ -3,6 +3,7 @@ package repository
 import (
 	"testing"
 	"time"
+	"net"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/stretchr/testify/assert"
@@ -94,11 +95,13 @@ func TestSQLiteRepository_AddFlow(t *testing.T) {
 	}
 
 	flow := &model.Flow{
-		Source:           "192.168.1.1:1234",
-		Destination:      "192.168.1.2:80",
+		SrcIP:            net.ParseIP("192.168.1.1"),
+		DstIP:            net.ParseIP("192.168.1.2"),
+		SrcPort:          1234,
+		DstPort:          80,
 		Protocol:         "TCP",
-		Packets:          1,
-		Bytes:            100,
+		PacketCount:      1,
+		ByteCount:        100,
 		FirstSeen:        ts,
 		LastSeen:         ts,
 		PacketRefs:       []int64{1},
@@ -135,8 +138,8 @@ func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 
 	// Simulate HTTP request (client to server)
 	requestFlow := &model.Flow{
-		Source: "192.168.1.10:12345", Destination: "192.168.1.20:80", Protocol: "HTTP",
-		Packets: 1, Bytes: 200, FirstSeen: ts1, LastSeen: ts1,
+		SrcIP: net.ParseIP("192.168.1.10"), DstIP: net.ParseIP("192.168.1.20"), SrcPort: 12345, DstPort: 80, Protocol: "HTTP",
+		PacketCount: 1, ByteCount: 200, FirstSeen: ts1, LastSeen: ts1,
 		PacketRefs: []int64{1}, SourcePorts: model.NewSet(), DestinationPorts: model.NewSet(),
 	}
 	requestFlow.SourcePorts.Add("12345")
@@ -147,8 +150,8 @@ func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 
 	// Simulate HTTP response (server to client)
 	responseFlow := &model.Flow{
-		Source: "192.168.1.20:80", Destination: "192.168.1.10:12345", Protocol: "HTTP",
-		Packets: 1, Bytes: 1500, FirstSeen: ts2, LastSeen: ts2,
+		SrcIP: net.ParseIP("192.168.1.20"), DstIP: net.ParseIP("192.168.1.10"), SrcPort: 80, DstPort: 12345, Protocol: "HTTP",
+		PacketCount: 1, ByteCount: 1500, FirstSeen: ts2, LastSeen: ts2,
 		PacketRefs: []int64{2}, SourcePorts: model.NewSet(), DestinationPorts: model.NewSet(),
 	}
 	responseFlow.SourcePorts.Add("80")
@@ -165,18 +168,20 @@ func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 	flow := flows[0]
 
 	// Verify canonical direction (client to server)
-	assert.Equal(t, "192.168.1.10:12345", flow.Source)
-	assert.Equal(t, "192.168.1.20:80", flow.Destination)
+	assert.Equal(t, "192.168.1.10", flow.SrcIP.String())
+	assert.Equal(t, 12345, flow.SrcPort)
+	assert.Equal(t, "192.168.1.20", flow.DstIP.String())
+	assert.Equal(t, 80, flow.DstPort)
 
 	// Verify bidirectional statistics
 	assert.Equal(t, 1, flow.PacketsClientToServer)
 	assert.Equal(t, 1, flow.PacketsServerToClient)
-	assert.Equal(t, 200, flow.BytesClientToServer)
-	assert.Equal(t, 1500, flow.BytesServerToClient)
+	assert.Equal(t, int64(200), flow.BytesClientToServer)
+	assert.Equal(t, int64(1500), flow.BytesServerToClient)
 
 	// Verify totals
-	assert.Equal(t, 2, flow.Packets)
-	assert.Equal(t, 1700, flow.Bytes)
+	assert.Equal(t, 2, flow.PacketCount)
+	assert.Equal(t, int64(1700), flow.ByteCount)
 
 	// Verify timestamps
 	assert.True(t, flow.FirstSeen.Equal(ts1))
@@ -212,8 +217,8 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 
 	// Simulate OPC UA request (client to server)
 	opcuaRequest := &model.Flow{
-		Source: "192.168.1.10:49152", Destination: "192.168.1.20:4840", Protocol: "OPC UA",
-		Packets: 1, Bytes: 100, FirstSeen: ts1, LastSeen: ts1,
+		SrcIP: net.ParseIP("192.168.1.10"), DstIP: net.ParseIP("192.168.1.20"), SrcPort: 49152, DstPort: 4840, Protocol: "OPC UA",
+		PacketCount: 1, ByteCount: 100, FirstSeen: ts1, LastSeen: ts1,
 		PacketRefs: []int64{1}, SourcePorts: model.NewSet(), DestinationPorts: model.NewSet(),
 	}
 	opcuaRequest.SourcePorts.Add("49152")
@@ -224,8 +229,8 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 
 	// Simulate OPC UA response (server to client)
 	opcuaResponse := &model.Flow{
-		Source: "192.168.1.20:4840", Destination: "192.168.1.10:49152", Protocol: "OPC UA",
-		Packets: 1, Bytes: 200, FirstSeen: ts2, LastSeen: ts2,
+		SrcIP: net.ParseIP("192.168.1.20"), DstIP: net.ParseIP("192.168.1.10"), SrcPort: 4840, DstPort: 49152, Protocol: "OPC UA",
+		PacketCount: 1, ByteCount: 200, FirstSeen: ts2, LastSeen: ts2,
 		PacketRefs: []int64{2}, SourcePorts: model.NewSet(), DestinationPorts: model.NewSet(),
 	}
 	opcuaResponse.SourcePorts.Add("4840")
@@ -242,14 +247,16 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 	flow := flows[0]
 
 	// Verify canonical direction (client to server)
-	assert.Equal(t, "192.168.1.10:49152", flow.Source)
-	assert.Equal(t, "192.168.1.20:4840", flow.Destination)
+	assert.Equal(t, "192.168.1.10", flow.SrcIP.String())
+	assert.Equal(t, 49152, flow.SrcPort)
+	assert.Equal(t, "192.168.1.20", flow.DstIP.String())
+	assert.Equal(t, 4840, flow.DstPort)
 
 	// Verify bidirectional statistics
 	assert.Equal(t, 1, flow.PacketsClientToServer)
 	assert.Equal(t, 1, flow.PacketsServerToClient)
-	assert.Equal(t, 100, flow.BytesClientToServer)
-	assert.Equal(t, 200, flow.BytesServerToClient)
+	assert.Equal(t, int64(100), flow.BytesClientToServer)
+	assert.Equal(t, int64(200), flow.BytesServerToClient)
 
 	// Verify protocol
 	assert.Equal(t, "OPC UA", flow.Protocol)

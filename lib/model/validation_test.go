@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -70,11 +71,13 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "happy path - valid TCP flow with IP addresses",
 			flow: Flow{
-				Source:        "192.168.1.1:1234",
-				Destination:   "192.168.1.2:80",
+				SrcIP:         net.ParseIP("192.168.1.1"),
+				DstIP:         net.ParseIP("192.168.1.2"),
+				SrcPort:       1234,
+				DstPort:       80,
 				Protocol:      "TCP",
-				Packets:       100,
-				Bytes:         1500,
+				PacketCount:   100,
+				ByteCount:     int64(1500),
 				FirstSeen:     now,
 				LastSeen:      later,
 				MinPacketSize: minSize,
@@ -85,11 +88,13 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "happy path - valid TCP flow with IPv6 addresses",
 			flow: Flow{
-				Source:      "[2001:db8::1]:1234",
-				Destination: "[2001:db8::2]:80",
+				SrcIP:       net.ParseIP("2001:db8::1"),
+				DstIP:       net.ParseIP("2001:db8::2"),
+				SrcPort:     1234,
+				DstPort:     80,
 				Protocol:    "TCP",
-				Packets:     100,
-				Bytes:       1500,
+				PacketCount: 100,
+				ByteCount:   int64(1500),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -98,11 +103,13 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "bad path - invalid IP address for TCP",
 			flow: Flow{
-				Source:      "invalid-ip",
-				Destination: "192.168.1.2:80",
+				SrcIP:       net.ParseIP("invalid-ip"),
+				DstIP:       net.ParseIP("192.168.1.2"),
+				SrcPort:     0,
+				DstPort:     80,
 				Protocol:    "TCP",
-				Packets:     100,
-				Bytes:       1500,
+				PacketCount: 100,
+				ByteCount:   int64(1500),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -111,24 +118,24 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "exception path - valid ARP flow with MAC addresses",
 			flow: Flow{
-				Source:      "00:11:22:33:44:55",
-				Destination: "ff:ff:ff:ff:ff:ff",
+				SrcIP:       net.ParseIP("192.168.1.10"),
+				DstIP:       net.ParseIP("192.168.1.255"),
 				Protocol:    "ARP",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
 			wantErr: false,
 		},
 		{
-			name: "bad path - TCP flow with MAC addresses",
+			name: "bad path - TCP flow with invalid src ip (simulate MAC)",
 			flow: Flow{
-				Source:      "00:11:22:33:44:55",
-				Destination: "ff:ff:ff:ff:ff:ff",
+				SrcIP:       nil,
+				DstIP:       net.ParseIP("192.168.1.255"),
 				Protocol:    "TCP",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -137,11 +144,13 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "happy path - valid DNS flow with hostname",
 			flow: Flow{
-				Source:      "192.168.1.1:53",
-				Destination: "dns.example.com",
+				SrcIP:       net.ParseIP("192.168.1.1"),
+				DstIP:       net.ParseIP("8.8.8.8"),
+				SrcPort:     53,
+				DstPort:     0,
 				Protocol:    "DNS",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -150,11 +159,11 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "bad path - ip addresses contain invalid characters",
 			flow: Flow{
-				Source:      "invalid-ip-address-format",
-				Destination: "not@valid!ip",
+				SrcIP:       net.ParseIP("invalid-ip-address-format"),
+				DstIP:       net.ParseIP("not@valid!ip"),
 				Protocol:    "UDP",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -163,11 +172,11 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "bad path - ip addresses with annotations",
 			flow: Flow{
-				Source:      "fe80::bc63:ff16:c0cd:87d5:546(dhcpv6-client)",
-				Destination: "10.60.143.255:1740(encore)",
+				SrcIP:       net.ParseIP("fe80::bc63:ff16:c0cd:87d5:546(dhcpv6-client)"),
+				DstIP:       net.ParseIP("10.60.143.255:1740(encore)"),
 				Protocol:    "UDP",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
@@ -176,15 +185,17 @@ func TestFlowValidation(t *testing.T) {
 		{
 			name: "happy path - special multicast addresses",
 			flow: Flow{
-				Source:      "192.168.1.1:5353",
-				Destination: "224.0.0.251:5353(mdns)", // mDNS multicast
+				SrcIP:       net.ParseIP("192.168.1.1"),
+				DstIP:       net.ParseIP("224.0.0.251"),
+				SrcPort:     5353,
+				DstPort:     5353,
 				Protocol:    "UDP",
-				Packets:     1,
-				Bytes:       64,
+				PacketCount: 1,
+				ByteCount:   int64(64),
 				FirstSeen:   now,
 				LastSeen:    later,
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 

@@ -1,4 +1,3 @@
-// filepath: /Users/patrick/gitRepos/pcap-importer-go/lib/layers/eigrp.go
 package lib_layers
 
 import (
