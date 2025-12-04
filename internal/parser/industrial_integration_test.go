@@ -25,7 +25,7 @@ func TestIndustrialProtocolIntegration_EtherNetIP(t *testing.T) {
 
 	// Set up repository and parser
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 
 	// Parse the file
 	err := parser.ParseFile()
@@ -65,7 +65,7 @@ func TestIndustrialProtocolIntegration_OPCUA(t *testing.T) {
 
 	// Set up repository and parser
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 
 	// Parse the file
 	err := parser.ParseFile()
@@ -107,7 +107,7 @@ func TestIndustrialProtocolIntegration_MixedProtocols(t *testing.T) {
 
 	// Set up repository and parser
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 
 	// Parse the file
 	err := parser.ParseFile()
@@ -191,7 +191,7 @@ func TestIndustrialProtocolIntegration_DatabasePersistence(t *testing.T) {
 	defer os.Remove(pcapFile)
 
 	// Parse with real repository
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 	err = parser.ParseFile()
 	require.NoError(t, err)
 
@@ -231,7 +231,7 @@ func TestIndustrialProtocolIntegration_ErrorHandling(t *testing.T) {
 
 	// Set up repository and parser
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 
 	// Parse should not fail even with malformed packets
 	err := parser.ParseFile()

@@ -29,7 +29,7 @@ func TestGopacketParser_IndustrialProtocolIntegration(t *testing.T) {
 	defer os.Remove(pcapFile)
 
 	// Create GopacketParser with industrial protocol support
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 	require.NotNil(t, parser)
 
 	// Verify industrial parser is initialized
@@ -72,7 +72,7 @@ func TestGopacketParser_BackwardCompatibility(t *testing.T) {
 	defer os.Remove(pcapFile)
 
 	// Create GopacketParser
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 	require.NotNil(t, parser)
 
 	// Parse the PCAP file
@@ -111,7 +111,7 @@ func TestGopacketParser_MixedTrafficProcessing(t *testing.T) {
 	defer os.Remove(pcapFile)
 
 	// Create GopacketParser
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 	require.NotNil(t, parser)
 
 	// Parse the PCAP file
@@ -159,7 +159,7 @@ func TestGopacketParser_ErrorHandling(t *testing.T) {
 	defer os.Remove(pcapFile)
 
 	// Create GopacketParser
-	parser := NewGopacketParser(pcapFile, repo)
+	parser := NewGopacketParser(pcapFile, repo, "")
 	require.NotNil(t, parser)
 
 	// Parse the PCAP file - should not fail even with malformed packets

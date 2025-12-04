@@ -24,7 +24,7 @@ func TestGopacketParser_ParseFile_Empty(t *testing.T) {
 	defer os.Remove(fname)
 
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(fname, repo)
+	parser := NewGopacketParser(fname, repo, "")
 	err = parser.ParseFile()
 	if err == nil {
 		t.Logf("ParseFile returned no error for empty file (expected for empty input)")
@@ -86,7 +86,7 @@ func TestGopacketParser_ParseFile_ARP_ICMP(t *testing.T) {
 	defer os.Remove(fname)
 
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(fname, repo)
+	parser := NewGopacketParser(fname, repo, "")
 	err = parser.ParseFile()
 	if err != nil {
 		t.Fatalf("ParseFile failed: %v", err)
@@ -151,7 +151,7 @@ func TestGopacketParser_ParseFile_TCP_UDP(t *testing.T) {
 	defer os.Remove(fname)
 
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(fname, repo)
+	parser := NewGopacketParser(fname, repo, "")
 	err = parser.ParseFile()
 	if err != nil {
 		t.Fatalf("ParseFile failed: %v", err)
@@ -212,7 +212,7 @@ func TestGopacketParser_ParseFile_DNS(t *testing.T) {
 	defer os.Remove(fname)
 
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(fname, repo)
+	parser := NewGopacketParser(fname, repo, "")
 	err = parser.ParseFile()
 	if err != nil {
 		t.Fatalf("ParseFile failed: %v", err)
@@ -221,7 +221,7 @@ func TestGopacketParser_ParseFile_DNS(t *testing.T) {
 
 func TestGopacketParser_ParseFile_ErrorHandling(t *testing.T) {
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser("nonexistent.pcap", repo)
+	parser := NewGopacketParser("nonexistent.pcap", repo, "")
 	err := parser.ParseFile()
 	if err == nil {
 		t.Errorf("expected error for nonexistent file, got nil")
@@ -262,7 +262,7 @@ func TestGopacketParser_ParseFile_RDPUDP(t *testing.T) {
 	defer os.Remove(fname)
 
 	repo := &testutil.MockRepository{}
-	parser := NewGopacketParser(fname, repo)
+	parser := NewGopacketParser(fname, repo, "")
 	err = parser.ParseFile()
 	if err != nil {
 		t.Fatalf("ParseFile failed for RDP UDP packet: %v", err)

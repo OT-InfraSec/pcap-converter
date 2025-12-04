@@ -35,6 +35,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 		clearDB                  bool
 		enableIndustrialAnalysis bool
 		outputFormat             string
+		tenantID                 string
 	)
 
 	rootCmd := &cobra.Command{
@@ -68,7 +69,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 				}
 				log.Printf("Using database at %s", dbPath)
 				provider.Repository = repo
-				provider.Parser = parser.NewGopacketParser(pcapFile, repo)
+				provider.Parser = parser.NewGopacketParser(pcapFile, repo, tenantID)
 				// TODO: Replace with real DNS processor implementation
 				provider.DNSProcessor = &dns.NoopDNSProcessor{}
 			}
@@ -114,6 +115,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 1000, "Number of packets to import in each batch")
 	importCmd.Flags().BoolVar(&clearDB, "clear", false, "Clear the database before importing")
 	importCmd.Flags().BoolVar(&enableIndustrialAnalysis, "industrial", false, "Enable industrial protocol analysis and device classification")
+	importCmd.Flags().StringVar(&tenantID, "tenant-id", "", "Tenant ID to associate with all imported data")
 
 	// Industrial device analysis commands
 	industrialCmd := &cobra.Command{

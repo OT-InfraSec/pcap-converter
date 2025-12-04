@@ -40,6 +40,7 @@ type DNSQuery struct {
 
 type GopacketParser struct {
 	PcapFile string
+	TenantID string // Tenant ID for multi-tenant support
 	// Track devices and their relationships
 	devices map[string]*model2.Device
 	// Track flows
@@ -58,9 +59,10 @@ type GopacketParser struct {
 	industrialParser IndustrialProtocolParser
 }
 
-func NewGopacketParser(pcapFile string, repo repository.Repository) *GopacketParser {
+func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID string) *GopacketParser {
 	parser := &GopacketParser{
 		PcapFile:         pcapFile,
+		TenantID:         tenantID,
 		devices:          make(map[string]*model2.Device),
 		flows:            make(map[string]*model2.Flow),
 		services:         make(map[string]*model2.Service),
@@ -174,6 +176,7 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 		}
 		dev = &model2.Device{
 			ID:                p.deviceCounter,
+			TenantID:          p.TenantID,
 			Address:           address,
 			AddressType:       addressType,
 			FirstSeen:         timestamp,
@@ -250,6 +253,7 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 			dstPortNum = 0
 		}
 		flow = &model2.Flow{
+			TenantID:         p.TenantID,
 			SrcIP:            net.ParseIP(src),
 			DstIP:            net.ParseIP(dst),
 			SrcPort:          srcPortNum,
