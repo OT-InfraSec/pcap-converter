@@ -855,7 +855,7 @@ func (p *GopacketParser) ParseFile() error {
 	// Start a worker goroutine to process packets in batches
 	go func() {
 		defer close(doneChan)
-		var batch []*model2.Packet
+		batch := make([]*model2.Packet, 0, batchSize)
 
 		for packet := range packetChan {
 			batch = append(batch, packet)
