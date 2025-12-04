@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -178,7 +179,7 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 			FirstSeen:         timestamp,
 			LastSeen:          timestamp,
 			AddressSubType:    addressSubType,
-			AddressScope:      helper2.GetAddressScope(address, addressType),
+			AddressScope:      helper2.GetAddressScopeCombined(address, macAddressSet),
 			MACAddressSet:     macAddressSet,
 			AdditionalData:    additionalData,
 			IsOnlyDestination: isDestination,
@@ -240,9 +241,19 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 
 	flow, exists := p.flows[flowKey]
 	if !exists {
+		srcPortNum, err := strconv.Atoi(srcPort)
+		if err != nil {
+			srcPortNum = 0
+		}
+		dstPortNum, err := strconv.Atoi(dstPort)
+		if err != nil {
+			dstPortNum = 0
+		}
 		flow = &model2.Flow{
 			SrcIP:            net.ParseIP(src),
 			DstIP:            net.ParseIP(dst),
+			SrcPort:          srcPortNum,
+			DstPort:          dstPortNum,
 			Protocol:         protocol,
 			PacketCount:      1,
 			ByteCount:        int64(packetSize),
@@ -692,6 +703,9 @@ func (p *GopacketParser) updateService(ip string, port int, protocol string, tim
 			FirstSeen: timestamp,
 			LastSeen:  timestamp,
 		}
+		if service.Validate() != nil {
+			log.Printf("Invalid service data: %s", serviceKey)
+		}
 		p.services[serviceKey] = service
 	} else {
 		if timestamp.Before(service.FirstSeen) {
@@ -970,6 +984,8 @@ func (p *GopacketParser) ParseFile() error {
 				"checksum":  icmp6.Checksum,
 			}
 			protocols = append(protocols, "icmpv6")
+
+			// TODO: if type_code is Router Advertisement <- src is router
 		}
 
 		// TCP
@@ -1005,6 +1021,8 @@ func (p *GopacketParser) ParseFile() error {
 				},
 			}
 			protocols = append(protocols, "tcp")
+
+			serviceUpdated := false
 
 			// Try to detect HTTP on any TCP port if not already detected
 			if packet.Layer(liblayers.LayerTypeHTTP) == nil && len(tcp.Payload) > 0 {
@@ -1093,6 +1111,7 @@ func (p *GopacketParser) ParseFile() error {
 						// Update the service for HTTP request
 						timestamp := packet.Metadata().Timestamp
 						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
+						serviceUpdated = true
 					} else { // IsResponse
 						isResponse = true
 						var request *liblayers.HTTP
@@ -1116,6 +1135,7 @@ func (p *GopacketParser) ParseFile() error {
 							if srcPort != "" /*&& (srcPortNum == 80 || srcPortNum == 443)*/ {
 								if port, err := strconv.Atoi(srcPort); err == nil {
 									p.updateService(srcIP, port, "http", timestamp)
+									serviceUpdated = true
 								}
 							}
 						} else { // no valid HTTP response
@@ -1187,7 +1207,9 @@ func (p *GopacketParser) ParseFile() error {
 
 			// Update service for TCP - use a direct call to avoid string concatenation
 			timestamp := packet.Metadata().Timestamp
-			p.updateService(srcIP, int(srcPortNum), "tcp", timestamp)
+			if !serviceUpdated {
+				p.updateService(srcIP, int(srcPortNum), "tcp", timestamp)
+			}
 		}
 
 		// UDP
@@ -1705,7 +1727,7 @@ func (p *GopacketParser) ParseFile() error {
 
 		// Industrial protocol parsing and device classification
 		// Always attempt industrial protocol parsing for comprehensive analysis
-		industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
+		/*industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
 		if err == nil && len(industrialProtocols) > 0 {
 			// Update devices with industrial protocol information
 			for _, protocolInfo := range industrialProtocols {
@@ -1729,7 +1751,7 @@ func (p *GopacketParser) ParseFile() error {
 					// Collect protocol usage statistics for destination device
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
 						// Store protocol usage statistics in repository
-						if statsErr := p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
+						if statsErr = p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
 							// Log error but continue processing
 							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", dstIP, statsErr)
 						}
@@ -1752,7 +1774,7 @@ func (p *GopacketParser) ParseFile() error {
 		} else if err != nil {
 			// Log industrial protocol parsing errors but continue processing
 			fmt.Printf("Warning: Industrial protocol parsing error: %v\n", err)
-		}
+		}*/
 
 		// Flow extraction and storage
 		if srcIP != "" && dstIP != "" && flowProto != "" {
@@ -1839,7 +1861,7 @@ func (p *GopacketParser) ParseFile() error {
 		serviceCount++
 
 		if serviceCount >= maxBatchSize {
-			if err := p.repo.UpsertServices(serviceBatch); err != nil {
+			if err = p.repo.UpsertServices(serviceBatch); err != nil {
 				return fmt.Errorf("failed to add service batch: %w", err)
 			}
 			serviceBatch = serviceBatch[:0]

@@ -289,9 +289,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	if err := device.Validate(); err != nil {
 		return errors.Join(err, errors.New("invalid device data in function AddDevice"))
 	}
-	macAddressesJSON := ""
-	// Convert MACAddressSet to JSON for storage
-	macAddressesJSON = macSetToJSON(device.MACAddressSet)
+	macAddressesList := device.MACAddressSet.ToString()
 
 	_, err := r.db.Exec(
 		`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
@@ -302,7 +300,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.LastSeen.Format(time.RFC3339Nano),
 		device.AddressSubType,
 		device.AddressScope,
-		macAddressesJSON,
+		macAddressesList,
 		device.AdditionalData,
 		sliceToJSON(device.ProtocolList),
 		sliceToJSON(device.DNSNames),
@@ -466,6 +464,10 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	if err != nil {
 		log.Fatalf("Error getting destination device for address %s: %v", destAddress, err)
 		return err
+	}
+
+	if flow.Duration <= 0 {
+		flow.Duration = float64(flow.LastSeen.Sub(flow.FirstSeen).Milliseconds())
 	}
 
 	// AddFlow: include bidirectional columns
@@ -634,7 +636,7 @@ func (r *SQLiteRepository) AddService(service *model2.Service) error {
 
 	_, err := r.db.Exec(
 		`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`,
-		service.IP,
+		service.IP.String(),
 		service.Port,
 		service.FirstSeen.Format(time.RFC3339Nano),
 		service.LastSeen.Format(time.RFC3339Nano),
@@ -866,7 +868,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO packets (timestamp, length, layers, protocols) VALUES (?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO packets (flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -882,6 +884,11 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 			return err
 		}
 		_, err = stmt.Exec(
+			packet.FlowID,
+			ipToString(packet.SrcIP),
+			packet.SrcPort,
+			ipToString(packet.DstIP),
+			packet.DstPort,
 			packet.Timestamp.Format(time.RFC3339Nano),
 			packet.Length,
 			string(layersJSON),
@@ -1016,12 +1023,12 @@ func (r *SQLiteRepository) AddServices(services []*model2.Service) error {
 	defer stmt.Close()
 
 	for _, service := range services {
-		if err := service.Validate(); err != nil {
+		if err = service.Validate(); err != nil {
 			return err
 		}
 
-		_, err := stmt.Exec(
-			service.IP,
+		_, err = stmt.Exec(
+			service.IP.String(),
 			service.Port,
 			service.FirstSeen.Format(time.RFC3339Nano),
 			service.LastSeen.Format(time.RFC3339Nano),
@@ -1179,14 +1186,14 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 	defer tx.Rollback()
 
 	// Prepare insert statement
-	insertStmt, err := tx.Prepare(`INSERT INTO packets (timestamp, length, layers, protocols) VALUES (?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO packets (flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
 	// Prepare update statement
-	updateStmt, err := tx.Prepare(`UPDATE packets SET timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE packets SET flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1220,6 +1227,11 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 
 			if exists {
 				_, err = updateStmt.Exec(
+					packet.FlowID,
+					ipToString(packet.SrcIP),
+					packet.SrcPort,
+					ipToString(packet.DstIP),
+					packet.DstPort,
 					packet.Timestamp.Format(time.RFC3339Nano),
 					packet.Length,
 					string(layersJSON),
@@ -1235,6 +1247,11 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 
 		// If packet doesn't exist or has no ID, insert it
 		_, err = insertStmt.Exec(
+			packet.FlowID,
+			ipToString(packet.SrcIP),
+			packet.SrcPort,
+			ipToString(packet.DstIP),
+			packet.DstPort,
 			packet.Timestamp.Format(time.RFC3339Nano),
 			packet.Length,
 			string(layersJSON),
@@ -1372,7 +1389,7 @@ func (r *SQLiteRepository) UpdateService(service *model2.Service) error {
 
 	_, err := r.db.Exec(
 		`UPDATE services SET ip = ?, port = ?, first_seen = ?, last_seen = ?, protocol = ? WHERE element_id = ?;`,
-		service.IP,
+		service.IP.String(),
 		service.Port,
 		service.FirstSeen.Format(time.RFC3339Nano),
 		service.LastSeen.Format(time.RFC3339Nano),
@@ -2101,22 +2118,6 @@ func (r *SQLiteRepository) copySet(s *model2.Set) *model2.Set {
 // parseAddressPort extracts IP and port from an address string like "192.168.1.1:80"
 // NOTE: Keep jsonArrayToSlice above so we can reuse
 
-// Convert a MACAddressSet to JSON string for DB storage
-func macSetToJSON(set *model2.MACAddressSet) string {
-	if set == nil {
-		return ""
-	}
-	list := set.List()
-	if len(list) == 0 {
-		return ""
-	}
-	b, err := json.Marshal(list)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 func jsonArrayToSlice(s string) []string {
 	if s == "" {
 		return nil
@@ -2216,7 +2217,7 @@ func (r *SQLiteRepository) UpsertService(service *model2.Service) error {
 
 	// Check if service exists by ip, port, protocol
 	existingServices, err := r.GetServices(map[string]interface{}{
-		"ip":       service.IP,
+		"ip":       service.IP.String(),
 		"port":     service.Port,
 		"protocol": service.Protocol,
 	})
@@ -2244,7 +2245,7 @@ func (r *SQLiteRepository) UpsertService(service *model2.Service) error {
 func (r *SQLiteRepository) UpsertServices(services []*model2.Service) error {
 	for _, service := range services {
 		if err := r.UpsertService(service); err != nil {
-			return err
+			return errors.Join(err, errors.New("error with service "+fmt.Sprintf("%+v", service)))
 		}
 	}
 	return nil

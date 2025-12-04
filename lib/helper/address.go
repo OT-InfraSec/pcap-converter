@@ -5,6 +5,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 )
 
 // GetAddressScope determines if an address is unicast, multicast, or broadcast
@@ -51,6 +53,13 @@ func GetAddressScope(address string, addressType string) string {
 		return "unicast"
 	}
 	return ""
+}
+
+func GetAddressScopeCombined(address string, macAddressSet *model.MACAddressSet) string {
+	if macAddressSet.Contains("ff:ff:ff:ff:ff:ff") {
+		return "broadcast"
+	}
+	return GetAddressScope(address, "IP")
 }
 
 // ParseAddress extracts IP and port from an address string. If port is missing, returns port 0.
