@@ -1712,6 +1712,7 @@ func (p *GopacketParser) ParseFile() error {
 		length := len(packet.Data())
 		modelPacket := &model2.Packet{
 			ID:        packetID,
+			TenantID:  p.TenantID,
 			SrcIP:     net.ParseIP(srcIP),
 			DstIP:     net.ParseIP(dstIP),
 			SrcPort:   int(srcPortNum),

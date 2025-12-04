@@ -140,6 +140,7 @@ func IsValidIPAddressPlusPort(address string) bool {
 // Packet represents a network packet.
 type Packet struct {
 	ID        int64                  // Database ID (optional)
+	TenantID  string                 // Optional tenant id (empty string means none)
 	FlowID    int64                  // Associated Flow ID
 	Timestamp time.Time              // Packet timestamp
 	SrcIP     net.IP                 // Source IP (converted to/from DB)

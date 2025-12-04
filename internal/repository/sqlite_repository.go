@@ -274,7 +274,7 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 	protocolsJSON, _ := json.Marshal(packet.Protocols)
 	_, err := r.db.Exec(
 		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-		nil,
+		packet.TenantID,
 		packet.FlowID,
 		packet.Timestamp.Format(time.RFC3339Nano),
 		ipToString(packet.SrcIP),
@@ -875,7 +875,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO packets (flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -891,6 +891,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 			return err
 		}
 		_, err = stmt.Exec(
+			packet.TenantID,
 			packet.FlowID,
 			ipToString(packet.SrcIP),
 			packet.SrcPort,
@@ -916,7 +917,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -928,6 +929,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 			macs = device.MACAddressSet.ToString()
 		}
 		result, err := stmt.Exec(
+			device.TenantID,
 			device.Address,
 			device.AddressType,
 			device.FirstSeen.Format(time.RFC3339Nano),
@@ -1123,7 +1125,8 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE devices SET address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ? WHERE id = ?;`,
+		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ? WHERE id = ?;`,
+		device.TenantID,
 		device.Address,
 		device.AddressType,
 		device.FirstSeen.Format(time.RFC3339Nano),
@@ -1193,14 +1196,14 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 	defer tx.Rollback()
 
 	// Prepare insert statement
-	insertStmt, err := tx.Prepare(`INSERT INTO packets (flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
 	// Prepare update statement
-	updateStmt, err := tx.Prepare(`UPDATE packets SET flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE packets SET tenant_id = ?, flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1234,6 +1237,7 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 
 			if exists {
 				_, err = updateStmt.Exec(
+					packet.TenantID,
 					packet.FlowID,
 					ipToString(packet.SrcIP),
 					packet.SrcPort,
@@ -1254,6 +1258,7 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 
 		// If packet doesn't exist or has no ID, insert it
 		_, err = insertStmt.Exec(
+			packet.TenantID,
 			packet.FlowID,
 			ipToString(packet.SrcIP),
 			packet.SrcPort,
@@ -1299,13 +1304,13 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO devices (address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE devices SET address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1334,6 +1339,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 			}
 
 			_, err = updateStmt.Exec(
+				device.TenantID,
 				device.AddressType,
 				device.FirstSeen.Format(time.RFC3339Nano),
 				device.LastSeen.Format(time.RFC3339Nano),
@@ -1356,6 +1362,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 			}
 
 			result, err := insertStmt.Exec(
+				device.TenantID,
 				device.Address,
 				device.AddressType,
 				device.FirstSeen.Format(time.RFC3339Nano),
@@ -1457,10 +1464,11 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE flows SET src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?, protocol = ?, packet_count = ?, byte_count = ?,
+		`UPDATE flows SET tenant_id = ?, src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?, protocol = ?, packet_count = ?, byte_count = ?,
 		first_seen = ?, last_seen = ?, duration = ?, source_device_id = ?, destination_device_id = ?,
 		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?, packets_client_to_server = ?, packets_server_to_client = ?, bytes_client_to_server = ?, bytes_server_to_client = ?
 		WHERE id = ?;`,
+		flow.TenantID,
 		ipToString(flow.SrcIP),
 		ipToString(flow.DstIP),
 		flow.SrcPort,
@@ -2073,6 +2081,7 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	} else {
 		// Insert new flow in canonical form
 		canonicalFlow := &model2.Flow{
+			TenantID:              flow.TenantID,
 			SrcIP:                 stringToIP(canonicalSrc),
 			DstIP:                 stringToIP(canonicalDst),
 			Protocol:              flow.Protocol,
