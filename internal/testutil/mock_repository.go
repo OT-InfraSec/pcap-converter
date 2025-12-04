@@ -14,6 +14,7 @@ type MockRepository struct {
 	DeviceRelations       []*model.DeviceRelation
 	ProtocolStats         []*model.ProtocolUsageStats
 	CommunicationPatterns []*model.CommunicationPattern
+	KeyValueStore         map[string]string
 	CommitCalled          bool
 	CloseCalled           bool
 }
@@ -454,4 +455,40 @@ func (m *MockRepository) UpsertSSDPQuery(ssdp *model.SSDPQuery) error {
 
 func (m *MockRepository) UpsertSSDPQueries(ssdps []*model.SSDPQuery) error {
 	return nil
+}
+
+// Key-value store methods
+
+func (m *MockRepository) SetKeyValue(key, value string) error {
+	if m.KeyValueStore == nil {
+		m.KeyValueStore = make(map[string]string)
+	}
+	m.KeyValueStore[key] = value
+	return nil
+}
+
+func (m *MockRepository) GetKeyValue(key string) (string, bool, error) {
+	if m.KeyValueStore == nil {
+		return "", false, nil
+	}
+	value, exists := m.KeyValueStore[key]
+	return value, exists, nil
+}
+
+func (m *MockRepository) DeleteKeyValue(key string) error {
+	if m.KeyValueStore != nil {
+		delete(m.KeyValueStore, key)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetAllKeyValues() (map[string]string, error) {
+	if m.KeyValueStore == nil {
+		return make(map[string]string), nil
+	}
+	result := make(map[string]string)
+	for k, v := range m.KeyValueStore {
+		result[k] = v
+	}
+	return result, nil
 }

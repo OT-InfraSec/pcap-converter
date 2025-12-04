@@ -80,10 +80,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.100",
-					Destination: "192.168.1.10",
+					SrcIP:      net.ParseIP("192.168.1.100"),
+					DstIP: net.ParseIP("192.168.1.10"),
 					Protocol:    "EtherNet/IP",
-					Bytes:       1024,
+					ByteCount:       1024,
 				},
 			},
 			expectedType: model.DeviceTypePLC,
@@ -102,10 +102,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.20",
-					Destination: "192.168.1.100",
+					SrcIP:      net.ParseIP("192.168.1.20"),
+					DstIP: net.ParseIP("192.168.1.100"),
 					Protocol:    "OPC UA",
-					Bytes:       512,
+					ByteCount:       512,
 				},
 			},
 			expectedType: model.DeviceTypeHMI,
@@ -124,10 +124,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.30",
-					Destination: "192.168.1.100",
+					SrcIP:      net.ParseIP("192.168.1.30"),
+					DstIP: net.ParseIP("192.168.1.100"),
 					Protocol:    "Modbus TCP",
-					Bytes:       256,
+					ByteCount:       256,
 				},
 			},
 			expectedType: model.DeviceTypeIODevice,
@@ -154,10 +154,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					Source:      "192.168.1.50",
-					Destination: "192.168.1.100",
+					SrcIP:      net.ParseIP("192.168.1.50"),
+					DstIP: net.ParseIP("192.168.1.100"),
 					Protocol:    "EtherNet/IP",
-					Bytes:       2048,
+					ByteCount:       2048,
 				},
 			},
 			expectedType: model.DeviceTypeEngWorkstation,

@@ -879,6 +879,7 @@ func (p *GopacketParser) ParseFile() error {
 	}()
 
 	for packet := range packetSource.Packets() {
+		var flags []string
 		// Pre-allocate maps with capacity hints
 		layersMap := make(map[string]interface{}, 10) // Assume average 10 layers
 		protocols := make([]string, 0, 5)             // Assume average 5 protocols
@@ -1021,6 +1022,8 @@ func (p *GopacketParser) ParseFile() error {
 				},
 			}
 			protocols = append(protocols, "tcp")
+
+			flags = append(flags, tcpFlagsToStrings(tcp))
 
 			serviceUpdated := false
 
@@ -1705,6 +1708,12 @@ func (p *GopacketParser) ParseFile() error {
 		length := len(packet.Data())
 		modelPacket := &model2.Packet{
 			ID:        packetID,
+			SrcIP:     net.ParseIP(srcIP),
+			DstIP:     net.ParseIP(dstIP),
+			SrcPort:   int(srcPortNum),
+			DstPort:   int(dstPortNum),
+			Protocol:  flowProto,
+			Flags:     strings.Join(flags, ","),
 			Timestamp: timestamp,
 			Length:    length,
 			Layers:    layersMap,
@@ -2032,6 +2041,35 @@ func (p *GopacketParser) ParseFile() error {
 	}
 
 	return nil
+}
+
+func tcpFlagsToStrings(tcp *layers.TCP) string {
+	var flags []string
+	if tcp.SYN {
+		flags = append(flags, "SYN")
+	}
+	if tcp.ACK {
+		flags = append(flags, "ACK")
+	}
+	if tcp.FIN {
+		flags = append(flags, "FIN")
+	}
+	if tcp.RST {
+		flags = append(flags, "RST")
+	}
+	if tcp.PSH {
+		flags = append(flags, "PSH")
+	}
+	if tcp.URG {
+		flags = append(flags, "URG")
+	}
+	if tcp.ECE {
+		flags = append(flags, "ECE")
+	}
+	if tcp.CWR {
+		flags = append(flags, "CWR")
+	}
+	return strings.Join(flags, ",")
 }
 
 // analyzeAndSaveCommunicationPatterns analyzes communication patterns and saves them to the repository

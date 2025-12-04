@@ -205,6 +205,13 @@ func (r *SQLiteRepository) createTables() error {
 			criticality TEXT NOT NULL,
 			created_at DATETIME NOT NULL
 		);`,
+		// Key-value store table for metadata (version, settings, etc.)
+		`CREATE TABLE IF NOT EXISTS kv_store (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);`,
 		// Create indexes for better query performance
 		`CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_address ON devices(address);`,
@@ -2249,4 +2256,82 @@ func (r *SQLiteRepository) UpsertServices(services []*model2.Service) error {
 		}
 	}
 	return nil
+}
+
+// SetKeyValue stores a key-value pair, creating or updating the entry.
+func (r *SQLiteRepository) SetKeyValue(key, value string) error {
+	if key == "" {
+		return errors.New("key cannot be empty")
+	}
+
+	now := time.Now().Format(time.RFC3339Nano)
+
+	// Use INSERT OR REPLACE to upsert the key-value pair
+	_, err := r.db.Exec(`
+		INSERT INTO kv_store (key, value, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			updated_at = excluded.updated_at
+	`, key, value, now, now)
+
+	if err != nil {
+		return fmt.Errorf("failed to set key-value pair: %w", err)
+	}
+	return nil
+}
+
+// GetKeyValue retrieves a value by key.
+// Returns the value, whether it exists, and any error.
+func (r *SQLiteRepository) GetKeyValue(key string) (string, bool, error) {
+	if key == "" {
+		return "", false, errors.New("key cannot be empty")
+	}
+
+	var value string
+	err := r.db.QueryRow(`SELECT value FROM kv_store WHERE key = ?`, key).Scan(&value)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("failed to get key-value pair: %w", err)
+	}
+	return value, true, nil
+}
+
+// DeleteKeyValue removes a key-value pair.
+func (r *SQLiteRepository) DeleteKeyValue(key string) error {
+	if key == "" {
+		return errors.New("key cannot be empty")
+	}
+
+	_, err := r.db.Exec(`DELETE FROM kv_store WHERE key = ?`, key)
+	if err != nil {
+		return fmt.Errorf("failed to delete key-value pair: %w", err)
+	}
+	return nil
+}
+
+// GetAllKeyValues returns all key-value pairs.
+func (r *SQLiteRepository) GetAllKeyValues() (map[string]string, error) {
+	rows, err := r.db.Query(`SELECT key, value FROM kv_store`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all key-value pairs: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("failed to scan key-value pair: %w", err)
+		}
+		result[key] = value
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating key-value pairs: %w", err)
+	}
+
+	return result, nil
 }

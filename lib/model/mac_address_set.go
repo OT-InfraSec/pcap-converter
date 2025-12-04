@@ -90,6 +90,9 @@ func (m *MACAddressSet) Difference(other *Set) *Set {
 }
 
 func (m *MACAddressSet) ToString() string {
+	if m == nil {
+		return "" // If the MACAddressSet is nil, return an empty string
+	}
 	if m.set == nil {
 		return "" // If the set is nil, return an empty string
 	}

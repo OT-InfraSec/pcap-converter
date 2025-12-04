@@ -16,14 +16,36 @@ A high-performance, testable, and extensible tool for importing PCAP files into 
 ## Usage
 
 ### Build
-```
+```bash
 go build -o pcap-importer ./cmd/importer
 ```
 
 ### Build for production
-```
+```bash
 go build -ldflags="-s -w" -o pcap-importer ./cmd/importer
 ```
+
+### Build with Version Information
+The application version can be embedded at build time using ldflags. This is the recommended approach for release builds:
+
+```bash
+# Set version only
+go build -ldflags="-s -w -X github.com/InfraSecConsult/pcap-importer-go/internal/version.Version=v1.0.0" -o pcap-importer ./cmd/importer
+
+# Set version with commit hash and build time
+go build -ldflags="-s -w \
+  -X github.com/InfraSecConsult/pcap-importer-go/internal/version.Version=v1.0.0 \
+  -X github.com/InfraSecConsult/pcap-importer-go/internal/version.CommitHash=$(git rev-parse --short HEAD) \
+  -X github.com/InfraSecConsult/pcap-importer-go/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o pcap-importer ./cmd/importer
+```
+
+**Version Resolution Order:**
+1. Build-time embedded version (via ldflags) - highest priority
+2. `VERSION` file in repository root - fallback for development
+3. `"dev"` - default fallback
+
+After importing a PCAP file, the application version is automatically stored in the database's `kv_store` table under the key `"version"`.
 
 ### Run Import
 ```

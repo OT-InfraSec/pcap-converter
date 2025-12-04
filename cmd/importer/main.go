@@ -13,6 +13,7 @@ import (
 	"github.com/InfraSecConsult/pcap-importer-go/internal/dns"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/parser"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/internal/version"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 
 	"github.com/spf13/cobra"
@@ -87,6 +88,15 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 					log.Printf("Industrial analysis failed: %v", err)
 					// Don't fail the entire import, just log the error
 				}
+			}
+
+			// Store the application version in the database
+			appVersion := version.GetVersion()
+			if err := provider.Repository.SetKeyValue("version", appVersion); err != nil {
+				log.Printf("Warning: Failed to store version in database: %v", err)
+				// Don't fail the import, just log the warning
+			} else {
+				log.Printf("Stored version %s in database", appVersion)
 			}
 
 			if err := provider.Repository.Commit(); err != nil {

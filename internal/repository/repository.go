@@ -107,6 +107,16 @@ type Repository interface {
 	SaveCommunicationPatterns(patterns []*model.CommunicationPattern) error
 	SaveIndustrialProtocolInfos(infos []*model.IndustrialProtocolInfo) error
 
+	// Key-value store operations
+	// SetKeyValue stores a key-value pair, creating or updating the entry
+	SetKeyValue(key, value string) error
+	// GetKeyValue retrieves a value by key. Returns the value, whether it exists, and any error.
+	GetKeyValue(key string) (value string, exists bool, err error)
+	// DeleteKeyValue removes a key-value pair
+	DeleteKeyValue(key string) error
+	// GetAllKeyValues returns all key-value pairs
+	GetAllKeyValues() (map[string]string, error)
+
 	// Transaction operations
 	Commit() error
 	Close() error
