@@ -17,12 +17,12 @@ func (m *mockRepo) SaveIndustrialDeviceInfo(info *model.IndustrialDeviceInfo) er
 	panic("implement me")
 }
 
-func (m *mockRepo) GetIndustrialDeviceInfo(deviceAddress string) (*model.IndustrialDeviceInfo, error) {
+func (m *mockRepo) GetIndustrialDeviceInfo(tenantID, deviceAddress string) (*model.IndustrialDeviceInfo, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *mockRepo) GetIndustrialDevicesByType(deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error) {
+func (m *mockRepo) GetIndustrialDevicesByType(tenantID string, deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -47,12 +47,12 @@ func (m *mockRepo) SaveProtocolUsageStats(stats *model.ProtocolUsageStats) error
 	panic("implement me")
 }
 
-func (m *mockRepo) GetProtocolUsageStats(deviceAddress string) ([]*model.ProtocolUsageStats, error) {
+func (m *mockRepo) GetProtocolUsageStats(tenantID, deviceAddress string) ([]*model.ProtocolUsageStats, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *mockRepo) GetProtocolUsageStatsByProtocol(protocol string) ([]*model.ProtocolUsageStats, error) {
+func (m *mockRepo) GetProtocolUsageStatsByProtocol(tenantID, protocol string) ([]*model.ProtocolUsageStats, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -77,12 +77,12 @@ func (m *mockRepo) SaveCommunicationPattern(pattern *model.CommunicationPattern)
 	panic("implement me")
 }
 
-func (m *mockRepo) GetCommunicationPatterns(deviceAddress string) ([]*model.CommunicationPattern, error) {
+func (m *mockRepo) GetCommunicationPatterns(tenantID, deviceAddress string) ([]*model.CommunicationPattern, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *mockRepo) GetCommunicationPatternsByProtocol(protocol string) ([]*model.CommunicationPattern, error) {
+func (m *mockRepo) GetCommunicationPatternsByProtocol(tenantID, protocol string) ([]*model.CommunicationPattern, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -107,12 +107,12 @@ func (m *mockRepo) SaveIndustrialProtocolInfo(info *model.IndustrialProtocolInfo
 	panic("implement me")
 }
 
-func (m *mockRepo) GetIndustrialProtocolInfos(deviceAddress string) ([]*model.IndustrialProtocolInfo, error) {
+func (m *mockRepo) GetIndustrialProtocolInfos(tenantID, deviceAddress string) ([]*model.IndustrialProtocolInfo, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *mockRepo) GetIndustrialProtocolInfosByProtocol(protocol string) ([]*model.IndustrialProtocolInfo, error) {
+func (m *mockRepo) GetIndustrialProtocolInfosByProtocol(tenantID, protocol string) ([]*model.IndustrialProtocolInfo, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -148,12 +148,12 @@ func (m *mockRepo) AddSSDPQuery(ssdp *model.SSDPQuery) error {
 }
 
 // GetDevices implements repository.Repository.
-func (m *mockRepo) GetDevices(filters map[string]interface{}) ([]*model.Device, error) {
+func (m *mockRepo) GetDevices(tenantID string, filters map[string]interface{}) ([]*model.Device, error) {
 	panic("unimplemented")
 }
 
 // GetFlows implements repository.Repository.
-func (m *mockRepo) GetFlows(filters map[string]interface{}) ([]*model.Flow, error) {
+func (m *mockRepo) GetFlows(tenantID string, filters map[string]interface{}) ([]*model.Flow, error) {
 	panic("unimplemented")
 }
 
@@ -262,7 +262,7 @@ func (m *mockRepo) AddPackets(packets []*model.Packet) error {
 	panic("implement me")
 }
 
-func (m *mockRepo) GetDevice(address string) (*model.Device, error) {
+func (m *mockRepo) GetDevice(tenantID, address string) (*model.Device, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -287,7 +287,7 @@ func (m *mockRepo) AddService(service *model.Service) error {
 	panic("implement me")
 }
 
-func (m *mockRepo) GetServices(filters map[string]interface{}) ([]*model.Service, error) {
+func (m *mockRepo) GetServices(tenantID string, filters map[string]interface{}) ([]*model.Service, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -302,7 +302,7 @@ func (m *mockRepo) AddFlows(flows []*model.Flow) error {
 	panic("implement me")
 }
 
-func (m *mockRepo) GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error) {
+func (m *mockRepo) GetDNSQueries(tenantID string, eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -319,9 +319,15 @@ func (m *mockRepo) AddDNSQuery(q *model.DNSQuery) error {
 	m.dnsQueries = append(m.dnsQueries, q)
 	return nil
 }
-func (m *mockRepo) Commit() error                        { return nil }
-func (m *mockRepo) Close() error                         { return nil }
-func (m *mockRepo) AllPackets() ([]*model.Packet, error) { return m.packets, nil }
+func (m *mockRepo) Commit() error                                       { return nil }
+func (m *mockRepo) Close() error                                        { return nil }
+func (m *mockRepo) AllPackets(tenantID string) ([]*model.Packet, error) { return m.packets, nil }
+
+// Key-value store methods
+func (m *mockRepo) SetKeyValue(key, value string) error          { return nil }
+func (m *mockRepo) GetKeyValue(key string) (string, bool, error) { return "", false, nil }
+func (m *mockRepo) DeleteKeyValue(key string) error              { return nil }
+func (m *mockRepo) GetAllKeyValues() (map[string]string, error)  { return make(map[string]string), nil }
 
 func TestDefaultDNSProcessor_Process(t *testing.T) {
 	ts := time.Now()

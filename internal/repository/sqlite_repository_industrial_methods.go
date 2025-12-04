@@ -21,8 +21,9 @@ func (r *SQLiteRepository) SaveIndustrialDeviceInfo(info *model2.IndustrialDevic
 	}
 
 	_, err = r.db.Exec(
-		`INSERT INTO industrial_devices (device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO industrial_devices (tenant_id, device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		info.TenantID,
 		info.DeviceAddress,
 		string(info.DeviceType),
 		string(info.Role),
@@ -41,10 +42,10 @@ func (r *SQLiteRepository) SaveIndustrialDeviceInfo(info *model2.IndustrialDevic
 }
 
 // GetIndustrialDeviceInfo retrieves industrial device information by device address
-func (r *SQLiteRepository) GetIndustrialDeviceInfo(deviceAddress string) (*model2.IndustrialDeviceInfo, error) {
+func (r *SQLiteRepository) GetIndustrialDeviceInfo(tenantID, deviceAddress string) (*model2.IndustrialDeviceInfo, error) {
 	query := `SELECT device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at 
-			  FROM industrial_devices WHERE device_address = ?`
-	row := r.db.QueryRow(query, deviceAddress)
+			  FROM industrial_devices WHERE tenant_id = ? AND device_address = ?`
+	row := r.db.QueryRow(query, tenantID, deviceAddress)
 
 	var info model2.IndustrialDeviceInfo
 	var protocolsJSON, lastSeenStr, createdAtStr, updatedAtStr string
@@ -82,10 +83,10 @@ func (r *SQLiteRepository) GetIndustrialDeviceInfo(deviceAddress string) (*model
 }
 
 // GetIndustrialDevicesByType retrieves industrial devices by device type
-func (r *SQLiteRepository) GetIndustrialDevicesByType(deviceType model2.IndustrialDeviceType) ([]*model2.IndustrialDeviceInfo, error) {
+func (r *SQLiteRepository) GetIndustrialDevicesByType(tenantID string, deviceType model2.IndustrialDeviceType) ([]*model2.IndustrialDeviceInfo, error) {
 	query := `SELECT device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at 
-			  FROM industrial_devices WHERE device_type = ?`
-	rows, err := r.db.Query(query, string(deviceType))
+			  FROM industrial_devices WHERE tenant_id = ? AND device_type = ?`
+	rows, err := r.db.Query(query, tenantID, string(deviceType))
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +144,9 @@ func (r *SQLiteRepository) UpdateIndustrialDeviceInfo(info *model2.IndustrialDev
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE industrial_devices SET device_type = ?, role = ?, confidence = ?, protocols = ?, security_level = ?, vendor = ?, product_name = ?, serial_number = ?, firmware_version = ?, last_seen = ?, updated_at = ? 
+		`UPDATE industrial_devices SET tenant_id = ?, device_type = ?, role = ?, confidence = ?, protocols = ?, security_level = ?, vendor = ?, product_name = ?, serial_number = ?, firmware_version = ?, last_seen = ?, updated_at = ? 
 		WHERE device_address = ?;`,
+		info.TenantID,
 		string(info.DeviceType),
 		string(info.Role),
 		info.Confidence,
@@ -164,7 +166,7 @@ func (r *SQLiteRepository) UpdateIndustrialDeviceInfo(info *model2.IndustrialDev
 // UpsertIndustrialDeviceInfo inserts or updates industrial device information
 func (r *SQLiteRepository) UpsertIndustrialDeviceInfo(info *model2.IndustrialDeviceInfo) error {
 	// Check if device exists
-	_, err := r.GetIndustrialDeviceInfo(info.DeviceAddress)
+	_, err := r.GetIndustrialDeviceInfo(info.TenantID, info.DeviceAddress)
 	if err == nil {
 		// Device exists, update it
 		return r.UpdateIndustrialDeviceInfo(info)
@@ -193,8 +195,9 @@ func (r *SQLiteRepository) SaveProtocolUsageStats(stats *model2.ProtocolUsageSta
 	}
 
 	_, err = r.db.Exec(
-		`INSERT INTO protocol_usage_stats (device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		stats.TenantID,
 		stats.DeviceID, // DeviceID is actually the device address in our API
 		stats.Protocol,
 		stats.PacketCount,
@@ -208,10 +211,10 @@ func (r *SQLiteRepository) SaveProtocolUsageStats(stats *model2.ProtocolUsageSta
 }
 
 // GetProtocolUsageStats retrieves protocol usage statistics for a device
-func (r *SQLiteRepository) GetProtocolUsageStats(deviceAddress string) ([]*model2.ProtocolUsageStats, error) {
+func (r *SQLiteRepository) GetProtocolUsageStats(tenantID, deviceAddress string) ([]*model2.ProtocolUsageStats, error) {
 	query := `SELECT id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used 
-			  FROM protocol_usage_stats WHERE device_address = ?`
-	rows, err := r.db.Query(query, deviceAddress)
+			  FROM protocol_usage_stats WHERE tenant_id = ? AND device_address = ?`
+	rows, err := r.db.Query(query, tenantID, deviceAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -252,10 +255,10 @@ func (r *SQLiteRepository) GetProtocolUsageStats(deviceAddress string) ([]*model
 }
 
 // GetProtocolUsageStatsByProtocol retrieves protocol usage statistics by protocol
-func (r *SQLiteRepository) GetProtocolUsageStatsByProtocol(protocol string) ([]*model2.ProtocolUsageStats, error) {
+func (r *SQLiteRepository) GetProtocolUsageStatsByProtocol(tenantID, protocol string) ([]*model2.ProtocolUsageStats, error) {
 	query := `SELECT id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used 
-			  FROM protocol_usage_stats WHERE protocol = ?`
-	rows, err := r.db.Query(query, protocol)
+			  FROM protocol_usage_stats WHERE tenant_id = ? AND protocol = ?`
+	rows, err := r.db.Query(query, tenantID, protocol)
 	if err != nil {
 		return nil, err
 	}
@@ -307,8 +310,9 @@ func (r *SQLiteRepository) UpdateProtocolUsageStats(stats *model2.ProtocolUsageS
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE protocol_usage_stats SET packet_count = ?, byte_count = ?, first_seen = ?, last_seen = ?, communication_role = ?, ports_used = ? 
+		`UPDATE protocol_usage_stats SET tenant_id = ?, packet_count = ?, byte_count = ?, first_seen = ?, last_seen = ?, communication_role = ?, ports_used = ? 
 		WHERE device_address = ? AND protocol = ?;`,
+		stats.TenantID,
 		stats.PacketCount,
 		stats.ByteCount,
 		stats.FirstSeen.Format(time.RFC3339Nano),
@@ -324,7 +328,7 @@ func (r *SQLiteRepository) UpdateProtocolUsageStats(stats *model2.ProtocolUsageS
 // UpsertProtocolUsageStats inserts or updates protocol usage statistics
 func (r *SQLiteRepository) UpsertProtocolUsageStats(stats *model2.ProtocolUsageStats) error {
 	// Check if stats exist
-	existingStats, err := r.GetProtocolUsageStats(stats.DeviceID)
+	existingStats, err := r.GetProtocolUsageStats(stats.TenantID, stats.DeviceID)
 	if err == nil {
 		// Check if this specific protocol exists for the device
 		for _, existing := range existingStats {
@@ -353,8 +357,9 @@ func (r *SQLiteRepository) SaveCommunicationPattern(pattern *model2.Communicatio
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO communication_patterns (tenant_id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		pattern.TenantID,
 		pattern.SourceDevice,
 		pattern.DestinationDevice,
 		pattern.Protocol,
@@ -371,10 +376,10 @@ func (r *SQLiteRepository) SaveCommunicationPattern(pattern *model2.Communicatio
 }
 
 // GetCommunicationPatterns retrieves communication patterns for a device
-func (r *SQLiteRepository) GetCommunicationPatterns(deviceAddress string) ([]*model2.CommunicationPattern, error) {
+func (r *SQLiteRepository) GetCommunicationPatterns(tenantID, deviceAddress string) ([]*model2.CommunicationPattern, error) {
 	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at 
-			  FROM communication_patterns WHERE source_device_address = ? OR destination_device_address = ?`
-	rows, err := r.db.Query(query, deviceAddress, deviceAddress)
+			  FROM communication_patterns WHERE tenant_id = ? AND (source_device_address = ? OR destination_device_address = ?)`
+	rows, err := r.db.Query(query, tenantID, deviceAddress, deviceAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -414,10 +419,10 @@ func (r *SQLiteRepository) GetCommunicationPatterns(deviceAddress string) ([]*mo
 }
 
 // GetCommunicationPatternsByProtocol retrieves communication patterns by protocol
-func (r *SQLiteRepository) GetCommunicationPatternsByProtocol(protocol string) ([]*model2.CommunicationPattern, error) {
+func (r *SQLiteRepository) GetCommunicationPatternsByProtocol(tenantID, protocol string) ([]*model2.CommunicationPattern, error) {
 	query := `SELECT id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at 
-			  FROM communication_patterns WHERE protocol = ?`
-	rows, err := r.db.Query(query, protocol)
+			  FROM communication_patterns WHERE tenant_id = ? AND protocol = ?`
+	rows, err := r.db.Query(query, tenantID, protocol)
 	if err != nil {
 		return nil, err
 	}
@@ -463,8 +468,9 @@ func (r *SQLiteRepository) UpdateCommunicationPattern(pattern *model2.Communicat
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE communication_patterns SET frequency_ms = ?, data_volume = ?, flow_count = ?, deviation_frequency = ?, deviation_data_volume = ?, pattern_type = ?, criticality = ? 
+		`UPDATE communication_patterns SET tenant_id = ?, frequency_ms = ?, data_volume = ?, flow_count = ?, deviation_frequency = ?, deviation_data_volume = ?, pattern_type = ?, criticality = ? 
 		WHERE source_device_address = ? AND destination_device_address = ? AND protocol = ?;`,
+		pattern.TenantID,
 		pattern.Frequency.Milliseconds(),
 		pattern.DataVolume,
 		pattern.FlowCount,
@@ -482,7 +488,7 @@ func (r *SQLiteRepository) UpdateCommunicationPattern(pattern *model2.Communicat
 // UpsertCommunicationPattern inserts or updates a communication pattern
 func (r *SQLiteRepository) UpsertCommunicationPattern(pattern *model2.CommunicationPattern) error {
 	// Check if pattern exists
-	existingPatterns, err := r.GetCommunicationPatterns(pattern.SourceDevice)
+	existingPatterns, err := r.GetCommunicationPatterns(pattern.TenantID, pattern.SourceDevice)
 	if err == nil {
 		// Check if this specific pattern exists
 		for _, existing := range existingPatterns {
@@ -514,7 +520,7 @@ func (r *SQLiteRepository) SaveIndustrialDeviceInfos(infos []*model2.IndustrialD
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO industrial_devices (device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO industrial_devices (tenant_id, device_address, device_type, role, confidence, protocols, security_level, vendor, product_name, serial_number, firmware_version, last_seen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -531,6 +537,7 @@ func (r *SQLiteRepository) SaveIndustrialDeviceInfos(infos []*model2.IndustrialD
 		}
 
 		_, err = stmt.Exec(
+			info.TenantID,
 			info.DeviceAddress,
 			string(info.DeviceType),
 			string(info.Role),
@@ -561,7 +568,7 @@ func (r *SQLiteRepository) SaveProtocolUsageStatsMultiple(stats []*model2.Protoc
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO protocol_usage_stats (device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -578,6 +585,7 @@ func (r *SQLiteRepository) SaveProtocolUsageStatsMultiple(stats []*model2.Protoc
 		}
 
 		_, err = stmt.Exec(
+			stat.TenantID,
 			stat.DeviceID, // DeviceID is actually the device address in our API
 			stat.Protocol,
 			stat.PacketCount,
@@ -603,7 +611,7 @@ func (r *SQLiteRepository) SaveCommunicationPatterns(patterns []*model2.Communic
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO communication_patterns (source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO communication_patterns (tenant_id, source_device_address, destination_device_address, protocol, frequency_ms, data_volume, flow_count, deviation_frequency, deviation_data_volume, pattern_type, criticality, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -615,6 +623,7 @@ func (r *SQLiteRepository) SaveCommunicationPatterns(patterns []*model2.Communic
 		}
 
 		_, err = stmt.Exec(
+			pattern.TenantID,
 			pattern.SourceDevice,
 			pattern.DestinationDevice,
 			pattern.Protocol,
@@ -677,10 +686,10 @@ func (r *SQLiteRepository) SaveIndustrialProtocolInfo(info *model2.IndustrialPro
 }
 
 // GetIndustrialProtocolInfos retrieves industrial protocol information for a device
-func (r *SQLiteRepository) GetIndustrialProtocolInfos(deviceAddress string) ([]*model2.IndustrialProtocolInfo, error) {
+func (r *SQLiteRepository) GetIndustrialProtocolInfos(tenantID, deviceAddress string) ([]*model2.IndustrialProtocolInfo, error) {
 	query := `SELECT protocol, port, direction, timestamp, confidence, service_type, message_type, is_real_time, is_discovery, is_configuration, device_identity, security_info, additional_data 
-			  FROM industrial_protocol_info WHERE device_address = ?`
-	rows, err := r.db.Query(query, deviceAddress)
+			  FROM industrial_protocol_info WHERE tenant_id = ? AND device_address = ?`
+	rows, err := r.db.Query(query, tenantID, deviceAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -728,10 +737,10 @@ func (r *SQLiteRepository) GetIndustrialProtocolInfos(deviceAddress string) ([]*
 }
 
 // GetIndustrialProtocolInfosByProtocol retrieves industrial protocol information by protocol type
-func (r *SQLiteRepository) GetIndustrialProtocolInfosByProtocol(protocol string) ([]*model2.IndustrialProtocolInfo, error) {
+func (r *SQLiteRepository) GetIndustrialProtocolInfosByProtocol(tenantID, protocol string) ([]*model2.IndustrialProtocolInfo, error) {
 	query := `SELECT protocol, port, direction, timestamp, confidence, service_type, message_type, is_real_time, is_discovery, is_configuration, device_identity, security_info, additional_data 
-			  FROM industrial_protocol_info WHERE protocol = ?`
-	rows, err := r.db.Query(query, protocol)
+			  FROM industrial_protocol_info WHERE tenant_id = ? AND protocol = ?`
+	rows, err := r.db.Query(query, tenantID, protocol)
 	if err != nil {
 		return nil, err
 	}

@@ -121,7 +121,7 @@ func main() {
 
 	// Example 3: Retrieve and aggregate statistics
 	fmt.Println("\n=== Statistics Retrieval and Aggregation ===")
-	allStats, err := repo.GetProtocolUsageStats(deviceAddress)
+	allStats, err := repo.GetProtocolUsageStats("", deviceAddress)
 	if err != nil {
 		log.Fatalf("Failed to retrieve stats: %v", err)
 	}
@@ -176,7 +176,7 @@ func main() {
 
 	// Example 5: Query patterns by protocol
 	fmt.Println("\n=== Protocol-Specific Pattern Queries ===")
-	ethernetIPPatterns, err := repo.GetCommunicationPatternsByProtocol("ethernetip")
+	ethernetIPPatterns, err := repo.GetCommunicationPatternsByProtocol("", "ethernetip")
 	if err != nil {
 		log.Fatalf("Failed to get EtherNet/IP patterns: %v", err)
 	}
@@ -187,7 +187,7 @@ func main() {
 			pattern.SourceDevice, pattern.DestinationDevice, pattern.PatternType, pattern.Criticality)
 	}
 
-	opcuaPatterns, err := repo.GetCommunicationPatternsByProtocol("opcua")
+	opcuaPatterns, err := repo.GetCommunicationPatternsByProtocol("", "opcua")
 	if err != nil {
 		log.Fatalf("Failed to get OPC UA patterns: %v", err)
 	}
@@ -271,7 +271,7 @@ func main() {
 	}
 
 	// Query flows to see the merged bidirectional flow
-	allFlows, err := repo.GetFlows(nil)
+	allFlows, err := repo.GetFlows("", nil)
 	if err != nil {
 		log.Printf("Failed to query flows: %v", err)
 	} else {

@@ -184,6 +184,7 @@ type Device struct {
 // Service represents a network service.
 type Service struct {
 	ID        int64
+	TenantID  string
 	IP        net.IP
 	Port      int
 	Protocol  string
@@ -231,6 +232,7 @@ type DeviceRelation struct {
 // DNSQuery represents a DNS transaction extracted from packets.
 type DNSQuery struct {
 	ID                int64
+	TenantID          string
 	QueryingDeviceID  int64
 	AnsweringDeviceID int64
 	QueryName         string
@@ -241,6 +243,7 @@ type DNSQuery struct {
 
 type SSDPQuery struct {
 	ID               int64
+	TenantID         string
 	QueryingDeviceID int64
 	QueryType        string
 	ST               string

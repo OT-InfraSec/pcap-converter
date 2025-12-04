@@ -41,7 +41,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 
 	// Test GetProtocolUsageStats
 	t.Run("GetProtocolUsageStats", func(t *testing.T) {
-		statsList, err := repo.GetProtocolUsageStats(deviceAddress)
+		statsList, err := repo.GetProtocolUsageStats("", deviceAddress)
 		require.NoError(t, err)
 		require.Len(t, statsList, 1)
 
@@ -58,7 +58,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 
 	// Test GetProtocolUsageStatsByProtocol
 	t.Run("GetProtocolUsageStatsByProtocol", func(t *testing.T) {
-		statsList, err := repo.GetProtocolUsageStatsByProtocol("ethernetip")
+		statsList, err := repo.GetProtocolUsageStatsByProtocol("", "ethernetip")
 		require.NoError(t, err)
 		require.Len(t, statsList, 1)
 
@@ -84,7 +84,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify update
-		statsList, err := repo.GetProtocolUsageStats(deviceAddress)
+		statsList, err := repo.GetProtocolUsageStats("", deviceAddress)
 		require.NoError(t, err)
 		require.Len(t, statsList, 1)
 
@@ -112,7 +112,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify update
-		statsList, err := repo.GetProtocolUsageStats(deviceAddress)
+		statsList, err := repo.GetProtocolUsageStats("", deviceAddress)
 		require.NoError(t, err)
 		require.Len(t, statsList, 1)
 
@@ -138,7 +138,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify insert
-		statsList, err := repo.GetProtocolUsageStats(deviceAddress)
+		statsList, err := repo.GetProtocolUsageStats("", deviceAddress)
 		require.NoError(t, err)
 		require.Len(t, statsList, 2) // Should have both ethernetip and opcua
 
@@ -161,7 +161,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify deletion
-		statsList, err := repo.GetProtocolUsageStats(deviceAddress)
+		statsList, err := repo.GetProtocolUsageStats("", deviceAddress)
 		require.NoError(t, err)
 		require.Len(t, statsList, 1) // Should only have ethernetip left
 
@@ -199,7 +199,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 
 	// Test GetCommunicationPatterns
 	t.Run("GetCommunicationPatterns", func(t *testing.T) {
-		patterns, err := repo.GetCommunicationPatterns(sourceDevice)
+		patterns, err := repo.GetCommunicationPatterns("", sourceDevice)
 		require.NoError(t, err)
 		require.Len(t, patterns, 1)
 
@@ -215,7 +215,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 
 	// Test GetCommunicationPatternsByProtocol
 	t.Run("GetCommunicationPatternsByProtocol", func(t *testing.T) {
-		patterns, err := repo.GetCommunicationPatternsByProtocol("ethernetip")
+		patterns, err := repo.GetCommunicationPatternsByProtocol("", "ethernetip")
 		require.NoError(t, err)
 		require.Len(t, patterns, 1)
 
@@ -239,7 +239,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify update
-		patterns, err := repo.GetCommunicationPatterns(sourceDevice)
+		patterns, err := repo.GetCommunicationPatterns("", sourceDevice)
 		require.NoError(t, err)
 		require.Len(t, patterns, 1)
 
@@ -266,7 +266,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify update
-		patterns, err := repo.GetCommunicationPatterns(sourceDevice)
+		patterns, err := repo.GetCommunicationPatterns("", sourceDevice)
 		require.NoError(t, err)
 		require.Len(t, patterns, 1)
 
@@ -291,7 +291,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify insert
-		patterns, err := repo.GetCommunicationPatterns(sourceDevice)
+		patterns, err := repo.GetCommunicationPatterns("", sourceDevice)
 		require.NoError(t, err)
 		require.Len(t, patterns, 2) // Should have both ethernetip and opcua
 
@@ -314,7 +314,7 @@ func TestSQLiteRepository_CommunicationPatternOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify deletion
-		patterns, err := repo.GetCommunicationPatterns(sourceDevice)
+		patterns, err := repo.GetCommunicationPatterns("", sourceDevice)
 		require.NoError(t, err)
 		require.Len(t, patterns, 1) // Should only have ethernetip left
 
@@ -362,12 +362,12 @@ func TestSQLiteRepository_BatchIndustrialOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify both were saved
-		stats1, err := repo.GetProtocolUsageStats("192.168.1.100")
+		stats1, err := repo.GetProtocolUsageStats("", "192.168.1.100")
 		require.NoError(t, err)
 		require.Len(t, stats1, 1)
 		assert.Equal(t, "ethernetip", stats1[0].Protocol)
 
-		stats2, err := repo.GetProtocolUsageStats("192.168.1.101")
+		stats2, err := repo.GetProtocolUsageStats("", "192.168.1.101")
 		require.NoError(t, err)
 		require.Len(t, stats2, 1)
 		assert.Equal(t, "opcua", stats2[0].Protocol)
@@ -400,12 +400,12 @@ func TestSQLiteRepository_BatchIndustrialOperations(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify both were saved
-		patterns1, err := repo.GetCommunicationPatterns("192.168.1.100")
+		patterns1, err := repo.GetCommunicationPatterns("", "192.168.1.100")
 		require.NoError(t, err)
 		require.Len(t, patterns1, 1)
 		assert.Equal(t, "ethernetip", patterns1[0].Protocol)
 
-		patterns2, err := repo.GetCommunicationPatterns("192.168.1.101")
+		patterns2, err := repo.GetCommunicationPatterns("", "192.168.1.101")
 		require.NoError(t, err)
 		require.Len(t, patterns2, 2) // 192.168.1.101 appears in both patterns (as destination in first, source in second)
 

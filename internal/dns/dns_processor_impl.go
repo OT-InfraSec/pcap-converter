@@ -2,6 +2,7 @@ package dns
 
 import (
 	"fmt"
+
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
@@ -117,13 +118,13 @@ func repoQueryPacketsWithDNS(repo repository.Repository) ([]*model.Packet, error
 	// This is a placeholder. In a real implementation, the repository would support queries.
 	// For now, assume we can type-assert to SQLiteRepository and query directly.
 	type sqlRepo interface {
-		AllPackets() ([]*model.Packet, error)
+		AllPackets(tenantID string) ([]*model.Packet, error)
 	}
 	sr, ok := repo.(sqlRepo)
 	if !ok {
 		return nil, fmt.Errorf("repository does not support AllPackets")
 	}
-	all, err := sr.AllPackets()
+	all, err := sr.AllPackets("")
 	if err != nil {
 		return nil, err
 	}

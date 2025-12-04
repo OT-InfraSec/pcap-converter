@@ -196,12 +196,12 @@ func TestIndustrialProtocolIntegration_DatabasePersistence(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test device retrieval
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices("", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, devices)
 
 	// Test industrial device queries
-	plcDevices, err := repo.GetIndustrialDevicesByType(model.DeviceTypePLC)
+	plcDevices, err := repo.GetIndustrialDevicesByType("", model.DeviceTypePLC)
 	require.NoError(t, err)
 	// May be empty if no PLCs were classified, which is acceptable
 	_ = plcDevices // Use the variable to avoid "declared and not used" error
@@ -209,7 +209,7 @@ func TestIndustrialProtocolIntegration_DatabasePersistence(t *testing.T) {
 	// Test protocol usage statistics retrieval
 	for _, device := range devices {
 		if device.IndustrialInfo != nil {
-			stats, err := repo.GetProtocolUsageStats(device.Address)
+			stats, err := repo.GetProtocolUsageStats("", device.Address)
 			require.NoError(t, err)
 			// Stats may be empty, which is acceptable for test data
 			t.Logf("Device %s has %d protocol stats", device.Address, len(stats))
@@ -217,7 +217,7 @@ func TestIndustrialProtocolIntegration_DatabasePersistence(t *testing.T) {
 	}
 
 	// Test communication patterns retrieval
-	patterns, err := repo.GetCommunicationPatterns("")
+	patterns, err := repo.GetCommunicationPatterns("", "")
 	require.NoError(t, err)
 	// Patterns may be empty, which is acceptable for test data
 	t.Logf("Found %d communication patterns", len(patterns))

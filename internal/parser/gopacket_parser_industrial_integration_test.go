@@ -40,7 +40,7 @@ func TestGopacketParser_IndustrialProtocolIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify devices were created and classified
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices("", nil)
 	require.NoError(t, err)
 	assert.Greater(t, len(devices), 0, "Should have detected devices")
 
@@ -80,11 +80,11 @@ func TestGopacketParser_BackwardCompatibility(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify standard functionality still works
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices("", nil)
 	require.NoError(t, err)
 	assert.Greater(t, len(devices), 0, "Should have detected standard devices")
 
-	flows, err := repo.GetFlows(nil)
+	flows, err := repo.GetFlows("", nil)
 	require.NoError(t, err)
 	assert.Greater(t, len(flows), 0, "Should have detected flows")
 
@@ -119,7 +119,7 @@ func TestGopacketParser_MixedTrafficProcessing(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify both industrial and standard devices were processed
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices("", nil)
 	require.NoError(t, err)
 	assert.Greater(t, len(devices), 2, "Should have detected multiple devices")
 
@@ -136,12 +136,12 @@ func TestGopacketParser_MixedTrafficProcessing(t *testing.T) {
 	assert.Greater(t, standardDevices, 0, "Should have standard devices")
 
 	// Verify flows were created for both types
-	flows, err := repo.GetFlows(nil)
+	flows, err := repo.GetFlows("", nil)
 	require.NoError(t, err)
 	assert.Greater(t, len(flows), 0, "Should have detected flows")
 
 	// Verify communication patterns were analyzed (may or may not be present)
-	_, err = repo.GetCommunicationPatterns("")
+	_, err = repo.GetCommunicationPatterns("", "")
 	require.NoError(t, err)
 }
 
@@ -167,7 +167,7 @@ func TestGopacketParser_ErrorHandling(t *testing.T) {
 	require.NoError(t, err, "Parser should handle malformed packets gracefully")
 
 	// Verify some devices were still processed
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices("", nil)
 	require.NoError(t, err)
 	// Should have at least some devices even with errors
 	assert.GreaterOrEqual(t, len(devices), 0, "Should handle errors gracefully")

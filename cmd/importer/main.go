@@ -78,6 +78,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 			if err := provider.Parser.ParseFile(); err != nil {
 				return err
 			}
+			// FIXME: not restricting to tenantID here
 			if err := provider.DNSProcessor.Process(provider.Repository); err != nil {
 				return err
 			}
@@ -198,7 +199,7 @@ func performIndustrialAnalysis(repo repository.Repository) error {
 	industrialParser := parser.NewIndustrialProtocolParser()
 
 	// Get all flows to analyze for industrial protocols
-	flows, err := repo.GetFlows(make(map[string]interface{}))
+	flows, err := repo.GetFlows("", make(map[string]interface{}))
 	if err != nil {
 		return fmt.Errorf("failed to get flows for industrial analysis: %w", err)
 	}
@@ -312,7 +313,7 @@ func listIndustrialDevices(dbPath, format string) error {
 
 	var allDevices []*model.IndustrialDeviceInfo
 	for _, deviceType := range allTypes {
-		devices, err := repo.GetIndustrialDevicesByType(deviceType)
+		devices, err := repo.GetIndustrialDevicesByType("", deviceType)
 		if err != nil {
 			continue // Skip errors for missing data
 		}
@@ -350,7 +351,7 @@ func listIndustrialDevicesByType(dbPath string, deviceType model.IndustrialDevic
 	}
 	defer repo.Close()
 
-	devices, err := repo.GetIndustrialDevicesByType(deviceType)
+	devices, err := repo.GetIndustrialDevicesByType("", deviceType)
 	if err != nil {
 		return fmt.Errorf("failed to get devices by type: %w", err)
 	}
@@ -368,7 +369,7 @@ func showProtocolStats(dbPath, deviceAddress, format string) error {
 
 	var stats []*model.ProtocolUsageStats
 	if deviceAddress != "" {
-		stats, err = repo.GetProtocolUsageStats(deviceAddress)
+		stats, err = repo.GetProtocolUsageStats("", deviceAddress)
 		if err != nil {
 			return fmt.Errorf("failed to get protocol stats for device: %w", err)
 		}
@@ -391,7 +392,7 @@ func showCommunicationPatterns(dbPath, deviceAddress, format string) error {
 
 	var patterns []*model.CommunicationPattern
 	if deviceAddress != "" {
-		patterns, err = repo.GetCommunicationPatterns(deviceAddress)
+		patterns, err = repo.GetCommunicationPatterns("", deviceAddress)
 		if err != nil {
 			return fmt.Errorf("failed to get communication patterns for device: %w", err)
 		}
@@ -424,7 +425,7 @@ func showIndustrialSummary(dbPath, format string) error {
 
 	totalDevices := 0
 	for _, deviceType := range allTypes {
-		devices, err := repo.GetIndustrialDevicesByType(deviceType)
+		devices, err := repo.GetIndustrialDevicesByType("", deviceType)
 		if err != nil {
 			continue
 		}

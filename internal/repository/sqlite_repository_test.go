@@ -1,9 +1,9 @@
 package repository
 
 import (
+	"net"
 	"testing"
 	"time"
-	"net"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +29,7 @@ func TestSQLiteRepository_AddPacketAndAllPackets(t *testing.T) {
 		t.Fatalf("AddPacket failed: %v", err)
 	}
 
-	packets, err := repo.AllPackets()
+	packets, err := repo.AllPackets("")
 	if err != nil {
 		t.Fatalf("AllPackets failed: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify single bidirectional flow was created
-	flows, err := repo.GetFlows(nil)
+	flows, err := repo.GetFlows("", nil)
 	require.NoError(t, err)
 	require.Len(t, flows, 1, "Should create exactly one bidirectional flow")
 
@@ -240,7 +240,7 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify single bidirectional flow was created
-	flows, err := repo.GetFlows(nil)
+	flows, err := repo.GetFlows("", nil)
 	require.NoError(t, err)
 	require.Len(t, flows, 1, "Should create exactly one bidirectional OPC UA flow")
 

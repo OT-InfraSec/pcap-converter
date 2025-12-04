@@ -56,15 +56,15 @@ func (m *MockRepository) AddDeviceRelation(relation *model.DeviceRelation) error
 	return nil
 }
 
-func (m *MockRepository) GetDevices(filters map[string]interface{}) ([]*model.Device, error) {
+func (m *MockRepository) GetDevices(tenantID string, filters map[string]interface{}) ([]*model.Device, error) {
 	return m.Devices, nil
 }
 
-func (m *MockRepository) GetFlows(filters map[string]interface{}) ([]*model.Flow, error) {
+func (m *MockRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model.Flow, error) {
 	return m.Flows, nil
 }
 
-func (m *MockRepository) GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error) {
+func (m *MockRepository) GetDNSQueries(tenantID string, eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error) {
 	return m.DNSQueries, nil
 }
 
@@ -72,7 +72,7 @@ func (m *MockRepository) GetDeviceRelations(deviceID *int64) ([]*model.DeviceRel
 	return m.DeviceRelations, nil
 }
 
-func (m *MockRepository) GetDevice(address string) (*model.Device, error) {
+func (m *MockRepository) GetDevice(tenantID, address string) (*model.Device, error) {
 	for _, device := range m.Devices {
 		if device.Address == address {
 			return device, nil
@@ -81,7 +81,7 @@ func (m *MockRepository) GetDevice(address string) (*model.Device, error) {
 	return nil, nil
 }
 
-func (m *MockRepository) GetServices(filters map[string]interface{}) ([]*model.Service, error) {
+func (m *MockRepository) GetServices(tenantID string, filters map[string]interface{}) ([]*model.Service, error) {
 	return []*model.Service{}, nil
 }
 
@@ -186,7 +186,7 @@ func (m *MockRepository) SaveIndustrialDeviceInfo(info *model.IndustrialDeviceIn
 	return nil
 }
 
-func (m *MockRepository) GetIndustrialDeviceInfo(deviceAddress string) (*model.IndustrialDeviceInfo, error) {
+func (m *MockRepository) GetIndustrialDeviceInfo(tenantID, deviceAddress string) (*model.IndustrialDeviceInfo, error) {
 	for _, device := range m.Devices {
 		if device.Address == deviceAddress && device.IndustrialInfo != nil {
 			return device.IndustrialInfo, nil
@@ -195,7 +195,7 @@ func (m *MockRepository) GetIndustrialDeviceInfo(deviceAddress string) (*model.I
 	return nil, nil
 }
 
-func (m *MockRepository) GetIndustrialDevicesByType(deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error) {
+func (m *MockRepository) GetIndustrialDevicesByType(tenantID string, deviceType model.IndustrialDeviceType) ([]*model.IndustrialDeviceInfo, error) {
 	var result []*model.IndustrialDeviceInfo
 	for _, device := range m.Devices {
 		if device.IndustrialInfo != nil && device.IndustrialInfo.DeviceType == deviceType {
@@ -228,7 +228,7 @@ func (m *MockRepository) SaveProtocolUsageStats(stats *model.ProtocolUsageStats)
 	return nil
 }
 
-func (m *MockRepository) GetProtocolUsageStats(deviceAddress string) ([]*model.ProtocolUsageStats, error) {
+func (m *MockRepository) GetProtocolUsageStats(tenantID, deviceAddress string) ([]*model.ProtocolUsageStats, error) {
 	var result []*model.ProtocolUsageStats
 	for _, stats := range m.ProtocolStats {
 		if stats.DeviceID == deviceAddress {
@@ -238,7 +238,7 @@ func (m *MockRepository) GetProtocolUsageStats(deviceAddress string) ([]*model.P
 	return result, nil
 }
 
-func (m *MockRepository) GetProtocolUsageStatsByProtocol(protocol string) ([]*model.ProtocolUsageStats, error) {
+func (m *MockRepository) GetProtocolUsageStatsByProtocol(tenantID, protocol string) ([]*model.ProtocolUsageStats, error) {
 	var result []*model.ProtocolUsageStats
 	for _, stats := range m.ProtocolStats {
 		if stats.Protocol == protocol {
@@ -271,7 +271,7 @@ func (m *MockRepository) SaveCommunicationPattern(pattern *model.CommunicationPa
 	return nil
 }
 
-func (m *MockRepository) GetCommunicationPatterns(deviceAddress string) ([]*model.CommunicationPattern, error) {
+func (m *MockRepository) GetCommunicationPatterns(tenantID, deviceAddress string) ([]*model.CommunicationPattern, error) {
 	var result []*model.CommunicationPattern
 	for _, pattern := range m.CommunicationPatterns {
 		if pattern.SourceDevice == deviceAddress || pattern.DestinationDevice == deviceAddress {
@@ -281,7 +281,7 @@ func (m *MockRepository) GetCommunicationPatterns(deviceAddress string) ([]*mode
 	return result, nil
 }
 
-func (m *MockRepository) GetCommunicationPatternsByProtocol(protocol string) ([]*model.CommunicationPattern, error) {
+func (m *MockRepository) GetCommunicationPatternsByProtocol(tenantID, protocol string) ([]*model.CommunicationPattern, error) {
 	var result []*model.CommunicationPattern
 	for _, pattern := range m.CommunicationPatterns {
 		if pattern.Protocol == protocol {
@@ -291,8 +291,12 @@ func (m *MockRepository) GetCommunicationPatternsByProtocol(protocol string) ([]
 	return result, nil
 }
 
-func (m *MockRepository) UpdateCommunicationPattern(pattern *model.CommunicationPattern) error {
-	return m.SaveCommunicationPattern(pattern)
+func (m *MockRepository) GetIndustrialProtocolInfos(tenantID, deviceAddress string) ([]*model.IndustrialProtocolInfo, error) {
+	return []*model.IndustrialProtocolInfo{}, nil
+}
+
+func (m *MockRepository) GetIndustrialProtocolInfosByProtocol(tenantID, protocol string) ([]*model.IndustrialProtocolInfo, error) {
+	return []*model.IndustrialProtocolInfo{}, nil
 }
 
 func (m *MockRepository) UpsertCommunicationPattern(pattern *model.CommunicationPattern) error {
@@ -355,7 +359,7 @@ func (m *MockRepository) GetSavedCommunicationPatterns() []*model.CommunicationP
 
 // Additional methods to satisfy Repository interface
 
-func (m *MockRepository) AllPackets() ([]*model.Packet, error) {
+func (m *MockRepository) AllPackets(tenantID string) ([]*model.Packet, error) {
 	return m.Packets, nil
 }
 

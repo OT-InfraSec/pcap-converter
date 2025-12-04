@@ -88,6 +88,7 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			ip TEXT NOT NULL,
 			port INTEGER NOT NULL,
 			first_seen TEXT NOT NULL,
@@ -146,6 +147,7 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS dns_queries (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			querying_device_id INTEGER,
 			answering_device_id INTEGER,
 			query_name TEXT NOT NULL,
@@ -158,6 +160,7 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS ssdp_queries (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			querying_device_id INTEGER NOT NULL,
 			query_type VARCHAR(20) NOT NULL,
 			st TEXT,
@@ -166,6 +169,7 @@ func (r *SQLiteRepository) createTables() error {
         );`,
 		`CREATE TABLE IF NOT EXISTS industrial_devices (
 			device_address TEXT PRIMARY KEY,
+			tenant_id TEXT,
 			device_type TEXT NOT NULL,
 			role TEXT NOT NULL,
 			confidence REAL NOT NULL,
@@ -181,6 +185,7 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS protocol_usage_stats (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			device_address TEXT NOT NULL,
 			protocol TEXT NOT NULL,
 			packet_count INTEGER NOT NULL,
@@ -193,6 +198,7 @@ func (r *SQLiteRepository) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS communication_patterns (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
 			source_device_address TEXT NOT NULL,
 			destination_device_address TEXT NOT NULL,
 			protocol TEXT NOT NULL,
@@ -324,18 +330,18 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	return err
 }
 
-func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
-	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description FROM devices WHERE address = ?`
-	row := r.db.QueryRow(query, address)
+func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, error) {
+	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description FROM devices WHERE tenant_id = ? AND address = ?`
+	row := r.db.QueryRow(query, tenantID, address)
 
 	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr, protocolListStr, dnsNamesStr, hostname, deviceType, vendor, os string
-	var tenantID sql.NullString
+	var dbTenantID sql.NullString
 	var isRouter, isOnlyDestination, isExternal sql.NullBool
 	var confidence sql.NullFloat64
 	var description sql.NullString
 
-	if err := row.Scan(&device.ID, &tenantID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+	if err := row.Scan(&device.ID, &dbTenantID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
 		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description); err != nil {
 		return nil, err
 	}
@@ -369,8 +375,8 @@ func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
 	device.DeviceType = deviceType
 	device.Vendor = vendor
 	device.OS = os
-	if tenantID.Valid {
-		device.TenantID = tenantID.String
+	if dbTenantID.Valid {
+		device.TenantID = dbTenantID.String
 	}
 	if isRouter.Valid {
 		device.IsRouter = isRouter.Bool
@@ -391,17 +397,15 @@ func (r *SQLiteRepository) GetDevice(address string) (*model2.Device, error) {
 	return &device, nil
 }
 
-func (r *SQLiteRepository) GetDevices(filters map[string]interface{}) ([]*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices`
-	params := []interface{}{}
+func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interface{}) ([]*model2.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices WHERE tenant_id = ?`
+	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
-		conditions := []string{}
 		for key, value := range filters {
-			conditions = append(conditions, key+" = ?")
+			query += " AND " + key + " = ?"
 			params = append(params, value)
 		}
-		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	rows, err := r.db.Query(query, params...)
@@ -515,17 +519,15 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	return err
 }
 
-func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.Flow, error) {
-	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count, byte_count, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client FROM flows`
-	params := []interface{}{}
+func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model2.Flow, error) {
+	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count, byte_count, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client FROM flows WHERE tenant_id = ?`
+	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
-		conditions := []string{}
 		for key, value := range filters {
-			conditions = append(conditions, key+" = ?")
+			query += " AND " + key + " = ?"
 			params = append(params, value)
 		}
-		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	rows, err := r.db.Query(query, params...)
@@ -595,8 +597,8 @@ func (r *SQLiteRepository) GetFlows(filters map[string]interface{}) ([]*model2.F
 	return flows, nil
 }
 
-func (r *SQLiteRepository) AllPackets() ([]*model2.Packet, error) {
-	rows, err := r.db.Query(`SELECT id, timestamp, length, layers, protocols FROM packets`)
+func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error) {
+	rows, err := r.db.Query(`SELECT id, timestamp, length, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +644,8 @@ func (r *SQLiteRepository) AddService(service *model2.Service) error {
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`,
+		`INSERT INTO services (tenant_id, ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?, ?);`,
+		service.TenantID,
 		service.IP.String(),
 		service.Port,
 		service.FirstSeen.Format(time.RFC3339Nano),
@@ -672,8 +675,9 @@ func (r *SQLiteRepository) AddDNSQuery(query *model2.DNSQuery) error {
 		log.Printf("Error marshaling query result: %v", err)
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) 
-		VALUES (?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO dns_queries (tenant_id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) 
+		VALUES (?, ?, ?, ?, ?, ?, ?);`,
+		query.TenantID,
 		query.QueryingDeviceID,
 		query.AnsweringDeviceID,
 		query.QueryName,
@@ -690,17 +694,15 @@ func (r *SQLiteRepository) AddDNSQuery(query *model2.DNSQuery) error {
 	return err
 }
 
-func (r *SQLiteRepository) GetServices(filters map[string]interface{}) ([]*model2.Service, error) {
-	query := "SELECT element_id, ip, port, first_seen, last_seen, protocol FROM services"
-	params := []interface{}{}
+func (r *SQLiteRepository) GetServices(tenantID string, filters map[string]interface{}) ([]*model2.Service, error) {
+	query := "SELECT element_id, ip, port, first_seen, last_seen, protocol FROM services WHERE tenant_id = ?"
+	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
-		conditions := []string{}
 		for key, value := range filters {
-			conditions = append(conditions, key+" = ?")
+			query += " AND " + key + " = ?"
 			params = append(params, value)
 		}
-		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	rows, err := r.db.Query(query, params...)
@@ -775,25 +777,21 @@ func (r *SQLiteRepository) GetDeviceRelations(deviceID *int64) ([]*model2.Device
 	return relations, nil
 }
 
-func (r *SQLiteRepository) GetDNSQueries(eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model2.DNSQuery, error) {
-	query := "SELECT id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp FROM dns_queries"
-	params := []interface{}{}
+func (r *SQLiteRepository) GetDNSQueries(tenantID string, eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model2.DNSQuery, error) {
+	query := "SELECT id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp FROM dns_queries WHERE tenant_id = ?"
+	params := []interface{}{tenantID}
 
-	if len(eqFilters) > 0 || len(likeFilters) > 0 {
-		conditions := []string{}
-		if len(eqFilters) > 0 {
-			for key, value := range eqFilters {
-				conditions = append(conditions, key+" = ?")
-				params = append(params, value)
-			}
+	if len(eqFilters) > 0 {
+		for key, value := range eqFilters {
+			query += " AND " + key + " = ?"
+			params = append(params, value)
 		}
-		if len(likeFilters) > 0 {
-			for key, value := range likeFilters {
-				conditions = append(conditions, key+" LIKE ?")
-				params = append(params, value.(string))
-			}
+	}
+	if len(likeFilters) > 0 {
+		for key, value := range likeFilters {
+			query += " AND " + key + " LIKE ?"
+			params = append(params, value.(string))
 		}
-		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
 	rows, err := r.db.Query(query, params...)
@@ -1025,7 +1023,7 @@ func (r *SQLiteRepository) AddServices(services []*model2.Service) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO services (ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO services (tenant_id, ip, port, first_seen, last_seen, protocol) VALUES (?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -1037,6 +1035,7 @@ func (r *SQLiteRepository) AddServices(services []*model2.Service) error {
 		}
 
 		_, err = stmt.Exec(
+			service.TenantID,
 			service.IP.String(),
 			service.Port,
 			service.FirstSeen.Format(time.RFC3339Nano),
@@ -1059,7 +1058,7 @@ func (r *SQLiteRepository) AddDNSQueries(queries []*model2.DNSQuery) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO dns_queries (tenant_id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -1078,6 +1077,7 @@ func (r *SQLiteRepository) AddDNSQueries(queries []*model2.DNSQuery) error {
 		}
 
 		_, err = stmt.Exec(
+			query.TenantID,
 			query.QueryingDeviceID,
 			query.AnsweringDeviceID,
 			query.QueryName,
@@ -1284,7 +1284,7 @@ func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
 	}
 
 	// Check if device exists by address
-	existingDevice, err := r.GetDevice(device.Address)
+	existingDevice, err := r.GetDevice(device.TenantID, device.Address)
 	if err == nil && existingDevice != nil {
 		// Device exists, update it
 		device.ID = existingDevice.ID
@@ -1402,7 +1402,8 @@ func (r *SQLiteRepository) UpdateService(service *model2.Service) error {
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE services SET ip = ?, port = ?, first_seen = ?, last_seen = ?, protocol = ? WHERE element_id = ?;`,
+		`UPDATE services SET tenant_id = ?, ip = ?, port = ?, first_seen = ?, last_seen = ?, protocol = ? WHERE element_id = ?;`,
+		service.TenantID,
 		service.IP.String(),
 		service.Port,
 		service.FirstSeen.Format(time.RFC3339Nano),
@@ -1573,7 +1574,8 @@ func (r *SQLiteRepository) UpdateDNSQuery(query *model2.DNSQuery) error {
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE dns_queries SET querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`,
+		`UPDATE dns_queries SET tenant_id = ?, querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`,
+		query.TenantID,
 		query.QueryingDeviceID,
 		query.AnsweringDeviceID,
 		query.QueryName,
@@ -1649,13 +1651,13 @@ func (r *SQLiteRepository) UpsertDNSQueries(queries []*model2.DNSQuery) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO dns_queries (querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO dns_queries (tenant_id, querying_device_id, answering_device_id, query_name, query_type, query_result, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE dns_queries SET querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE dns_queries SET tenant_id = ?, querying_device_id = ?, answering_device_id = ?, query_name = ?, query_type = ?, query_result = ?, timestamp = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1724,6 +1726,7 @@ func (r *SQLiteRepository) UpsertDNSQueries(queries []*model2.DNSQuery) error {
 		if exists {
 			// Update existing query
 			_, err = updateStmt.Exec(
+				query.TenantID,
 				query.QueryingDeviceID,
 				query.AnsweringDeviceID,
 				query.QueryName,
@@ -1739,6 +1742,7 @@ func (r *SQLiteRepository) UpsertDNSQueries(queries []*model2.DNSQuery) error {
 		} else {
 			// Insert new query
 			result, err := insertStmt.Exec(
+				query.TenantID,
 				query.QueryingDeviceID,
 				query.AnsweringDeviceID,
 				query.QueryName,
@@ -1772,7 +1776,8 @@ func (r *SQLiteRepository) AddSSDPQuery(query *model2.SSDPQuery) error {
 
 	// Insert the SSDP query
 	result, err := r.db.Exec(
-		`INSERT INTO ssdp_queries (querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?);`,
+		`INSERT INTO ssdp_queries (tenant_id, querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?, ?);`,
+		query.TenantID,
 		query.QueryingDeviceID,
 		query.QueryType,
 		query.ST,
@@ -1802,7 +1807,8 @@ func (r *SQLiteRepository) UpdateSSDPQuery(query *model2.SSDPQuery) error {
 
 	// Query exists, update it
 	_, err := r.db.Exec(
-		`UPDATE ssdp_queries SET st = ?, user_agent = ? WHERE id = ?;`,
+		`UPDATE ssdp_queries SET tenant_id = ?, st = ?, user_agent = ? WHERE id = ?;`,
+		query.TenantID,
 		query.ST,
 		query.UserAgent,
 		query.ID)
@@ -1855,14 +1861,14 @@ func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error 
 	defer tx.Rollback()
 
 	// Prepare insert statement
-	insertStmt, err := tx.Prepare(`INSERT INTO ssdp_queries (querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO ssdp_queries (tenant_id, querying_device_id, query_type, st, user_agent) VALUES (?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
 	// Prepare update statement
-	updateStmt, err := tx.Prepare(`UPDATE ssdp_queries SET st = ?, user_agent = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE ssdp_queries SET tenant_id = ?, st = ?, user_agent = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1918,6 +1924,7 @@ func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error 
 			query.ID = existingID
 			// Update existing query
 			_, err = updateStmt.Exec(
+				query.TenantID,
 				query.ST,
 				query.UserAgent,
 				query.ID,
@@ -1927,6 +1934,7 @@ func (r *SQLiteRepository) UpsertSSDPQueries(queries []*model2.SSDPQuery) error 
 			}
 		} else { // Insert new query
 			result, err := insertStmt.Exec(
+				query.TenantID,
 				query.QueryingDeviceID,
 				query.QueryType,
 				query.ST,
@@ -2062,7 +2070,7 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 
 	// Check if a canonical flow already exists
 	var existingFlow *model2.Flow
-	existingFlows, err := r.GetFlows(map[string]interface{}{
+	existingFlows, err := r.GetFlows(flow.TenantID, map[string]interface{}{
 		"src_ip":   canonicalSrc,
 		"dst_ip":   canonicalDst,
 		"protocol": flow.Protocol,
@@ -2232,7 +2240,7 @@ func (r *SQLiteRepository) UpsertService(service *model2.Service) error {
 	}
 
 	// Check if service exists by ip, port, protocol
-	existingServices, err := r.GetServices(map[string]interface{}{
+	existingServices, err := r.GetServices(service.TenantID, map[string]interface{}{
 		"ip":       service.IP.String(),
 		"port":     service.Port,
 		"protocol": service.Protocol,

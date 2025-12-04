@@ -74,7 +74,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 	}
 
 	// Import existing devices from repository
-	devices, err := repo.GetDevices(nil)
+	devices, err := repo.GetDevices(tenantID, nil)
 	if err == nil {
 		for _, device := range devices {
 			deviceKey := device.AddressType + ":" + device.Address
@@ -87,7 +87,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 	}
 
 	// Import existing flows from repository
-	flows, err := repo.GetFlows(nil)
+	flows, err := repo.GetFlows(tenantID, nil)
 	if err == nil {
 		for _, flow := range flows {
 			flowKey := fmt.Sprintf("%s:%s:%s", flow.SrcIP.String(), flow.DstIP.String(), flow.Protocol)
@@ -104,7 +104,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 	}
 
 	// Import existing services from repository
-	services, err := repo.GetServices(nil)
+	services, err := repo.GetServices(tenantID, nil)
 	if err == nil {
 		for _, service := range services {
 			serviceKey := fmt.Sprintf("%s:%d:%s", service.IP, service.Port, service.Protocol)
@@ -113,7 +113,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 	}
 
 	// Import existing DNS queries from repository
-	dnsQueries, err := repo.GetDNSQueries(nil, nil)
+	dnsQueries, err := repo.GetDNSQueries(tenantID, nil, nil)
 	if err == nil {
 		for _, query := range dnsQueries {
 			// We need to find the corresponding devices for these DNS queries
@@ -1912,7 +1912,7 @@ func (p *GopacketParser) ParseFile() error {
 			if err != nil {
 				return fmt.Errorf("failed to add querying device: %w", err)
 			}
-			queryingDevice, err = p.repo.GetDevice(dnsQuery.QueryingDeviceIP)
+			queryingDevice, err = p.repo.GetDevice(p.TenantID, dnsQuery.QueryingDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve querying device: %w", err)
 			}
@@ -1931,7 +1931,7 @@ func (p *GopacketParser) ParseFile() error {
 			if err != nil {
 				return fmt.Errorf("failed to add answering device: %w", err)
 			}
-			answeringDevice, err = p.repo.GetDevice(dnsQuery.AnsweringDeviceIP)
+			answeringDevice, err = p.repo.GetDevice(p.TenantID, dnsQuery.AnsweringDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve answering device: %w", err)
 			}
@@ -1993,7 +1993,7 @@ func (p *GopacketParser) ParseFile() error {
 			if err != nil {
 				return fmt.Errorf("failed to add querying device for SSDP query: %w", err)
 			}
-			queryingDevice, err = p.repo.GetDevice(ssdpQuery.QueryingDeviceIP)
+			queryingDevice, err = p.repo.GetDevice(p.TenantID, ssdpQuery.QueryingDeviceIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve querying device for SSDP query: %w", err)
 			}

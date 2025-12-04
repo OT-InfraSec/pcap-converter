@@ -34,7 +34,7 @@ class flows {
    bigint byte_count
    timestamp first_seen
    timestamp last_seen
-   numeric(10,6) duration
+   integer duration
    integer id
 }
 class kv_store {
@@ -102,3 +102,84 @@ packets  -->  tenants : tenant_id:id
 sessions  -->  tenants : tenant_id:id
 sessions  -->  users : user_id:id
 users  -->  tenants : tenant_id:id
+class services {
+   varchar(255) tenant_id
+   inet ip
+   integer port
+   timestamp first_seen
+   timestamp last_seen
+   varchar(50) protocol
+   integer element_id
+}
+class dns_queries {
+   varchar(255) tenant_id
+   integer querying_device_id
+   integer answering_device_id
+   varchar(255) query_name
+   varchar(50) query_type
+   text query_result
+   timestamp timestamp
+   integer id
+}
+class ssdp_queries {
+   varchar(255) tenant_id
+   integer querying_device_id
+   varchar(50) query_type
+   varchar(255) st
+   varchar(255) user_agent
+   integer id
+}
+class industrial_devices {
+   varchar(255) tenant_id
+   varchar(255) device_address
+   varchar(50) device_type
+   varchar(50) role
+   numeric(5,4) confidence
+   text protocols
+   integer security_level
+   varchar(255) vendor
+   varchar(255) product_name
+   varchar(255) serial_number
+   varchar(255) firmware_version
+   timestamp last_seen
+   timestamp created_at
+   timestamp updated_at
+   integer id
+}
+class protocol_usage_stats {
+   varchar(255) tenant_id
+   varchar(255) device_address
+   varchar(50) protocol
+   bigint packet_count
+   bigint byte_count
+   timestamp first_seen
+   timestamp last_seen
+   varchar(50) communication_role
+   text ports_used
+   integer id
+}
+class communication_patterns {
+   varchar(255) tenant_id
+   varchar(255) source_device_address
+   varchar(255) destination_device_address
+   varchar(50) protocol
+   bigint frequency_ms
+   bigint data_volume
+   integer flow_count
+   numeric(10,6) deviation_frequency
+   numeric(10,6) deviation_data_volume
+   varchar(50) pattern_type
+   varchar(50) criticality
+   timestamp created_at
+   integer id
+}
+
+services  -->  tenants : tenant_id:id
+dns_queries  -->  tenants : tenant_id:id
+dns_queries  -->  devices : querying_device_id:id
+dns_queries  -->  devices : answering_device_id:id
+ssdp_queries  -->  tenants : tenant_id:id
+ssdp_queries  -->  devices : querying_device_id:id
+industrial_devices  -->  tenants : tenant_id:id
+protocol_usage_stats  -->  tenants : tenant_id:id
+communication_patterns  -->  tenants : tenant_id:id

@@ -44,6 +44,7 @@ const (
 
 // IndustrialDeviceInfo represents industrial-specific device information
 type IndustrialDeviceInfo struct {
+	TenantID        string               `json:"tenant_id"`
 	DeviceAddress   string               `json:"device_address"`
 	DeviceType      IndustrialDeviceType `json:"device_type"`
 	Role            IndustrialDeviceRole `json:"role"`
@@ -61,6 +62,7 @@ type IndustrialDeviceInfo struct {
 
 // ProtocolUsageStats represents protocol usage statistics for a device
 type ProtocolUsageStats struct {
+	TenantID          string    `json:"tenant_id"`
 	DeviceID          string    `json:"device_id"`
 	Protocol          string    `json:"protocol"`
 	PacketCount       int64     `json:"packet_count"`
@@ -73,6 +75,7 @@ type ProtocolUsageStats struct {
 
 // CommunicationPattern represents communication patterns between devices
 type CommunicationPattern struct {
+	TenantID            string        `json:"tenant_id"`
 	SourceDevice        string        `json:"source_device"`
 	DestinationDevice   string        `json:"destination_device"`
 	Protocol            string        `json:"protocol"`
