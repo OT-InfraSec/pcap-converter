@@ -9,15 +9,17 @@ import (
 type IndustrialDeviceType string
 
 const (
-	DeviceTypePLC            IndustrialDeviceType = "PLC"
-	DeviceTypeHMI            IndustrialDeviceType = "HMI"
-	DeviceTypeSCADA          IndustrialDeviceType = "SCADA"
-	DeviceTypeHistorian      IndustrialDeviceType = "Historian"
-	DeviceTypeEngWorkstation IndustrialDeviceType = "EngineeringWorkstation"
-	DeviceTypeIODevice       IndustrialDeviceType = "IODevice"
-	DeviceTypeSensor         IndustrialDeviceType = "Sensor"
-	DeviceTypeActuator       IndustrialDeviceType = "Actuator"
-	DeviceTypeUnknown        IndustrialDeviceType = "Unknown"
+	DeviceTypePLC              IndustrialDeviceType = "PLC"
+	DeviceTypeHMI              IndustrialDeviceType = "HMI"
+	DeviceTypeSCADA            IndustrialDeviceType = "SCADA"
+	DeviceTypeHistorian        IndustrialDeviceType = "Historian"
+	DeviceTypeEngWorkstation   IndustrialDeviceType = "EngineeringWorkstation"
+	DeviceTypeIODevice         IndustrialDeviceType = "IODevice"
+	DeviceTypeSensor           IndustrialDeviceType = "Sensor"
+	DeviceTypeActuator         IndustrialDeviceType = "Actuator"
+	DeviceTypePrinter          IndustrialDeviceType = "Printer"
+	DeviceTypeDomainController IndustrialDeviceType = "DomainController"
+	DeviceTypeUnknown          IndustrialDeviceType = "Unknown"
 )
 
 // IndustrialDeviceRole represents the role of an industrial device in the network
@@ -198,7 +200,7 @@ func isValidIndustrialDeviceType(deviceType IndustrialDeviceType) bool {
 	switch deviceType {
 	case DeviceTypePLC, DeviceTypeHMI, DeviceTypeSCADA, DeviceTypeHistorian,
 		DeviceTypeEngWorkstation, DeviceTypeIODevice, DeviceTypeSensor,
-		DeviceTypeActuator, DeviceTypeUnknown:
+		DeviceTypeActuator, DeviceTypePrinter, DeviceTypeDomainController, DeviceTypeUnknown:
 		return true
 	default:
 		return false

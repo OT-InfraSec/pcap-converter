@@ -339,6 +339,11 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 		}
 	}
 
+	// Check for CIFS Browser protocol
+	if cifsInfo := p.parseCIFSBrowser(packet, timestamp); cifsInfo != nil && cifsInfo.Confidence >= p.config.ConfidenceThreshold {
+		protocols = append(protocols, *cifsInfo)
+	}
+
 	return protocols, nil
 }
 
@@ -835,6 +840,72 @@ func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, t
 		info.Confidence = 0.9
 	}
 	return info
+}
+
+// parseCIFSBrowser parses CIFS Browser protocol (NetBIOS/Windows network discovery)
+// parseCIFSBrowser parses CIFS Browser protocol (NetBIOS/Windows network discovery)
+func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
+	if !p.isCIFSBrowserPort(packet) {
+		return nil
+	}
+
+	info := &model.IndustrialProtocolInfo{
+		Protocol:       "CIFSBROWSER",
+		Timestamp:      timestamp,
+		Confidence:     0.6,
+		DeviceIdentity: make(map[string]interface{}),
+		SecurityInfo:   make(map[string]interface{}),
+		AdditionalData: make(map[string]interface{}),
+	}
+
+	// Try to extract CIFS Browser specific data
+	// Check for CIFS Browser Announcement layer (the most common message type)
+	if announcementLayer := packet.Layer(lib_layers.LayerTypeCIFSBrowser); announcementLayer != nil {
+		if announcement, ok := announcementLayer.(*lib_layers.CIFSBrowserAnnouncement); ok {
+			info.Confidence = 0.95
+
+			// We can't directly use the iec62443 package functions here (would create circular dependency)
+			// Instead, extract basic information
+			info.DeviceIdentity["server_name"] = announcement.ServerName
+			info.DeviceIdentity["is_workstation"] = announcement.ServerTypeFlags.IsWorkstation
+			info.DeviceIdentity["is_server"] = announcement.ServerTypeFlags.IsServer
+			info.DeviceIdentity["is_printer"] = announcement.ServerTypeFlags.IsPrintQueueServer
+			info.DeviceIdentity["is_domain_controller"] = announcement.ServerTypeFlags.IsDomainController
+			info.DeviceIdentity["is_apple"] = announcement.ServerTypeFlags.IsAppleServer
+
+			info.AdditionalData["command"] = announcement.Command.String()
+			info.AdditionalData["os_version"] = fmt.Sprintf("%d.%d", announcement.OSMajorVersion, announcement.OSMinorVersion)
+		}
+	}
+
+	// Determine port direction
+	if err := p.extractPortInfo(packet, info, []uint16{137}); err != nil {
+		info.Confidence = 0.7
+	} else {
+		info.Confidence = 0.9
+	}
+
+	// Mark as network discovery protocol
+	info.SecurityInfo["network_discovery_detected"] = true
+	info.SecurityInfo["windows_network_protocol"] = true
+
+	return info
+}
+
+// isCIFSBrowserPort checks if packet is CIFS Browser protocol based on port
+func (p *IndustrialProtocolParserImpl) isCIFSBrowserPort(packet gopacket.Packet) bool {
+	// CIFS Browser uses UDP port 137 (NetBIOS Name Service)
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp := udpLayer.(*layers.UDP)
+		return udp.SrcPort == 137 || udp.DstPort == 137
+	}
+
+	// Also check for CIFS Browser layer directly
+	if packet.Layer(lib_layers.LayerTypeCIFSBrowser) != nil {
+		return true
+	}
+
+	return false
 }
 
 // extractOPCUADetails extracts OPC UA specific information

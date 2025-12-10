@@ -102,6 +102,9 @@ func (dc *DeviceClassifierImpl) AnalyzeProtocolUsage(protocols []IndustrialProto
 		case "MODBUS":
 			primaryProtocols = append(primaryProtocols, protocol.Protocol)
 			dc.analyzeModbusProtocol(protocol, &deviceTypeHints, &roleHints, securityIndicators)
+		case "CIFSBROWSER":
+			secondaryProtocols = append(secondaryProtocols, protocol.Protocol)
+			dc.analyzeCIFSBrowserProtocol(protocol, &deviceTypeHints, &roleHints, securityIndicators)
 		case "HTTP", "HTTPS":
 			secondaryProtocols = append(secondaryProtocols, protocol.Protocol)
 			dc.analyzeHTTPProtocol(protocol, &deviceTypeHints, &roleHints, securityIndicators)
@@ -329,6 +332,56 @@ func (dc *DeviceClassifierImpl) analyzeModbusProtocol(protocol IndustrialProtoco
 
 	securityIndicators["modbus_detected"] = true
 	securityIndicators["unencrypted_communication"] = true // Modbus is typically unencrypted
+}
+
+func (dc *DeviceClassifierImpl) analyzeCIFSBrowserProtocol(protocol IndustrialProtocolInfo, deviceTypeHints *[]model.IndustrialDeviceType, roleHints *[]model.IndustrialDeviceRole, securityIndicators map[string]interface{}) {
+	// CIFS Browser analysis logic
+	// CIFS Browser is used for Windows network discovery and sharing
+	// Extract device type hints based on server type flags detected in CIFS Browser announcements
+
+	// Check for CIFS Browser specific information in DeviceIdentity
+	if protocol.DeviceIdentity != nil {
+		// Device type classification from CIFS Browser data
+		if deviceType, ok := protocol.DeviceIdentity["cifs_device_type"]; ok {
+			if devType, isString := deviceType.(model.IndustrialDeviceType); isString {
+				*deviceTypeHints = append(*deviceTypeHints, devType)
+			}
+		}
+
+		// Role classification from CIFS Browser data
+		if role, ok := protocol.DeviceIdentity["cifs_role"]; ok {
+			if r, isString := role.(model.IndustrialDeviceRole); isString {
+				*roleHints = append(*roleHints, r)
+			}
+		}
+
+		// OS detection from CIFS Browser announcements
+		if osType, ok := protocol.DeviceIdentity["detected_os"]; ok {
+			securityIndicators["detected_os"] = osType
+		}
+
+		if osConf, ok := protocol.DeviceIdentity["os_confidence"]; ok {
+			securityIndicators["os_confidence"] = osConf
+		}
+	}
+
+	// General CIFS Browser protocol handling based on direction
+	if protocol.Direction == "outbound" || protocol.Direction == "bidirectional" {
+		// Device initiating CIFS Browser announcements - likely workstation or server
+		*deviceTypeHints = append(*deviceTypeHints, model.DeviceTypeEngWorkstation)
+		*roleHints = append(*roleHints, model.RoleOperator, model.RoleFieldDevice)
+	}
+
+	if protocol.Direction == "inbound" {
+		// Device responding to CIFS Browser queries - likely server or domain controller
+		*deviceTypeHints = append(*deviceTypeHints, model.DeviceTypeDomainController)
+		*roleHints = append(*roleHints, model.RoleController)
+	}
+
+	// Record CIFS Browser protocol detection
+	securityIndicators["cifs_browser_detected"] = true
+	securityIndicators["windows_network_protocol"] = true
+	securityIndicators["network_discovery_detected"] = true
 }
 
 func (dc *DeviceClassifierImpl) analyzeHTTPProtocol(protocol IndustrialProtocolInfo, deviceTypeHints *[]model.IndustrialDeviceType, roleHints *[]model.IndustrialDeviceRole, securityIndicators map[string]interface{}) {
