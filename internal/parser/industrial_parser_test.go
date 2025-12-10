@@ -167,7 +167,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			protocols: []IndustrialProtocolInfo{
 				{
 					Protocol:    "CIFSBROWSER",
-					Port:        137,
+					Port:        138,
 					Direction:   "inbound",
 					ServiceType: "server",
 					Confidence:  0.95,
@@ -191,7 +191,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			protocols: []IndustrialProtocolInfo{
 				{
 					Protocol:    "CIFSBROWSER",
-					Port:        137,
+					Port:        138,
 					Direction:   "inbound",
 					ServiceType: "server",
 					Confidence:  0.95,
@@ -215,7 +215,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			protocols: []IndustrialProtocolInfo{
 				{
 					Protocol:    "CIFSBrowser",
-					Port:        137,
+					Port:        138,
 					Direction:   "bidirectional",
 					ServiceType: "client",
 					Confidence:  0.90,
@@ -239,7 +239,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			protocols: []IndustrialProtocolInfo{
 				{
 					Protocol:    "cifsbrowser",
-					Port:        137,
+					Port:        138,
 					Direction:   "inbound",
 					ServiceType: "server",
 					Confidence:  0.85,
@@ -263,7 +263,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			protocols: []IndustrialProtocolInfo{
 				{
 					Protocol:    "CIFSBROWSER",
-					Port:        137,
+					Port:        138,
 					Direction:   "inbound",
 					ServiceType: "server",
 					Confidence:  0.95,

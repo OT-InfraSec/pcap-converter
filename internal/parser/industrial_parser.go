@@ -401,7 +401,7 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 
 	for _, protocol := range protocols {
 		protocolLower := strings.ToLower(protocol.Protocol)
-		
+
 		switch {
 		case strings.Contains(protocolLower, "ethernet"):
 			ethernetIPCount++
@@ -888,7 +888,6 @@ func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, t
 }
 
 // parseCIFSBrowser parses CIFS Browser protocol (NetBIOS/Windows network discovery)
-// parseCIFSBrowser parses CIFS Browser protocol (NetBIOS/Windows network discovery)
 func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
 	if !p.isCIFSBrowserPort(packet) {
 		return nil
@@ -939,10 +938,10 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 
 // isCIFSBrowserPort checks if packet is CIFS Browser protocol based on port
 func (p *IndustrialProtocolParserImpl) isCIFSBrowserPort(packet gopacket.Packet) bool {
-	// CIFS Browser uses UDP port 137 (NetBIOS Name Service)
+	// CIFS Browser uses UDP port 138 (NetBIOS Datagram Service)
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		return udp.SrcPort == 137 || udp.DstPort == 137
+		return udp.SrcPort == 138 || udp.DstPort == 138
 	}
 
 	// Also check for CIFS Browser layer directly
