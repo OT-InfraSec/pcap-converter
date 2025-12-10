@@ -391,19 +391,49 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 	// Analyze protocol patterns to determine device type
 	ethernetIPCount := 0
 	opcuaCount := 0
-	hasRealTimeData := false
+	modbusCount := 0
+	cifsCount := 0
 	hasOutboundConnections := false
 	hasInboundConnections := false
 
+	// Check CIFS Browser flags for device type hints
+	var cifsDeviceType model.IndustrialDeviceType
+
 	for _, protocol := range protocols {
-		switch protocol.Protocol {
-		case "ethernetip":
+		protocolLower := strings.ToLower(protocol.Protocol)
+		
+		switch {
+		case strings.Contains(protocolLower, "ethernet"):
 			ethernetIPCount++
-			if protocol.IsRealTimeData {
-				hasRealTimeData = true
-			}
-		case "opcua":
+		case strings.Contains(protocolLower, "opc"):
 			opcuaCount++
+		case strings.Contains(protocolLower, "modbus"):
+			modbusCount++
+		case protocolLower == "cifsbrowser":
+			cifsCount++
+			// Check CIFS Browser specific device identity information
+			if len(protocol.DeviceIdentity) > 0 {
+				// Check for printer flag
+				if isPrinter, ok := protocol.DeviceIdentity["is_printer"].(bool); ok && isPrinter {
+					cifsDeviceType = model.DeviceTypePrinter
+				}
+				// Check for domain controller flag
+				if isDomainController, ok := protocol.DeviceIdentity["is_domain_controller"].(bool); ok && isDomainController {
+					cifsDeviceType = model.DeviceTypeDomainController
+				}
+				// Check for workstation flag
+				if isWorkstation, ok := protocol.DeviceIdentity["is_workstation"].(bool); ok && isWorkstation {
+					if cifsDeviceType == "" { // Don't override more specific types
+						cifsDeviceType = model.DeviceTypeEngWorkstation
+					}
+				}
+				// Check for server flag (generic server/IO device)
+				if isServer, ok := protocol.DeviceIdentity["is_server"].(bool); ok && isServer {
+					if cifsDeviceType == "" { // Don't override more specific types
+						cifsDeviceType = model.DeviceTypeIODevice
+					}
+				}
+			}
 		}
 
 		if protocol.Direction == "outbound" {
@@ -413,20 +443,35 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 		}
 	}
 
+	// If CIFS Browser detected a specific device type, return it (highest priority)
+	if cifsCount > 0 && cifsDeviceType != "" {
+		return cifsDeviceType
+	}
+
 	// Classification logic based on protocol usage patterns
-	if hasRealTimeData && ethernetIPCount > 0 {
-		return model.DeviceTypeIODevice
+	// If multiple protocols, it's an engineering workstation
+	if (ethernetIPCount > 0 && opcuaCount > 0) || (ethernetIPCount > 0 && modbusCount > 0) || (opcuaCount > 0 && modbusCount > 0) {
+		return model.DeviceTypeEngWorkstation
 	}
 
-	if opcuaCount > 0 && hasOutboundConnections && !hasInboundConnections {
-		return model.DeviceTypeHMI
-	}
-
-	if opcuaCount > 0 && hasInboundConnections {
+	// Single protocol analysis - order matters
+	if ethernetIPCount > 0 {
 		return model.DeviceTypePLC
 	}
 
-	if ethernetIPCount > 0 {
+	if opcuaCount > 0 {
+		if hasOutboundConnections && !hasInboundConnections {
+			return model.DeviceTypeHMI
+		}
+		if hasInboundConnections {
+			return model.DeviceTypePLC
+		}
+	}
+
+	if modbusCount > 0 {
+		if hasInboundConnections {
+			return model.DeviceTypeIODevice
+		}
 		return model.DeviceTypePLC
 	}
 

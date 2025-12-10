@@ -80,10 +80,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:      net.ParseIP("192.168.1.100"),
-					DstIP: net.ParseIP("192.168.1.10"),
-					Protocol:    "EtherNet/IP",
-					ByteCount:       1024,
+					SrcIP:     net.ParseIP("192.168.1.100"),
+					DstIP:     net.ParseIP("192.168.1.10"),
+					Protocol:  "EtherNet/IP",
+					ByteCount: 1024,
 				},
 			},
 			expectedType: model.DeviceTypePLC,
@@ -102,10 +102,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:      net.ParseIP("192.168.1.20"),
-					DstIP: net.ParseIP("192.168.1.100"),
-					Protocol:    "OPC UA",
-					ByteCount:       512,
+					SrcIP:     net.ParseIP("192.168.1.20"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "OPC UA",
+					ByteCount: 512,
 				},
 			},
 			expectedType: model.DeviceTypeHMI,
@@ -124,10 +124,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:      net.ParseIP("192.168.1.30"),
-					DstIP: net.ParseIP("192.168.1.100"),
-					Protocol:    "Modbus TCP",
-					ByteCount:       256,
+					SrcIP:     net.ParseIP("192.168.1.30"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "Modbus TCP",
+					ByteCount: 256,
 				},
 			},
 			expectedType: model.DeviceTypeIODevice,
@@ -154,13 +154,135 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:      net.ParseIP("192.168.1.50"),
-					DstIP: net.ParseIP("192.168.1.100"),
-					Protocol:    "EtherNet/IP",
-					ByteCount:       2048,
+					SrcIP:     net.ParseIP("192.168.1.50"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "EtherNet/IP",
+					ByteCount: 2048,
 				},
 			},
 			expectedType: model.DeviceTypeEngWorkstation,
+		},
+		{
+			name: "Printer detected via CIFS Browser",
+			protocols: []IndustrialProtocolInfo{
+				{
+					Protocol:    "CIFSBROWSER",
+					Port:        137,
+					Direction:   "inbound",
+					ServiceType: "server",
+					Confidence:  0.95,
+					DeviceIdentity: map[string]interface{}{
+						"is_printer": true,
+					},
+				},
+			},
+			flows: []model.Flow{
+				{
+					SrcIP:     net.ParseIP("192.168.1.60"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "CIFSBROWSER",
+					ByteCount: 512,
+				},
+			},
+			expectedType: model.DeviceTypePrinter,
+		},
+		{
+			name: "Domain Controller detected via CIFS Browser",
+			protocols: []IndustrialProtocolInfo{
+				{
+					Protocol:    "CIFSBROWSER",
+					Port:        137,
+					Direction:   "inbound",
+					ServiceType: "server",
+					Confidence:  0.95,
+					DeviceIdentity: map[string]interface{}{
+						"is_domain_controller": true,
+					},
+				},
+			},
+			flows: []model.Flow{
+				{
+					SrcIP:     net.ParseIP("192.168.1.70"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "CIFSBROWSER",
+					ByteCount: 512,
+				},
+			},
+			expectedType: model.DeviceTypeDomainController,
+		},
+		{
+			name: "Engineering Workstation detected via CIFS Browser",
+			protocols: []IndustrialProtocolInfo{
+				{
+					Protocol:    "CIFSBrowser",
+					Port:        137,
+					Direction:   "bidirectional",
+					ServiceType: "client",
+					Confidence:  0.90,
+					DeviceIdentity: map[string]interface{}{
+						"is_workstation": true,
+					},
+				},
+			},
+			flows: []model.Flow{
+				{
+					SrcIP:     net.ParseIP("192.168.1.80"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "CIFSBROWSER",
+					ByteCount: 256,
+				},
+			},
+			expectedType: model.DeviceTypeEngWorkstation,
+		},
+		{
+			name: "I/O Device detected via CIFS Browser server flag",
+			protocols: []IndustrialProtocolInfo{
+				{
+					Protocol:    "cifsbrowser",
+					Port:        137,
+					Direction:   "inbound",
+					ServiceType: "server",
+					Confidence:  0.85,
+					DeviceIdentity: map[string]interface{}{
+						"is_server": true,
+					},
+				},
+			},
+			flows: []model.Flow{
+				{
+					SrcIP:     net.ParseIP("192.168.1.90"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "CIFSBROWSER",
+					ByteCount: 512,
+				},
+			},
+			expectedType: model.DeviceTypeIODevice,
+		},
+		{
+			name: "CIFS Browser with multiple flags - printer priority",
+			protocols: []IndustrialProtocolInfo{
+				{
+					Protocol:    "CIFSBROWSER",
+					Port:        137,
+					Direction:   "inbound",
+					ServiceType: "server",
+					Confidence:  0.95,
+					DeviceIdentity: map[string]interface{}{
+						"is_printer":     true,
+						"is_workstation": true,
+						"is_server":      true,
+					},
+				},
+			},
+			flows: []model.Flow{
+				{
+					SrcIP:     net.ParseIP("192.168.1.95"),
+					DstIP:     net.ParseIP("192.168.1.100"),
+					Protocol:  "CIFSBROWSER",
+					ByteCount: 512,
+				},
+			},
+			expectedType: model.DeviceTypePrinter,
 		},
 	}
 

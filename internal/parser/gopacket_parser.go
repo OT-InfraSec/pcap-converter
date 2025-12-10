@@ -1741,7 +1741,7 @@ func (p *GopacketParser) ParseFile() error {
 
 		// Industrial protocol parsing and device classification
 		// Always attempt industrial protocol parsing for comprehensive analysis
-		/*industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
+		industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
 		if err == nil && len(industrialProtocols) > 0 {
 			// Update devices with industrial protocol information
 			for _, protocolInfo := range industrialProtocols {
@@ -1788,7 +1788,7 @@ func (p *GopacketParser) ParseFile() error {
 		} else if err != nil {
 			// Log industrial protocol parsing errors but continue processing
 			fmt.Printf("Warning: Industrial protocol parsing error: %v\n", err)
-		}*/
+		}
 
 		// Flow extraction and storage
 		if srcIP != "" && dstIP != "" && flowProto != "" {
