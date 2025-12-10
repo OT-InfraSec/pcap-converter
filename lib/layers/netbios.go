@@ -149,11 +149,14 @@ func (n *NetBIOS) CanDecode() gopacket.LayerClass {
 
 // NextLayerType returns the next layer type
 func (n *NetBIOS) NextLayerType() gopacket.LayerType {
-	// For datagram packets, the payload is typically SMB
-	if n.MessageType == NB_DATAGRAM || n.MessageType == NB_DATAGRAM_BCAST {
+	// For RFC 1002 datagram packets, the payload is typically SMB
+	// Datagram message types: 0x10, 0x11, 0x12, 0x13
+	switch n.MessageType {
+	case 0x10, 0x11, 0x12, 0x13:
 		// Check if payload looks like SMB
 		if len(n.Payload) >= 4 {
 			if n.Payload[0] == 0xFF && n.Payload[1] == 'S' && n.Payload[2] == 'M' && n.Payload[3] == 'B' {
+				log.Debug().Msg("SMB payload detected in NetBIOS datagram, returning LayerTypeSMBProtocol")
 				return LayerTypeSMBProtocol
 			}
 		}
@@ -178,32 +181,94 @@ func (n *NetBIOS) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error
 	n.DatagramLength = binary.BigEndian.Uint16(data[NB_DGM_LENGTH:])
 	n.PacketOffset = binary.BigEndian.Uint16(data[NB_DGM_PACKET_OFFSET:])
 
-	log.Debug().
-		Uint8("msgType", uint8(n.MessageType)).
-		Uint16("dgramLength", n.DatagramLength).
-		Uint16("packetOffset", n.PacketOffset).
-		Int("totalLen", len(data)).
-		Msg("NetBIOS datagram header parsed")
+	offset := NB_DGM_SOURCE_NAME // offset = 14
 
-	// For datagram service, we pass the payload (after the 14-byte header) to the next layer
-	// The names are NOT in the NetBIOS header for datagram service - they're in the SMB messages
-	// The datagram payload contains the complete SMB message
-	n.Contents = data[:14]
-	if len(data) > 14 {
-		n.Payload = data[14:]
-		log.Debug().
-			Str("payloadHex", fmt.Sprintf("%x", n.Payload[:min(20, len(n.Payload))])).
-			Int("payloadLen", len(n.Payload)).
-			Msg("NetBIOS payload extracted")
-	} else {
-		n.Payload = nil
-		log.Debug().Msg("NetBIOS packet too short for payload")
+	// Parse based on message type
+	switch n.MessageType {
+	case 0x10, 0x11, 0x12, 0x13: // RFC 1002 datagram message types
+		// 0x10 = Direct Unique Datagram
+		// 0x11 = Direct Group Datagram
+		// 0x12 = Broadcast Datagram
+		// 0x13 = Datagram Error
+
+		// Names in datagram format: first byte is length (0x20 = 32), then 32 encoded bytes
+		// Total: 34 bytes per name
+
+		// Check if we have enough for both names
+		if len(data) < offset+68 {
+			// Not enough for both names, try to extract what we can
+			log.Warn().
+				Int("offset", offset).
+				Int("have", len(data)).
+				Msg("Not enough data for both names in NetBIOS datagram")
+		}
+
+		// Source name (34 bytes)
+		if len(data) >= offset+34 {
+			// First byte should be 0x20 (32 decimal)
+			if data[offset] == 0x20 {
+				sourceName, err := DecodeNetBIOSName(data[offset+1 : offset+33])
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to decode NetBIOS source name")
+					n.SourceName = ""
+				} else {
+					n.SourceName = sourceName
+				}
+			} else {
+				log.Warn().Uint8("lengthByte", data[offset]).Msg("Unexpected length byte for source name")
+				n.SourceName = ""
+			}
+			offset += 34
+		} else {
+			n.SourceName = ""
+		}
+
+		// Destination name (34 bytes)
+		if len(data) >= offset+34 {
+			if data[offset] == 0x20 {
+				destName, err := DecodeNetBIOSName(data[offset+1 : offset+33])
+				if err != nil {
+					log.Warn().Err(err).Msg("Failed to decode NetBIOS destination name")
+					n.DestinationName = ""
+				} else {
+					n.DestinationName = destName
+				}
+			} else {
+				log.Warn().Uint8("lengthByte", data[offset]).Msg("Unexpected length byte for destination name")
+				n.DestinationName = ""
+			}
+			offset += 34
+		} else {
+			n.DestinationName = ""
+		}
+
+		// Remaining data is the payload (SMB data)
+		n.Contents = data[:offset]
+		if len(data) > offset {
+			n.Payload = data[offset:]
+			log.Debug().
+				Str("srcName", n.SourceName).
+				Str("destName", n.DestinationName).
+				Str("payloadHex", fmt.Sprintf("%x", n.Payload[:min(20, len(n.Payload))])).
+				Int("payloadLen", len(n.Payload)).
+				Msg("NetBIOS datagram parsed successfully")
+		} else {
+			n.Payload = nil
+			log.Debug().
+				Str("srcName", n.SourceName).
+				Str("destName", n.DestinationName).
+				Msg("NetBIOS datagram parsed (no payload)")
+		}
+
+	default:
+		// For non-datagram message types, just mark everything as payload
+		n.Contents = data[:14]
+		if len(data) > 14 {
+			n.Payload = data[14:]
+		} else {
+			n.Payload = nil
+		}
 	}
-
-	// Set the source and destination names based on datagram ID/source
-	// For now, we'll skip name decoding as it doesn't appear to be in the datagram format
-	n.SourceName = ""
-	n.DestinationName = ""
 
 	return nil
 }

@@ -22,78 +22,78 @@ var LayerTypeSMBProtocol gopacket.LayerType
 type SMBCommand uint8
 
 const (
-	SMB_COM_CREATE_DIRECTORY      SMBCommand = 0x00
-	SMB_COM_DELETE_DIRECTORY      SMBCommand = 0x01
-	SMB_COM_OPEN                  SMBCommand = 0x02
-	SMB_COM_CREATE                SMBCommand = 0x03
-	SMB_COM_CLOSE                 SMBCommand = 0x04
-	SMB_COM_FLUSH                 SMBCommand = 0x05
-	SMB_COM_DELETE                SMBCommand = 0x06
-	SMB_COM_RENAME                SMBCommand = 0x07
-	SMB_COM_QUERY_INFORMATION     SMBCommand = 0x08
-	SMB_COM_SET_INFORMATION       SMBCommand = 0x09
-	SMB_COM_READ                  SMBCommand = 0x0A
-	SMB_COM_WRITE                 SMBCommand = 0x0B
-	SMB_COM_LOCK_BYTE_RANGE       SMBCommand = 0x0C
-	SMB_COM_UNLOCK_BYTE_RANGE     SMBCommand = 0x0D
-	SMB_COM_CREATE_TEMPORARY      SMBCommand = 0x0E
-	SMB_COM_CREATE_NEW            SMBCommand = 0x0F
-	SMB_COM_CHECK_DIRECTORY       SMBCommand = 0x10
-	SMB_COM_PROCESS_EXIT          SMBCommand = 0x11
-	SMB_COM_SEEK                  SMBCommand = 0x12
-	SMB_COM_LOCK_AND_READ         SMBCommand = 0x13
-	SMB_COM_WRITE_AND_UNLOCK      SMBCommand = 0x14
-	SMB_COM_READ_RAW              SMBCommand = 0x1A
-	SMB_COM_READ_MPX              SMBCommand = 0x1B
-	SMB_COM_READ_MPX_SECONDARY    SMBCommand = 0x1C
-	SMB_COM_WRITE_RAW             SMBCommand = 0x1D
-	SMB_COM_WRITE_MPX             SMBCommand = 0x1E
-	SMB_COM_WRITE_MPX_SECONDARY   SMBCommand = 0x1F
-	SMB_COM_WRITE_COMPLETE        SMBCommand = 0x20
-	SMB_COM_QUERY_SERVER          SMBCommand = 0x21
-	SMB_COM_SET_INFORMATION2      SMBCommand = 0x22
-	SMB_COM_QUERY_INFORMATION2    SMBCommand = 0x23
-	SMB_COM_LOCKING_ANDX          SMBCommand = 0x24
-	SMB_COM_TRANSACTION           SMBCommand = 0x25
-	SMB_COM_TRANSACTION_SECONDARY SMBCommand = 0x26
-	SMB_COM_IOCTL                 SMBCommand = 0x27
-	SMB_COM_IOCTL_SECONDARY       SMBCommand = 0x28
-	SMB_COM_COPY                  SMBCommand = 0x29
-	SMB_COM_MOVE                  SMBCommand = 0x2A
-	SMB_COM_ECHO                  SMBCommand = 0x2B
-	SMB_COM_WRITE_AND_CLOSE       SMBCommand = 0x2C
-	SMB_COM_OPEN_ANDX             SMBCommand = 0x2D
-	SMB_COM_READ_ANDX             SMBCommand = 0x2E
-	SMB_COM_WRITE_ANDX            SMBCommand = 0x2F
-	SMB_COM_NEW_FILE_SIZE         SMBCommand = 0x30
-	SMB_COM_CLOSE_AND_TREE_DISC   SMBCommand = 0x31
-	SMB_COM_TRANSACTION2          SMBCommand = 0x32
+	SMB_COM_CREATE_DIRECTORY       SMBCommand = 0x00
+	SMB_COM_DELETE_DIRECTORY       SMBCommand = 0x01
+	SMB_COM_OPEN                   SMBCommand = 0x02
+	SMB_COM_CREATE                 SMBCommand = 0x03
+	SMB_COM_CLOSE                  SMBCommand = 0x04
+	SMB_COM_FLUSH                  SMBCommand = 0x05
+	SMB_COM_DELETE                 SMBCommand = 0x06
+	SMB_COM_RENAME                 SMBCommand = 0x07
+	SMB_COM_QUERY_INFORMATION      SMBCommand = 0x08
+	SMB_COM_SET_INFORMATION        SMBCommand = 0x09
+	SMB_COM_READ                   SMBCommand = 0x0A
+	SMB_COM_WRITE                  SMBCommand = 0x0B
+	SMB_COM_LOCK_BYTE_RANGE        SMBCommand = 0x0C
+	SMB_COM_UNLOCK_BYTE_RANGE      SMBCommand = 0x0D
+	SMB_COM_CREATE_TEMPORARY       SMBCommand = 0x0E
+	SMB_COM_CREATE_NEW             SMBCommand = 0x0F
+	SMB_COM_CHECK_DIRECTORY        SMBCommand = 0x10
+	SMB_COM_PROCESS_EXIT           SMBCommand = 0x11
+	SMB_COM_SEEK                   SMBCommand = 0x12
+	SMB_COM_LOCK_AND_READ          SMBCommand = 0x13
+	SMB_COM_WRITE_AND_UNLOCK       SMBCommand = 0x14
+	SMB_COM_READ_RAW               SMBCommand = 0x1A
+	SMB_COM_READ_MPX               SMBCommand = 0x1B
+	SMB_COM_READ_MPX_SECONDARY     SMBCommand = 0x1C
+	SMB_COM_WRITE_RAW              SMBCommand = 0x1D
+	SMB_COM_WRITE_MPX              SMBCommand = 0x1E
+	SMB_COM_WRITE_MPX_SECONDARY    SMBCommand = 0x1F
+	SMB_COM_WRITE_COMPLETE         SMBCommand = 0x20
+	SMB_COM_QUERY_SERVER           SMBCommand = 0x21
+	SMB_COM_SET_INFORMATION2       SMBCommand = 0x22
+	SMB_COM_QUERY_INFORMATION2     SMBCommand = 0x23
+	SMB_COM_LOCKING_ANDX           SMBCommand = 0x24
+	SMB_COM_TRANSACTION            SMBCommand = 0x25
+	SMB_COM_TRANSACTION_SECONDARY  SMBCommand = 0x26
+	SMB_COM_IOCTL                  SMBCommand = 0x27
+	SMB_COM_IOCTL_SECONDARY        SMBCommand = 0x28
+	SMB_COM_COPY                   SMBCommand = 0x29
+	SMB_COM_MOVE                   SMBCommand = 0x2A
+	SMB_COM_ECHO                   SMBCommand = 0x2B
+	SMB_COM_WRITE_AND_CLOSE        SMBCommand = 0x2C
+	SMB_COM_OPEN_ANDX              SMBCommand = 0x2D
+	SMB_COM_READ_ANDX              SMBCommand = 0x2E
+	SMB_COM_WRITE_ANDX             SMBCommand = 0x2F
+	SMB_COM_NEW_FILE_SIZE          SMBCommand = 0x30
+	SMB_COM_CLOSE_AND_TREE_DISC    SMBCommand = 0x31
+	SMB_COM_TRANSACTION2           SMBCommand = 0x32
 	SMB_COM_TRANSACTION2_SECONDARY SMBCommand = 0x33
-	SMB_COM_FIND_CLOSE2           SMBCommand = 0x34
-	SMB_COM_FIND_NOTIFY_CLOSE     SMBCommand = 0x35
-	SMB_COM_TREE_CONNECT          SMBCommand = 0x70
-	SMB_COM_TREE_DISCONNECT       SMBCommand = 0x71
-	SMB_COM_NEGOTIATE             SMBCommand = 0x72
-	SMB_COM_SESSION_SETUP_ANDX    SMBCommand = 0x73
-	SMB_COM_LOGOFF_ANDX           SMBCommand = 0x74
-	SMB_COM_TREE_CONNECT_ANDX     SMBCommand = 0x75
+	SMB_COM_FIND_CLOSE2            SMBCommand = 0x34
+	SMB_COM_FIND_NOTIFY_CLOSE      SMBCommand = 0x35
+	SMB_COM_TREE_CONNECT           SMBCommand = 0x70
+	SMB_COM_TREE_DISCONNECT        SMBCommand = 0x71
+	SMB_COM_NEGOTIATE              SMBCommand = 0x72
+	SMB_COM_SESSION_SETUP_ANDX     SMBCommand = 0x73
+	SMB_COM_LOGOFF_ANDX            SMBCommand = 0x74
+	SMB_COM_TREE_CONNECT_ANDX      SMBCommand = 0x75
 	SMB_COM_QUERY_INFORMATION_DISK SMBCommand = 0x80
-	SMB_COM_SEARCH                SMBCommand = 0x81
-	SMB_COM_FIND                  SMBCommand = 0x82
-	SMB_COM_FIND_UNIQUE           SMBCommand = 0x83
-	SMB_COM_FIND_CLOSE            SMBCommand = 0x84
-	SMB_COM_NT_TRANSACT           SMBCommand = 0xA0
-	SMB_COM_NT_TRANSACT_SECONDARY SMBCommand = 0xA1
-	SMB_COM_NT_CREATE_ANDX        SMBCommand = 0xA2
-	SMB_COM_NT_CANCEL             SMBCommand = 0xA4
-	SMB_COM_NT_RENAME             SMBCommand = 0xA5
-	SMB_COM_OPEN_PRINT_FILE       SMBCommand = 0xC0
-	SMB_COM_WRITE_PRINT_FILE      SMBCommand = 0xC1
-	SMB_COM_CLOSE_PRINT_FILE      SMBCommand = 0xC2
-	SMB_COM_GET_PRINT_QUEUE       SMBCommand = 0xC3
-	SMB_COM_READ_BULK             SMBCommand = 0xD8
-	SMB_COM_WRITE_BULK            SMBCommand = 0xD9
-	SMB_COM_WRITE_BULK_DATA       SMBCommand = 0xDA
+	SMB_COM_SEARCH                 SMBCommand = 0x81
+	SMB_COM_FIND                   SMBCommand = 0x82
+	SMB_COM_FIND_UNIQUE            SMBCommand = 0x83
+	SMB_COM_FIND_CLOSE             SMBCommand = 0x84
+	SMB_COM_NT_TRANSACT            SMBCommand = 0xA0
+	SMB_COM_NT_TRANSACT_SECONDARY  SMBCommand = 0xA1
+	SMB_COM_NT_CREATE_ANDX         SMBCommand = 0xA2
+	SMB_COM_NT_CANCEL              SMBCommand = 0xA4
+	SMB_COM_NT_RENAME              SMBCommand = 0xA5
+	SMB_COM_OPEN_PRINT_FILE        SMBCommand = 0xC0
+	SMB_COM_WRITE_PRINT_FILE       SMBCommand = 0xC1
+	SMB_COM_CLOSE_PRINT_FILE       SMBCommand = 0xC2
+	SMB_COM_GET_PRINT_QUEUE        SMBCommand = 0xC3
+	SMB_COM_READ_BULK              SMBCommand = 0xD8
+	SMB_COM_WRITE_BULK             SMBCommand = 0xD9
+	SMB_COM_WRITE_BULK_DATA        SMBCommand = 0xDA
 )
 
 // String returns the command name
@@ -250,51 +250,51 @@ func (c SMBCommand) String() string {
 
 // SMB Flags
 const (
-	SMB_FLAGS_LOCK_AND_READ_OK     = 0x01
-	SMB_FLAGS_BUF_AVAIL            = 0x02
-	SMB_FLAGS_CASE_INSENSITIVE     = 0x08
-	SMB_FLAGS_CANONICALIZED_PATHS  = 0x10
-	SMB_FLAGS_OPLOCK               = 0x20
-	SMB_FLAGS_OPBATCH              = 0x40
-	SMB_FLAGS_REPLY                = 0x80
+	SMB_FLAGS_LOCK_AND_READ_OK    = 0x01
+	SMB_FLAGS_BUF_AVAIL           = 0x02
+	SMB_FLAGS_CASE_INSENSITIVE    = 0x08
+	SMB_FLAGS_CANONICALIZED_PATHS = 0x10
+	SMB_FLAGS_OPLOCK              = 0x20
+	SMB_FLAGS_OPBATCH             = 0x40
+	SMB_FLAGS_REPLY               = 0x80
 )
 
 // SMB Flags2
 const (
-	SMB_FLAGS2_LONG_NAMES          = 0x0001
-	SMB_FLAGS2_EAS                 = 0x0002
-	SMB_FLAGS2_SECURITY_SIGNATURE  = 0x0004
-	SMB_FLAGS2_IS_LONG_NAME        = 0x0040
-	SMB_FLAGS2_DFS                 = 0x1000
-	SMB_FLAGS2_PAGING_IO           = 0x2000
-	SMB_FLAGS2_NT_STATUS           = 0x4000
-	SMB_FLAGS2_UNICODE             = 0x8000
+	SMB_FLAGS2_LONG_NAMES         = 0x0001
+	SMB_FLAGS2_EAS                = 0x0002
+	SMB_FLAGS2_SECURITY_SIGNATURE = 0x0004
+	SMB_FLAGS2_IS_LONG_NAME       = 0x0040
+	SMB_FLAGS2_DFS                = 0x1000
+	SMB_FLAGS2_PAGING_IO          = 0x2000
+	SMB_FLAGS2_NT_STATUS          = 0x4000
+	SMB_FLAGS2_UNICODE            = 0x8000
 )
 
 // SMBProtocol represents an SMB v1 protocol packet
 type SMBProtocol struct {
 	layers.BaseLayer
-	
+
 	// SMB v1 Header (32 bytes + variable)
-	Protocol        [4]byte // Should be 0xFF,'S','M','B'
-	Command         SMBCommand
-	NTStatus        uint32  // or Error Class/Code in older dialects
-	Flags           uint8
-	Flags2          uint16
-	PIDHigh         uint16
-	Signature       [8]byte // Security signature
-	Reserved        uint16
-	TID             uint16  // Tree ID
-	PID             uint16  // Process ID
-	UID             uint16  // User ID
-	MID             uint16  // Multiplex ID
-	
+	Protocol  [4]byte // Should be 0xFF,'S','M','B'
+	Command   SMBCommand
+	NTStatus  uint32 // or Error Class/Code in older dialects
+	Flags     uint8
+	Flags2    uint16
+	PIDHigh   uint16
+	Signature [8]byte // Security signature
+	Reserved  uint16
+	TID       uint16 // Tree ID
+	PID       uint16 // Process ID
+	UID       uint16 // User ID
+	MID       uint16 // Multiplex ID
+
 	// Variable part
-	WordCount       uint8
-	ParameterWords  []byte  // WordCount * 2 bytes
-	ByteCount       uint16
-	ByteData        []byte  // ByteCount bytes
-	
+	WordCount      uint8
+	ParameterWords []byte // WordCount * 2 bytes
+	ByteCount      uint16
+	ByteData       []byte // ByteCount bytes
+
 	// Parsed transaction data (for TRANSACTION commands)
 	TransactionName string
 	TransactionData []byte
@@ -315,12 +315,12 @@ func (s *SMBProtocol) NextLayerType() gopacket.LayerType {
 	// Check if this is a TRANSACTION command with a mailslot
 	if s.Command == SMB_COM_TRANSACTION || s.Command == SMB_COM_TRANSACTION2 {
 		// Check if transaction name indicates a mailslot
-		if len(s.TransactionName) > 0 && 
-		   (s.TransactionName[0] == '\\' || s.TransactionName[0] == '/') {
+		if len(s.TransactionName) > 0 &&
+			(s.TransactionName[0] == '\\' || s.TransactionName[0] == '/') {
 			return LayerTypeSMBMailSlot
 		}
 	}
-	
+
 	return gopacket.LayerTypePayload
 }
 
@@ -331,7 +331,7 @@ func (s *SMBProtocol) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) e
 		log.Warn().Int("length", len(data)).Msg("SMB packet too short")
 		return errors.New("SMB packet too short")
 	}
-	
+
 	// Check magic bytes
 	copy(s.Protocol[:], data[0:4])
 	if s.Protocol[0] != 0xFF || s.Protocol[1] != 'S' || s.Protocol[2] != 'M' || s.Protocol[3] != 'B' {
@@ -340,7 +340,7 @@ func (s *SMBProtocol) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) e
 			Msg("Invalid SMB magic bytes")
 		return errors.New("invalid SMB magic bytes")
 	}
-	
+
 	// Parse header
 	s.Command = SMBCommand(data[4])
 	s.NTStatus = binary.LittleEndian.Uint32(data[5:9])
@@ -353,20 +353,20 @@ func (s *SMBProtocol) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) e
 	s.PID = binary.LittleEndian.Uint16(data[26:28])
 	s.UID = binary.LittleEndian.Uint16(data[28:30])
 	s.MID = binary.LittleEndian.Uint16(data[30:32])
-	
+
 	offset := 32
-	
+
 	// Check if we have enough data for WordCount
 	if len(data) < offset+1 {
 		s.Contents = data
 		s.Payload = nil
 		return nil
 	}
-	
+
 	// Parse WordCount and parameters
 	s.WordCount = data[offset]
 	offset++
-	
+
 	paramSize := int(s.WordCount) * 2
 	if len(data) < offset+paramSize {
 		log.Warn().
@@ -377,21 +377,21 @@ func (s *SMBProtocol) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) e
 		s.Payload = nil
 		return nil
 	}
-	
+
 	s.ParameterWords = data[offset : offset+paramSize]
 	offset += paramSize
-	
+
 	// Check if we have ByteCount
 	if len(data) < offset+2 {
 		s.Contents = data[:offset]
 		s.Payload = nil
 		return nil
 	}
-	
+
 	// Parse ByteCount and data
 	s.ByteCount = binary.LittleEndian.Uint16(data[offset : offset+2])
 	offset += 2
-	
+
 	if len(data) < offset+int(s.ByteCount) {
 		log.Warn().
 			Int("expected", int(s.ByteCount)).
@@ -402,22 +402,22 @@ func (s *SMBProtocol) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) e
 		s.Payload = nil
 		return nil
 	}
-	
+
 	s.ByteData = data[offset : offset+int(s.ByteCount)]
 	offset += int(s.ByteCount)
-	
+
 	// Parse transaction-specific data
 	if s.Command == SMB_COM_TRANSACTION || s.Command == SMB_COM_TRANSACTION2 {
 		s.parseTransaction()
 	}
-	
+
 	s.Contents = data[:offset]
 	if len(data) > offset {
 		s.Payload = data[offset:]
 	} else {
 		s.Payload = nil
 	}
-	
+
 	return nil
 }
 
@@ -441,19 +441,19 @@ func (s *SMBProtocol) parseTransaction() {
 	//   Word 14: SetupCount
 	//   Word 15: Reserved3
 	//   Words 16+: Setup words
-	
+
 	if len(s.ParameterWords) < 30 { // Need at least 15 words
 		return
 	}
-	
+
 	// Extract setup count and setup words
 	setupCount := s.ParameterWords[28] // Word 14 low byte
-	setupStart := 30                    // After word 15
-	
+	setupStart := 30                   // After word 15
+
 	if setupCount > 0 && len(s.ParameterWords) >= setupStart+int(setupCount)*2 {
 		// Setup words are present - not needed for basic parsing
 	}
-	
+
 	// Extract transaction name from ByteData
 	// ByteData contains: Name (null-terminated string) + padding + params + data
 	if len(s.ByteData) > 0 {
@@ -469,21 +469,41 @@ func (s *SMBProtocol) parseTransaction() {
 			s.TransactionName = string(s.ByteData[:nameEnd])
 		}
 	}
-	
+
 	// Extract data portion (for mailslot payload)
+	// The offsets in the SMB transaction are absolute from the start of the SMB message
+	// We need to extract where ByteData starts to calculate relative offset
 	if len(s.ParameterWords) >= 26 {
-		dataCount := binary.LittleEndian.Uint16(s.ParameterWords[24:26])  // Word 12
-		dataOffset := binary.LittleEndian.Uint16(s.ParameterWords[26:28]) // Word 13
-		
-		// DataOffset is relative to start of SMB header
-		// We need to calculate where that is in ByteData
-		if dataOffset >= 32 { // Must be after SMB header
-			relativeOffset := int(dataOffset) - 32 - 1 - len(s.ParameterWords) - 2
-			if relativeOffset >= 0 && relativeOffset < len(s.ByteData) {
-				endOffset := relativeOffset + int(dataCount)
-				if endOffset <= len(s.ByteData) {
-					s.TransactionData = s.ByteData[relativeOffset:endOffset]
+		// Word 12 (dataCount) and Word 13 (dataOffset) - not directly used with new approach
+		// dataCount := binary.LittleEndian.Uint16(s.ParameterWords[24:26])  // Word 12
+		// dataOffset := binary.LittleEndian.Uint16(s.ParameterWords[26:28]) // Word 13
+
+		// DataOffset is absolute from SMB header start
+		// ByteData starts at: 32 (header) + 1 (wordcount) + wordcount*2 (params) + 2 (bytecount)
+		// This is complex, so let's take a simpler approach:
+		// Data offset points into the full SMB message, so if it's past where we are now,
+		// it should be in our payload
+
+		// For now, use the transaction name to determine the mailslot type
+		// and just take all remaining ByteData as the payload if it looks like CIFS Browser data
+		if len(s.ByteData) > 0 {
+			// Skip the transaction name and any padding
+			dataStart := 0
+			for i, b := range s.ByteData {
+				if b == 0 {
+					dataStart = i + 1
+					break
 				}
+			}
+
+			// Skip alignment padding (usually one byte)
+			if dataStart < len(s.ByteData) && s.ByteData[dataStart] == 0 {
+				dataStart++
+			}
+
+			// The rest is the transaction data
+			if dataStart < len(s.ByteData) {
+				s.TransactionData = s.ByteData[dataStart:]
 			}
 		}
 	}
@@ -496,9 +516,9 @@ func (s *SMBProtocol) IsResponse() bool {
 
 // IsTransactionCommand returns true if the command is a transaction type
 func IsTransactionCommand(cmd SMBCommand) bool {
-	return cmd == SMB_COM_TRANSACTION || 
-	       cmd == SMB_COM_TRANSACTION2 || 
-	       cmd == SMB_COM_NT_TRANSACT
+	return cmd == SMB_COM_TRANSACTION ||
+		cmd == SMB_COM_TRANSACTION2 ||
+		cmd == SMB_COM_NT_TRANSACT
 }
 
 // GetCommandName returns the command name
@@ -526,13 +546,13 @@ func DecodeSMBProtocol(data []byte, p gopacket.PacketBuilder) error {
 	if next == gopacket.LayerTypeZero {
 		return nil
 	}
-	
+
 	// For mailslot layer, we need to create a custom packet builder that will
 	// decode the transaction data (which contains the actual mailslot payload)
 	// The MailSlot decoder will then extract the CIFS Browser data
 	// Since we need to pass SMB context, we'll rely on the MailSlot decoder
 	// to look back and find the SMB layer
-	
+
 	// The transaction data contains the mailslot payload which should be
 	// passed to the next decoder (MailSlot, then CIFS Browser)
 	if next == LayerTypeSMBMailSlot && len(smb.TransactionData) > 0 {
@@ -543,7 +563,7 @@ func DecodeSMBProtocol(data []byte, p gopacket.PacketBuilder) error {
 			return err
 		}
 		p.AddLayer(mailslot)
-		
+
 		// Now continue with the next layer (CIFS Browser)
 		nextNext := mailslot.NextLayerType()
 		if nextNext == gopacket.LayerTypeZero {
@@ -551,7 +571,7 @@ func DecodeSMBProtocol(data []byte, p gopacket.PacketBuilder) error {
 		}
 		return p.NextDecoder(nextNext)
 	}
-	
+
 	return p.NextDecoder(next)
 }
 

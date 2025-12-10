@@ -184,6 +184,10 @@ type GenericCIFSBrowser struct {
 	Payload []byte
 }
 
+func (g *GenericCIFSBrowser) LayerType() gopacket.LayerType {
+	return LayerTypeCIFSBrowser
+}
+
 // parseServerTypeFlags parses the 4-byte server type flags field
 func parseServerTypeFlags(data []byte) ServerTypeFlags {
 	if len(data) < 4 {
@@ -510,10 +514,6 @@ func (c *CIFSBrowserBecomeBackupMsg) LayerType() gopacket.LayerType {
 	return LayerTypeCIFSBrowser
 }
 
-func (c *GenericCIFSBrowser) LayerType() gopacket.LayerType {
-	return LayerTypeCIFSBrowser
-}
-
 // NextLayerType returns the next layer type (none for CIFS Browser)
 func (c *CIFSBrowserAnnouncement) NextLayerType() gopacket.LayerType {
 	return gopacket.LayerTypeZero
@@ -604,7 +604,30 @@ func DecodeCIFSBrowserMessage(data []byte) (interface{}, error) {
 	}
 }
 
+// DecodeCIFSBrowserLayer is the gopacket decoder function for CIFS Browser layers
+func DecodeCIFSBrowserLayer(data []byte, p gopacket.PacketBuilder) error {
+	if len(data) < 1 {
+		return errors.New("CIFS Browser message too short")
+	}
+
+	cmdType := CIFSBrowserCommandType(data[0])
+
+	browser := &GenericCIFSBrowser{
+		Command: cmdType,
+		Payload: data[1:],
+	}
+
+	browser.Contents = data
+	browser.Payload = nil // GenericCIFSBrowser doesn't have further layers
+
+	p.AddLayer(browser)
+	return p.NextDecoder(gopacket.LayerTypePayload)
+}
+
 // init initializes the CIFS Browser layer type
 func init() {
-	LayerTypeCIFSBrowser = gopacket.OverrideLayerType(150, gopacket.LayerTypeMetadata{Name: "CIFSBrowser"})
+	LayerTypeCIFSBrowser = gopacket.OverrideLayerType(150, gopacket.LayerTypeMetadata{
+		Name:    "CIFSBrowser",
+		Decoder: gopacket.DecodeFunc(DecodeCIFSBrowserLayer),
+	})
 }

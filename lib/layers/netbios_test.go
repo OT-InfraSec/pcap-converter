@@ -120,7 +120,7 @@ func TestNetBIOSDatagramParsing(t *testing.T) {
 	sourceIP := [4]byte{192, 168, 1, 100}
 	payload := []byte{0xFF, 'S', 'M', 'B', 0x00, 0x01, 0x02, 0x03}
 	
-	data := buildNetBIOSDatagramPacket(NB_DATAGRAM, sourceIP, "SOURCE", "DESTINATION", payload)
+	data := buildNetBIOSDatagramPacket(NetBIOSCommand(0x10), sourceIP, "SOURCE", "DESTINATION", payload)
 
 	// Decode the packet
 	packet := gopacket.NewPacket(data, LayerTypeNetBIOS, gopacket.Default)
@@ -133,8 +133,8 @@ func TestNetBIOSDatagramParsing(t *testing.T) {
 	netbios := netbiosLayer.(*NetBIOS)
 
 	// Verify header fields
-	if netbios.MessageType != NB_DATAGRAM {
-		t.Errorf("MessageType = %v, want %v", netbios.MessageType, NB_DATAGRAM)
+	if netbios.MessageType != NetBIOSCommand(0x10) {
+		t.Errorf("MessageType = %v, want 0x10", netbios.MessageType)
 	}
 
 	// Verify source IP
@@ -173,7 +173,7 @@ func TestNetBIOSBroadcastDatagram(t *testing.T) {
 	sourceIP := [4]byte{192, 168, 1, 255}
 	payload := []byte{0xFF, 'S', 'M', 'B'}
 	
-	data := buildNetBIOSDatagramPacket(NB_DATAGRAM_BCAST, sourceIP, "BROADCAST", "*", payload)
+	data := buildNetBIOSDatagramPacket(NetBIOSCommand(0x12), sourceIP, "BROADCAST", "*", payload)
 
 	// Decode
 	netbios := &NetBIOS{}
@@ -183,8 +183,8 @@ func TestNetBIOSBroadcastDatagram(t *testing.T) {
 		t.Fatalf("Failed to decode broadcast datagram: %v", err)
 	}
 
-	if netbios.MessageType != NB_DATAGRAM_BCAST {
-		t.Errorf("MessageType = %v, want NB_DATAGRAM_BCAST", netbios.MessageType)
+	if netbios.MessageType != NetBIOSCommand(0x12) {
+		t.Errorf("MessageType = %v, want NetBIOSCommand(0x12)", netbios.MessageType)
 	}
 
 	if netbios.SourceName != "BROADCAST" {
@@ -320,19 +320,19 @@ func TestNetBIOSNextLayerType(t *testing.T) {
 	}{
 		{
 			name:     "Datagram with SMB payload",
-			msgType:  NB_DATAGRAM,
+			msgType:  NetBIOSCommand(0x10),
 			payload:  []byte{0xFF, 'S', 'M', 'B', 0x25},
 			expected: LayerTypeSMBProtocol,
 		},
 		{
 			name:     "Datagram with non-SMB payload",
-			msgType:  NB_DATAGRAM,
+			msgType:  NetBIOSCommand(0x10),
 			payload:  []byte{0x00, 0x01, 0x02, 0x03},
 			expected: gopacket.LayerTypePayload,
 		},
 		{
 			name:     "Broadcast Datagram with SMB payload",
-			msgType:  NB_DATAGRAM_BCAST,
+			msgType:  NetBIOSCommand(0x12),
 			payload:  []byte{0xFF, 'S', 'M', 'B'},
 			expected: LayerTypeSMBProtocol,
 		},
@@ -344,7 +344,7 @@ func TestNetBIOSNextLayerType(t *testing.T) {
 		},
 		{
 			name:     "Empty payload",
-			msgType:  NB_DATAGRAM,
+			msgType:  NetBIOSCommand(0x10),
 			payload:  []byte{},
 			expected: gopacket.LayerTypePayload,
 		},
