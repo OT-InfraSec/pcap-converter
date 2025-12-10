@@ -920,11 +920,13 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 			info.AdditionalData["command"] = announcement.Command.String()
 			info.AdditionalData["os_version"] = fmt.Sprintf("%d.%d", announcement.OSMajorVersion, announcement.OSMinorVersion)
 		}
+	} else {
+		fmt.Println("CIFS Browser layer not found in packet")
 	}
 
 	// Determine port direction
 	if err := p.extractPortInfo(packet, info, []uint16{137}); err != nil {
-		info.Confidence = 0.7
+		info.Confidence -= 0.2
 	} else {
 		info.Confidence = 0.9
 	}
