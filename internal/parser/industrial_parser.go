@@ -826,7 +826,7 @@ func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet
 		if udp.SrcPort == 2222 {
 			return "inbound"
 		}
-		if udp.DstPort == 2222 {
+		if udp.DstPort == 2222 || udp.DstPort == 138 {
 			return "outbound"
 		}
 	}
@@ -900,13 +900,15 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 		DeviceIdentity: make(map[string]interface{}),
 		SecurityInfo:   make(map[string]interface{}),
 		AdditionalData: make(map[string]interface{}),
+		Port:           uint16(packet.TransportLayer().(*layers.UDP).SrcPort),
+		Direction:      p.determineDirection(packet),
 	}
 
 	// Try to extract CIFS Browser specific data
 	// Check for CIFS Browser Announcement layer (the most common message type)
 	if announcementLayer := packet.Layer(lib_layers.LayerTypeCIFSBrowser); announcementLayer != nil {
 		if announcement, ok := announcementLayer.(*lib_layers.CIFSBrowserAnnouncement); ok {
-			info.Confidence = 0.95
+			info.Confidence = 1
 
 			// We can't directly use the iec62443 package functions here (would create circular dependency)
 			// Instead, extract basic information
@@ -919,16 +921,18 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 
 			info.AdditionalData["command"] = announcement.Command.String()
 			info.AdditionalData["os_version"] = fmt.Sprintf("%d.%d", announcement.OSMajorVersion, announcement.OSMinorVersion)
+		} else {
+			fmt.Println("Failed to cast CIFS Browser layer to Announcement")
 		}
 	} else {
 		fmt.Println("CIFS Browser layer not found in packet")
 	}
 
 	// Determine port direction
-	if err := p.extractPortInfo(packet, info, []uint16{137}); err != nil {
+	if err := p.extractPortInfo(packet, info, []uint16{137, 138}); err != nil {
 		info.Confidence -= 0.2
 	} else {
-		info.Confidence = 0.9
+		info.Confidence = 1
 	}
 
 	// Mark as network discovery protocol
