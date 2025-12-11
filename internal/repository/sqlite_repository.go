@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/helper"
@@ -25,8 +26,12 @@ type SQLiteRepository struct {
 }
 
 var sqliteRepositoryCache = make(map[string]*SQLiteRepository)
+var mutex = &sync.Mutex{}
 
 func NewSQLiteRepository(path string) (*SQLiteRepository, error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	if repo, exists := sqliteRepositoryCache[path]; exists {
 		return repo, nil
 	}
