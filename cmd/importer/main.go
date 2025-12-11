@@ -78,10 +78,12 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 			if err := provider.Parser.ParseFile(); err != nil {
 				return err
 			}
+			log.Printf("Packet parsing completed, processing DNS records...")
 			// FIXME: not restricting to tenantID here
 			if err := provider.DNSProcessor.Process(provider.Repository); err != nil {
 				return err
 			}
+			log.Printf("DNS processing completed")
 
 			// Perform industrial device analysis if enabled
 			if enableIndustrialAnalysis {
@@ -91,6 +93,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 					// Don't fail the entire import, just log the error
 				}
 			}
+			log.Printf("Finalizing database operations...")
 
 			// Store the application version in the database
 			appVersion := version.GetVersion()

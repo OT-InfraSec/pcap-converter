@@ -55,22 +55,26 @@ type GopacketParser struct {
 
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 
+	// Collect protocol usage stats during parsing to defer DB writes
+	protocolUsageStats []*model2.ProtocolUsageStats
+
 	repo             repository.Repository
 	industrialParser IndustrialProtocolParser
 }
 
 func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID string) *GopacketParser {
 	parser := &GopacketParser{
-		PcapFile:         pcapFile,
-		TenantID:         tenantID,
-		devices:          make(map[string]*model2.Device),
-		flows:            make(map[string]*model2.Flow),
-		services:         make(map[string]*model2.Service),
-		dnsQueries:       make(map[string]*DNSQuery),
-		ssdpQueries:      make(map[string]*SSDPQuery),
-		httpRingBuffer:   helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
-		repo:             repo,
-		industrialParser: NewIndustrialProtocolParser(),
+		PcapFile:           pcapFile,
+		TenantID:           tenantID,
+		devices:            make(map[string]*model2.Device),
+		flows:              make(map[string]*model2.Flow),
+		services:           make(map[string]*model2.Service),
+		dnsQueries:         make(map[string]*DNSQuery),
+		ssdpQueries:        make(map[string]*SSDPQuery),
+		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
+		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),      // Collect stats for deferred writing
+		repo:               repo,
+		industrialParser:   NewIndustrialProtocolParser(),
 	}
 
 	// Import existing devices from repository
@@ -1783,26 +1787,20 @@ func (p *GopacketParser) ParseFile() error {
 				if srcIP != "" {
 					p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
 
-					// Collect protocol usage statistics for source device
+					// Collect protocol usage statistics for source device (defer DB write)
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
-						// Store protocol usage statistics in repository
-						if statsErr = p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
-							// Log error but continue processing
-							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", srcIP, statsErr)
-						}
+						// Append to deferred stats list instead of writing immediately
+						p.protocolUsageStats = append(p.protocolUsageStats, stats)
 					}
 				}
 				// Update destination device with industrial protocol info
 				if dstIP != "" {
 					p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
 
-					// Collect protocol usage statistics for destination device
+					// Collect protocol usage statistics for destination device (defer DB write)
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
-						// Store protocol usage statistics in repository
-						if statsErr = p.repo.SaveProtocolUsageStats(stats); statsErr != nil {
-							// Log error but continue processing
-							fmt.Printf("Warning: Failed to save protocol usage stats for device %s: %v\n", dstIP, statsErr)
-						}
+						// Append to deferred stats list instead of writing immediately
+						p.protocolUsageStats = append(p.protocolUsageStats, stats)
 					}
 				}
 			}
@@ -1921,6 +1919,13 @@ func (p *GopacketParser) ParseFile() error {
 	if serviceCount > 0 {
 		if err = p.repo.UpsertServices(serviceBatch); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
+		}
+	}
+
+	// Save all collected protocol usage statistics in batch (deferred from main loop)
+	if len(p.protocolUsageStats) > 0 {
+		if err = p.repo.SaveProtocolUsageStatsMultiple(p.protocolUsageStats); err != nil {
+			return fmt.Errorf("failed to save protocol usage stats: %w", err)
 		}
 	}
 
