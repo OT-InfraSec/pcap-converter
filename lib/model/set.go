@@ -4,6 +4,7 @@ import "strings"
 
 type SetInterface interface {
 	Add(value string)
+	AddAll(value ...string)
 	Remove(value string)
 	Contains(value string) bool
 	Size() int
@@ -17,6 +18,23 @@ type SetInterface interface {
 // Set is a collection of unique elements
 type Set struct {
 	elements map[string]struct{}
+}
+
+func SetFromSlice(values []string) *Set {
+	s := NewSet()
+	for _, v := range values {
+		s.Add(v)
+	}
+	return s
+}
+
+func (s *Set) AddAll(value ...string) {
+	if s == nil {
+		return
+	}
+	for _, v := range value {
+		s.Add(v)
+	}
 }
 
 // NewSet creates a new set
@@ -49,6 +67,9 @@ func (s *Set) Size() int {
 
 // List returns all elements in the set as a slice
 func (s *Set) List() []string {
+	if s == nil {
+		return []string{}
+	}
 	keys := make([]string, 0, len(s.elements))
 	for key := range s.elements {
 		keys = append(keys, key)

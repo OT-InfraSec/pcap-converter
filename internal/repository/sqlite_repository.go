@@ -324,8 +324,8 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.AddressScope,
 		macAddressesList,
 		device.AdditionalData,
-		sliceToJSON(device.ProtocolList),
-		sliceToJSON(device.DNSNames),
+		sliceToJSON(device.ProtocolList.List()),
+		sliceToJSON(device.DNSNames.List()),
 		device.Hostname,
 		device.DeviceType,
 		device.Vendor,
@@ -378,8 +378,8 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 			device.MACAddressSet.Add(mac)
 		}
 	}
-	device.ProtocolList = jsonArrayToSlice(protocolListStr)
-	device.DNSNames = jsonArrayToSlice(dnsNamesStr)
+	device.ProtocolList = model2.SetFromSlice(jsonArrayToSlice(protocolListStr))
+	device.DNSNames = model2.SetFromSlice(jsonArrayToSlice(dnsNamesStr))
 	device.Hostname = hostname
 	device.DeviceType = deviceType
 	device.Vendor = vendor

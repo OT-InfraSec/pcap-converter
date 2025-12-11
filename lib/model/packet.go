@@ -165,8 +165,8 @@ type Device struct {
 	AddressScope      string // IPv4 or IPv6
 	MACAddressSet     *MACAddressSet
 	AdditionalData    string // JSON string
-	ProtocolList      []string
-	DNSNames          []string
+	ProtocolList      *Set
+	DNSNames          *Set
 	Hostname          string
 	DeviceType        string
 	Vendor            string

@@ -8,6 +8,19 @@ type MACAddressSet struct {
 	set *Set
 }
 
+func (m *MACAddressSet) FromSlice(values []string) {
+	m.set = SetFromSlice(values)
+}
+
+func (m *MACAddressSet) AddAll(value ...string) {
+	if m.set == nil {
+		m.set = NewSet()
+	}
+	for _, v := range value {
+		m.set.Add(v)
+	}
+}
+
 func NewMACAddressSet() *MACAddressSet {
 	return &MACAddressSet{
 		set: NewSet(),

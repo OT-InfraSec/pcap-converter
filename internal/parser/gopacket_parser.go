@@ -486,7 +486,10 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 		protocolSummary["has_configuration"] = p.hasConfiguration(allProtocols)
 		additionalData["protocol_summary"] = protocolSummary
 
-		device.ProtocolList = append(device.ProtocolList, p.extractProtocolNames(allProtocols)...)
+		if device.ProtocolList == nil {
+			device.ProtocolList = model2.NewSet()
+		}
+		device.ProtocolList.AddAll(p.extractProtocolNames(allProtocols)...)
 	}
 
 	// Update device additional data
