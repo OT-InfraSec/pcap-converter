@@ -24,9 +24,19 @@ type SQLiteRepository struct {
 	errorHandler FlowErrorHandler
 }
 
+var sqliteRepositoryCache = make(map[string]*SQLiteRepository)
+
 func NewSQLiteRepository(path string) (*SQLiteRepository, error) {
+	if repo, exists := sqliteRepositoryCache[path]; exists {
+		return repo, nil
+	}
 	// use default canonicalizer
-	return NewSQLiteRepositoryWithCanonicalizer(path, helper.NewFlowCanonicalizer())
+	repo, err := NewSQLiteRepositoryWithCanonicalizer(path, helper.NewFlowCanonicalizer())
+	if err != nil {
+		return nil, err
+	}
+	sqliteRepositoryCache[path] = repo
+	return repo, nil
 }
 
 func NewSQLiteRepositoryWithCanonicalizer(path string, canonicalizer helper.FlowCanonicalizer) (*SQLiteRepository, error) {
@@ -193,8 +203,7 @@ func (r *SQLiteRepository) createTables() error {
 			first_seen DATETIME NOT NULL,
 			last_seen DATETIME NOT NULL,
 			communication_role TEXT NOT NULL,
-			ports_used TEXT NOT NULL,
-			UNIQUE (device_address, protocol)
+			ports_used TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS communication_patterns (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
