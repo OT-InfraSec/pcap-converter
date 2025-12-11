@@ -227,7 +227,7 @@ func (p *GopacketParser) upsertDevice(address string, addressType string, timest
 }
 
 // updateFlow updates or creates a flow
-func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
+func (p *GopacketParser) updateFlow(src, dst, protocol, oldProtocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
 	// Create flow key based on addresses (which may include ports)
 	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
 
@@ -244,57 +244,76 @@ func (p *GopacketParser) updateFlow(src, dst, protocol string, timestamp time.Ti
 
 	flow, exists := p.flows[flowKey]
 	if !exists {
-		srcPortNum, err := strconv.Atoi(srcPort)
-		if err != nil {
-			srcPortNum = 0
+		flow = p.createNewFlow(src, dst, protocol, srcPort, dstPort, flow, packetSize, timestamp, packetID, sourcePortsSet, destinationPortsSet, flowKey)
+
+		if oldProtocol != "" && oldProtocol != protocol {
+			oldFlowKey := fmt.Sprintf("%s:%s:%s", src, dst, oldProtocol)
+			oldFlow, oldExists := p.flows[oldFlowKey]
+			if oldExists {
+				// Migrate data from old flow to new flow
+				oldFlow.Protocol = protocol
+				p.updateExistingFlow(oldFlow, packetSize, timestamp, packetID, srcPort, dstPort)
+			}
 		}
-		dstPortNum, err := strconv.Atoi(dstPort)
-		if err != nil {
-			dstPortNum = 0
-		}
-		flow = &model2.Flow{
-			TenantID:         p.TenantID,
-			SrcIP:            net.ParseIP(src),
-			DstIP:            net.ParseIP(dst),
-			SrcPort:          srcPortNum,
-			DstPort:          dstPortNum,
-			Protocol:         protocol,
-			PacketCount:      1,
-			ByteCount:        int64(packetSize),
-			FirstSeen:        timestamp,
-			LastSeen:         timestamp,
-			PacketRefs:       []int64{packetID},
-			MinPacketSize:    packetSize,
-			MaxPacketSize:    packetSize,
-			SourcePorts:      sourcePortsSet,
-			DestinationPorts: destinationPortsSet,
-		}
-		p.flows[flowKey] = flow
 	} else {
-		flow.PacketCount++
-		flow.ByteCount += int64(packetSize)
-		if timestamp.Before(flow.FirstSeen) {
-			flow.FirstSeen = timestamp
-		}
-		if timestamp.After(flow.LastSeen) {
-			flow.LastSeen = timestamp
-		}
-		flow.PacketRefs = append(flow.PacketRefs, packetID)
-		if packetSize < flow.MinPacketSize {
-			flow.MinPacketSize = packetSize
-		}
-		if packetSize > flow.MaxPacketSize {
-			flow.MaxPacketSize = packetSize
-		}
-		// Add ports to existing sets
-		if srcPort != "" {
-			flow.SourcePorts.Add(srcPort)
-		}
-		if dstPort != "" {
-			flow.DestinationPorts.Add(dstPort)
-		}
+		p.updateExistingFlow(flow, packetSize, timestamp, packetID, srcPort, dstPort)
 	}
 	return flow
+}
+
+func (p *GopacketParser) createNewFlow(src string, dst string, protocol string, srcPort string, dstPort string, flow *model2.Flow, packetSize int, timestamp time.Time, packetID int64, sourcePortsSet *model2.Set, destinationPortsSet *model2.Set, flowKey string) *model2.Flow {
+	srcPortNum, err := strconv.Atoi(srcPort)
+	if err != nil {
+		srcPortNum = 0
+	}
+	dstPortNum, err := strconv.Atoi(dstPort)
+	if err != nil {
+		dstPortNum = 0
+	}
+	flow = &model2.Flow{
+		TenantID:         p.TenantID,
+		SrcIP:            net.ParseIP(src),
+		DstIP:            net.ParseIP(dst),
+		SrcPort:          srcPortNum,
+		DstPort:          dstPortNum,
+		Protocol:         protocol,
+		PacketCount:      1,
+		ByteCount:        int64(packetSize),
+		FirstSeen:        timestamp,
+		LastSeen:         timestamp,
+		PacketRefs:       []int64{packetID},
+		MinPacketSize:    packetSize,
+		MaxPacketSize:    packetSize,
+		SourcePorts:      sourcePortsSet,
+		DestinationPorts: destinationPortsSet,
+	}
+	p.flows[flowKey] = flow
+	return flow
+}
+
+func (p *GopacketParser) updateExistingFlow(flow *model2.Flow, packetSize int, timestamp time.Time, packetID int64, srcPort string, dstPort string) {
+	flow.PacketCount++
+	flow.ByteCount += int64(packetSize)
+	if timestamp.Before(flow.FirstSeen) {
+		flow.FirstSeen = timestamp
+	}
+	if timestamp.After(flow.LastSeen) {
+		flow.LastSeen = timestamp
+	}
+	flow.PacketRefs = append(flow.PacketRefs, packetID)
+	if packetSize < flow.MinPacketSize {
+		flow.MinPacketSize = packetSize
+	}
+	if packetSize > flow.MaxPacketSize {
+		flow.MaxPacketSize = packetSize
+	}
+	// Add ports to existing sets
+	if srcPort != "" {
+		flow.SourcePorts.Add(srcPort)
+	}
+	if dstPort != "" {
+		flow.DestinationPorts.Add(dstPort)
+	}
 }
 
 // updateDeviceWithIndustrialInfo updates a device with industrial protocol information and performs classification
@@ -1752,6 +1771,8 @@ func (p *GopacketParser) ParseFile() error {
 			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
 		}
 
+		oldProtocol := flowProto
+
 		// Industrial protocol parsing and device classification
 		// Always attempt industrial protocol parsing for comprehensive analysis
 		industrialProtocols, err := p.industrialParser.ParseIndustrialProtocols(packet)
@@ -1811,7 +1832,7 @@ func (p *GopacketParser) ParseFile() error {
 			destination = dstIP
 
 			if !isResponse {
-				p.updateFlow(source, destination, flowProto, timestamp, length, packetID, srcPort, dstPort)
+				p.updateFlow(source, destination, flowProto, oldProtocol, timestamp, length, packetID, srcPort, dstPort)
 			}
 		}
 
