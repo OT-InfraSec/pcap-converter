@@ -156,7 +156,6 @@ func (n *NetBIOS) NextLayerType() gopacket.LayerType {
 		// Check if payload looks like SMB
 		if len(n.Payload) >= 4 {
 			if n.Payload[0] == 0xFF && n.Payload[1] == 'S' && n.Payload[2] == 'M' && n.Payload[3] == 'B' {
-				log.Debug().Msg("SMB payload detected in NetBIOS datagram, returning LayerTypeSMBProtocol")
 				return LayerTypeSMBProtocol
 			}
 		}
@@ -246,12 +245,6 @@ func (n *NetBIOS) DecodeFromBytes(data []byte, df gopacket.DecodeFeedback) error
 		n.Contents = data[:offset]
 		if len(data) > offset {
 			n.Payload = data[offset:]
-			log.Debug().
-				Str("srcName", n.SourceName).
-				Str("destName", n.DestinationName).
-				Str("payloadHex", fmt.Sprintf("%x", n.Payload[:min(20, len(n.Payload))])).
-				Int("payloadLen", len(n.Payload)).
-				Msg("NetBIOS datagram parsed successfully")
 		} else {
 			n.Payload = nil
 			log.Debug().
@@ -347,19 +340,12 @@ func ValidateNetBIOSHeader(data []byte) bool {
 
 // DecodeNetBIOS decodes NetBIOS protocol data
 func DecodeNetBIOS(data []byte, p gopacket.PacketBuilder) error {
-	log.Debug().Int("length", len(data)).Msg("DecodeNetBIOS called with data")
-
 	netbios := &NetBIOS{}
 	err := netbios.DecodeFromBytes(data, p)
 	if err != nil {
 		log.Warn().Err(err).Msg("NetBIOS DecodeFromBytes failed")
 		return err
 	}
-
-	log.Debug().
-		Uint8("msgType", uint8(netbios.MessageType)).
-		Str("srcName", netbios.SourceName).
-		Msg("NetBIOS layer decoded successfully")
 
 	p.AddLayer(netbios)
 	next := netbios.NextLayerType()

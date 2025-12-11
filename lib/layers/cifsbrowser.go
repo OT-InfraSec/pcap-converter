@@ -604,24 +604,56 @@ func DecodeCIFSBrowserMessage(data []byte) (interface{}, error) {
 	}
 }
 
+// setCIFSBaseLayer attaches the raw message bytes to the decoded layer for gopacket bookkeeping.
+func setCIFSBaseLayer(layer gopacket.Layer, data []byte) {
+	switch v := layer.(type) {
+	case *CIFSBrowserAnnouncement:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserRequestAnnounce:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserElectionRequest:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserBackupListRequest:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserBackupListResponse:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserMasterAnnouncement:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserResetBrowserState:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *CIFSBrowserBecomeBackupMsg:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	case *GenericCIFSBrowser:
+		v.BaseLayer = layers.BaseLayer{Contents: data, Payload: nil}
+	}
+}
+
 // DecodeCIFSBrowserLayer is the gopacket decoder function for CIFS Browser layers
 func DecodeCIFSBrowserLayer(data []byte, p gopacket.PacketBuilder) error {
 	if len(data) < 1 {
 		return errors.New("CIFS Browser message too short")
 	}
 
-	cmdType := CIFSBrowserCommandType(data[0])
-
-	browser := &GenericCIFSBrowser{
-		Command: cmdType,
-		Payload: data[1:],
+	msg, err := DecodeCIFSBrowserMessage(data)
+	if err != nil {
+		return err
 	}
 
-	browser.Contents = data
-	browser.Payload = nil // GenericCIFSBrowser doesn't have further layers
+	layer, ok := msg.(gopacket.Layer)
+	if !ok {
+		return errors.New("decoded CIFS Browser message does not implement gopacket.Layer")
+	}
 
-	p.AddLayer(browser)
-	return p.NextDecoder(gopacket.LayerTypePayload)
+	setCIFSBaseLayer(layer, data)
+	p.AddLayer(layer)
+
+	if nextLayerProvider, ok := layer.(interface{ NextLayerType() gopacket.LayerType }); ok {
+		if next := nextLayerProvider.NextLayerType(); next != gopacket.LayerTypeZero {
+			return p.NextDecoder(next)
+		}
+	}
+
+	return nil
 }
 
 // init initializes the CIFS Browser layer type

@@ -119,7 +119,7 @@ func TestNetBIOSDatagramParsing(t *testing.T) {
 	// Create a NetBIOS datagram packet
 	sourceIP := [4]byte{192, 168, 1, 100}
 	payload := []byte{0xFF, 'S', 'M', 'B', 0x00, 0x01, 0x02, 0x03}
-	
+
 	data := buildNetBIOSDatagramPacket(NetBIOSCommand(0x10), sourceIP, "SOURCE", "DESTINATION", payload)
 
 	// Decode the packet
@@ -172,7 +172,7 @@ func TestNetBIOSDatagramParsing(t *testing.T) {
 func TestNetBIOSBroadcastDatagram(t *testing.T) {
 	sourceIP := [4]byte{192, 168, 1, 255}
 	payload := []byte{0xFF, 'S', 'M', 'B'}
-	
+
 	data := buildNetBIOSDatagramPacket(NetBIOSCommand(0x12), sourceIP, "BROADCAST", "*", payload)
 
 	// Decode
