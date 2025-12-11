@@ -432,6 +432,10 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 				}
 			}
 
+			if server_name, exists := protocol.DeviceIdentity["server_name"]; exists && !isDestination {
+				device.Hostname = server_name.(string)
+			}
+
 			allProtocols = append(allProtocols, protocol)
 		}
 	}
@@ -456,8 +460,12 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 
 			// Calculate and store classification confidence
 			// This uses the existing device and protocols for confidence calculation
-			if confidence := p.calculateDeviceClassificationConfidence(*device, allProtocols, deviceFlows); confidence > 0 {
+			confidence := p.calculateDeviceClassificationConfidence(*device, allProtocols, deviceFlows)
+			if confidence > 0 {
 				additionalData["classification_confidence"] = confidence
+			}
+			if confidence > 0.5 && !isDestination {
+				device.DeviceType = string(deviceType)
 			}
 		}
 
@@ -477,6 +485,8 @@ func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protoco
 		protocolSummary["has_discovery"] = p.hasDiscovery(allProtocols)
 		protocolSummary["has_configuration"] = p.hasConfiguration(allProtocols)
 		additionalData["protocol_summary"] = protocolSummary
+
+		device.ProtocolList = append(device.ProtocolList, p.extractProtocolNames(allProtocols)...)
 	}
 
 	// Update device additional data
@@ -1861,7 +1871,7 @@ func (p *GopacketParser) ParseFile() error {
 
 	// Add remaining flows
 	if flowCount > 0 {
-		if err := p.repo.UpsertFlows(flowBatch); err != nil {
+		if err = p.repo.UpsertFlows(flowBatch); err != nil {
 			return fmt.Errorf("failed to add flows: %w", err)
 		}
 	}
@@ -1885,7 +1895,7 @@ func (p *GopacketParser) ParseFile() error {
 
 	// Add remaining services
 	if serviceCount > 0 {
-		if err := p.repo.UpsertServices(serviceBatch); err != nil {
+		if err = p.repo.UpsertServices(serviceBatch); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
 		}
 	}
@@ -2040,7 +2050,7 @@ func (p *GopacketParser) ParseFile() error {
 	}
 
 	// Analyze and save communication patterns for industrial devices
-	if err := p.analyzeAndSaveCommunicationPatterns(); err != nil {
+	if err = p.analyzeAndSaveCommunicationPatterns(); err != nil {
 		// Log error but don't fail the entire parsing process
 		fmt.Printf("Warning: Failed to analyze communication patterns: %v\n", err)
 	}

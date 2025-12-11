@@ -894,7 +894,7 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 	}
 
 	info := &model.IndustrialProtocolInfo{
-		Protocol:       "CIFSBROWSER",
+		Protocol:       "cifsbrowser",
 		Timestamp:      timestamp,
 		Confidence:     0.6,
 		DeviceIdentity: make(map[string]interface{}),
