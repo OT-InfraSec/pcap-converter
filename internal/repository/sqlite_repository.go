@@ -23,6 +23,7 @@ type SQLiteRepository struct {
 	flowCanonicalizer helper.FlowCanonicalizer
 	// Error handler for graceful degradation
 	errorHandler FlowErrorHandler
+	cacheKey     string
 }
 
 var sqliteRepositoryCache = make(map[string]*SQLiteRepository)
@@ -32,7 +33,9 @@ func NewSQLiteRepository(path string) (*SQLiteRepository, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if repo, exists := sqliteRepositoryCache[path]; exists {
+	cacheKey := path
+
+	if repo, exists := sqliteRepositoryCache[cacheKey]; exists && repo != nil {
 		return repo, nil
 	}
 	// use default canonicalizer
@@ -40,7 +43,8 @@ func NewSQLiteRepository(path string) (*SQLiteRepository, error) {
 	if err != nil {
 		return nil, err
 	}
-	sqliteRepositoryCache[path] = repo
+	repo.cacheKey = cacheKey
+	sqliteRepositoryCache[cacheKey] = repo
 	return repo, nil
 }
 
@@ -886,7 +890,9 @@ func (r *SQLiteRepository) Commit() error {
 }
 
 func (r *SQLiteRepository) Close() error {
-	return r.db.Close()
+	err := r.db.Close()
+	sqliteRepositoryCache[r.cacheKey] = nil
+	return err
 }
 
 // AddPackets inserts multiple packets in a single transaction.
