@@ -114,13 +114,15 @@ func CreateTestCommunicationPattern(source, dest, protocol string) model.Communi
 // CreateTestFlows creates test flows for device classification testing
 func CreateTestFlows(sourceIP, destIP string, protocol string, packetCount int, byteCount int) []model.Flow {
 	flow := model.Flow{
-		SrcIP:       net.ParseIP(sourceIP),
-		DstIP:       net.ParseIP(destIP),
-		Protocol:    protocol,
-		PacketCount: packetCount,
-		ByteCount:   int64(byteCount),
-		FirstSeen:   time.Now().Add(-time.Hour),
-		LastSeen:    time.Now(),
+		SrcIP:         net.ParseIP(sourceIP),
+		DstIP:         net.ParseIP(destIP),
+		Protocol:      protocol,
+		PacketCountOut: packetCount,
+		ByteCountOut:  int64(byteCount),
+		PacketCountIn: 0,
+		ByteCountIn:   0,
+		FirstSeen:     time.Now().Add(-time.Hour),
+		LastSeen:      time.Now(),
 	}
 
 	return []model.Flow{flow}

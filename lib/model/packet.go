@@ -201,8 +201,10 @@ type Flow struct {
 	SrcPort             int
 	DstPort             int
 	Protocol            string
-	PacketCount         int
-	ByteCount           int64
+	PacketCountOut      int   // Packets from src to dst
+	ByteCountOut        int64 // Bytes from src to dst
+	PacketCountIn       int   // Packets from dst to src
+	ByteCountIn         int64 // Bytes from dst to src
 	FirstSeen           time.Time
 	LastSeen            time.Time
 	Duration            float64
@@ -320,11 +322,17 @@ func (f *Flow) Validate() error {
 	if f.LastSeen.Before(f.FirstSeen) {
 		return errors.New("last seen time must not be before first seen time")
 	}
-	if f.PacketCount < 0 {
-		return errors.New("packets count must not be negative")
+	if f.PacketCountOut < 0 {
+		return errors.New("packet_count_out must not be negative")
 	}
-	if f.ByteCount < 0 {
-		return errors.New("bytes count must not be negative")
+	if f.ByteCountOut < 0 {
+		return errors.New("byte_count_out must not be negative")
+	}
+	if f.PacketCountIn < 0 {
+		return errors.New("packet_count_in must not be negative")
+	}
+	if f.ByteCountIn < 0 {
+		return errors.New("byte_count_in must not be negative")
 	}
 	// Validate new directional counters are non-negative
 	if f.PacketsClientToServer < 0 {

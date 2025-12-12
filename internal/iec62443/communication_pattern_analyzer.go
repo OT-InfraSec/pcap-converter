@@ -478,7 +478,10 @@ func (cpa *CommunicationPatternAnalyzerImpl) isRequestResponsePair(flow1, flow2 
 
 	// Check if request is typically smaller than response (common pattern)
 	// This is a heuristic and may need adjustment based on specific protocols
-	return flow1.ByteCount <= flow2.ByteCount*2 // Allow some tolerance
+	// Sum both directions for total byte count comparison
+	flow1Bytes := flow1.ByteCountOut + flow1.ByteCountIn
+	flow2Bytes := flow2.ByteCountOut + flow2.ByteCountIn
+	return flow1Bytes <= flow2Bytes*2 // Allow some tolerance
 }
 
 // analyzeRequestResponseLatency analyzes latency patterns in request-response pairs

@@ -281,8 +281,10 @@ func (p *GopacketParser) createNewFlow(src string, dst string, protocol string, 
 		SrcPort:          srcPortNum,
 		DstPort:          dstPortNum,
 		Protocol:         protocol,
-		PacketCount:      1,
-		ByteCount:        int64(packetSize),
+		PacketCountOut:   1,
+		ByteCountOut:     int64(packetSize),
+		PacketCountIn:    0,
+		ByteCountIn:      0,
 		FirstSeen:        timestamp,
 		LastSeen:         timestamp,
 		PacketRefs:       []int64{packetID},
@@ -296,8 +298,8 @@ func (p *GopacketParser) createNewFlow(src string, dst string, protocol string, 
 }
 
 func (p *GopacketParser) updateExistingFlow(flow *model2.Flow, packetSize int, timestamp time.Time, packetID int64, srcPort string, dstPort string) {
-	flow.PacketCount++
-	flow.ByteCount += int64(packetSize)
+	flow.PacketCountOut++
+	flow.ByteCountOut += int64(packetSize)
 	if timestamp.Before(flow.FirstSeen) {
 		flow.FirstSeen = timestamp
 	}

@@ -604,7 +604,7 @@ func (p *IndustrialProtocolParserImpl) analyzeFlowGroup(flows []model.Flow) *mod
 	}
 
 	// Calculate deviations and dataVolume
-	totalBytes := int64(sortedFlows[0].ByteCount)
+	totalBytes := int64(sortedFlows[0].ByteCountOut + sortedFlows[0].ByteCountIn)
 	if pattern.Frequency > 0 {
 		frequencyVarianceSum := float64(0)
 		dataVolumeVarianceSum := float64(0)
@@ -613,10 +613,11 @@ func (p *IndustrialProtocolParserImpl) analyzeFlowGroup(flows []model.Flow) *mod
 			frequencyDeviation := float64(interval - pattern.Frequency)
 			frequencyVarianceSum += frequencyDeviation * frequencyDeviation
 
-			dataVolumeDeviation := float64(int64(sortedFlows[i].ByteCount) - (pattern.DataVolume / pattern.FlowCount))
+			flowBytes := int64(sortedFlows[i].ByteCountOut + sortedFlows[i].ByteCountIn)
+			dataVolumeDeviation := float64(flowBytes - (pattern.DataVolume / pattern.FlowCount))
 			dataVolumeVarianceSum += dataVolumeDeviation * dataVolumeDeviation
 
-			totalBytes += int64(sortedFlows[i].ByteCount)
+			totalBytes += flowBytes
 		}
 		pattern.DeviationFrequency = frequencyVarianceSum / float64(flowLen-1)
 		pattern.DeviationDataVolume = dataVolumeVarianceSum / float64(flowLen-1)

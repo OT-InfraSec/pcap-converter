@@ -138,22 +138,26 @@ func main() {
 	// Create some sample flows for pattern analysis
 	flows := []model.Flow{
 		{
-			SrcIP:       net.ParseIP("192.168.1.100"),
-			DstIP:       net.ParseIP("192.168.1.101"),
-			Protocol:    "ethernetip",
-			PacketCount: 100,
-			ByteCount:   5000,
-			FirstSeen:   now,
-			LastSeen:    now.Add(time.Minute * 10),
+			SrcIP:          net.ParseIP("192.168.1.100"),
+			DstIP:          net.ParseIP("192.168.1.101"),
+			Protocol:       "ethernetip",
+			PacketCountOut: 100,
+			ByteCountOut:   5000,
+			PacketCountIn:  0,
+			ByteCountIn:    0,
+			FirstSeen:      now,
+			LastSeen:       now.Add(time.Minute * 10),
 		},
 		{
-			SrcIP:       net.ParseIP("192.168.1.101"),
-			DstIP:       net.ParseIP("192.168.1.102"),
-			Protocol:    "opcua",
-			PacketCount: 50,
-			ByteCount:   2500,
-			FirstSeen:   now,
-			LastSeen:    now.Add(time.Minute * 5),
+			SrcIP:          net.ParseIP("192.168.1.101"),
+			DstIP:          net.ParseIP("192.168.1.102"),
+			Protocol:       "opcua",
+			PacketCountOut: 50,
+			ByteCountOut:   2500,
+			PacketCountIn:  0,
+			ByteCountIn:    0,
+			FirstSeen:      now,
+			LastSeen:       now.Add(time.Minute * 5),
 		},
 	}
 
@@ -222,16 +226,18 @@ func main() {
 	// Demonstrate how request-response flows are automatically merged
 	// Simulate HTTP request (client -> server)
 	httpRequest := &model.Flow{
-		SrcIP:       net.ParseIP("192.168.1.10"),
-		SrcPort:     34567,
-		DstIP:       net.ParseIP("192.168.1.20"),
-		DstPort:     80,
-		Protocol:    "HTTP",
-		PacketCount: 1,
-		ByteCount:   200,
-		FirstSeen:   now,
-		LastSeen:    now,
-		PacketRefs:  []int64{1},
+		SrcIP:          net.ParseIP("192.168.1.10"),
+		SrcPort:        34567,
+		DstIP:          net.ParseIP("192.168.1.20"),
+		DstPort:        80,
+		Protocol:       "HTTP",
+		PacketCountOut: 1,
+		ByteCountOut:   200,
+		PacketCountIn:  0,
+		ByteCountIn:    0,
+		FirstSeen:      now,
+		LastSeen:       now,
+		PacketRefs:     []int64{1},
 	}
 	httpRequest.SourcePorts = model.NewSet()
 	httpRequest.SourcePorts.Add("34567")
@@ -247,16 +253,18 @@ func main() {
 
 	// Simulate HTTP response (server -> client)
 	httpResponse := &model.Flow{
-		SrcIP:       net.ParseIP("192.168.1.20"),
-		SrcPort:     80,
-		DstIP:       net.ParseIP("192.168.1.10"),
-		DstPort:     34567,
-		Protocol:    "HTTP",
-		PacketCount: 1,
-		ByteCount:   1500,
-		FirstSeen:   now.Add(time.Second),
-		LastSeen:    now.Add(time.Second),
-		PacketRefs:  []int64{2},
+		SrcIP:          net.ParseIP("192.168.1.20"),
+		SrcPort:        80,
+		DstIP:          net.ParseIP("192.168.1.10"),
+		DstPort:        34567,
+		Protocol:       "HTTP",
+		PacketCountOut: 1,
+		ByteCountOut:   1500,
+		PacketCountIn:  0,
+		ByteCountIn:    0,
+		FirstSeen:      now.Add(time.Second),
+		LastSeen:       now.Add(time.Second),
+		PacketRefs:     []int64{2},
 	}
 	httpResponse.SourcePorts = model.NewSet()
 	httpResponse.SourcePorts.Add("80")
@@ -279,7 +287,8 @@ func main() {
 		for _, flow := range allFlows {
 			if flow.Protocol == "HTTP" {
 				fmt.Printf("  HTTP Flow: %s:%d -> %s:%d\n", flow.SrcIP.String(), flow.SrcPort, flow.DstIP.String(), flow.DstPort)
-				fmt.Printf("    Total Packets: %d, Total Bytes: %d\n", flow.PacketCount, flow.ByteCount)
+				fmt.Printf("    Out (src->dst): %d packets, %d bytes\n", flow.PacketCountOut, flow.ByteCountOut)
+				fmt.Printf("    In (dst->src): %d packets, %d bytes\n", flow.PacketCountIn, flow.ByteCountIn)
 				fmt.Printf("    Client->Server: %d packets, %d bytes\n", flow.PacketsClientToServer, flow.BytesClientToServer)
 				fmt.Printf("    Server->Client: %d packets, %d bytes\n", flow.PacketsServerToClient, flow.BytesServerToClient)
 				fmt.Printf("    Duration: %v\n", flow.LastSeen.Sub(flow.FirstSeen))

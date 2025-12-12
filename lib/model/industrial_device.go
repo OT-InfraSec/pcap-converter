@@ -67,8 +67,10 @@ type ProtocolUsageStats struct {
 	TenantID          string    `json:"tenant_id"`
 	DeviceID          string    `json:"device_id"`
 	Protocol          string    `json:"protocol"`
-	PacketCount       int64     `json:"packet_count"`
-	ByteCount         int64     `json:"byte_count"`
+	PacketCountIn       int64     `json:"packet_count_in"`
+	ByteCountIn         int64     `json:"byte_count_in"`
+	PacketCountOut       int64     `json:"packet_count_out"`
+	ByteCountOut         int64     `json:"byte_count_out"`
 	FirstSeen         time.Time `json:"first_seen"`
 	LastSeen          time.Time `json:"last_seen"`
 	CommunicationRole string    `json:"communication_role"` // "client", "server", "both"
@@ -136,11 +138,17 @@ func (pus *ProtocolUsageStats) Validate() error {
 	if pus.Protocol == "" {
 		return errors.New("protocol must not be empty")
 	}
-	if pus.PacketCount < 0 {
-		return errors.New("packet count must not be negative")
+	if pus.PacketCountIn < 0 {
+		return errors.New("packet count in must not be negative")
 	}
-	if pus.ByteCount < 0 {
-		return errors.New("byte count must not be negative")
+	if pus.ByteCountIn < 0 {
+		return errors.New("byte count in must not be negative")
+	}
+	if pus.PacketCountOut < 0 {
+		return errors.New("packet count out must not be negative")
+	}
+	if pus.ByteCountOut < 0 {
+		return errors.New("byte count out must not be negative")
 	}
 	if pus.FirstSeen.IsZero() {
 		return errors.New("first seen time must not be zero")
