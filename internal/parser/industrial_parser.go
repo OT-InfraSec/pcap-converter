@@ -508,7 +508,6 @@ func (p *IndustrialProtocolParserImpl) CollectProtocolUsageStats(deviceID string
 
 	stats := &model.ProtocolUsageStats{
 		DeviceID:          deviceID,
-		PacketCount:       int64(len(protocols)),
 		FirstSeen:         time.Now(),
 		LastSeen:          time.Now(),
 		CommunicationRole: "unknown",

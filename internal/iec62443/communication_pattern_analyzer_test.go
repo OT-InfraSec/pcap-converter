@@ -457,14 +457,14 @@ func createPeriodicFlows(sourceAddr, destAddr, protocol string, interval time.Du
 		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i] = model.Flow{
-			ID:          int64(i + 1),
-			SrcIP:       net.ParseIP(srcIP),
-			DstIP:       net.ParseIP(dstIP),
-			Protocol:    protocol,
-			PacketCount: 1,
-			ByteCount:   int64(64),
-			FirstSeen:   timestamp,
-			LastSeen:    timestamp.Add(10 * time.Millisecond),
+			ID:             int64(i + 1),
+			SrcIP:          net.ParseIP(srcIP),
+			DstIP:          net.ParseIP(dstIP),
+			Protocol:       protocol,
+			PacketCountOut: 1,
+			ByteCountOut:   int64(64),
+			FirstSeen:      timestamp,
+			LastSeen:       timestamp.Add(10 * time.Millisecond),
 		}
 	}
 
@@ -485,14 +485,14 @@ func createBurstPeriodicFlows(sourceAddr, destAddr, protocol string, burstInterv
 			srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 			dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 			flows[flowIndex] = model.Flow{
-				ID:          int64(flowIndex + 1),
-				SrcIP:       net.ParseIP(srcIP),
-				DstIP:       net.ParseIP(dstIP),
-				Protocol:    protocol,
-				PacketCount: 1,
-				ByteCount:   int64(32),
-				FirstSeen:   timestamp,
-				LastSeen:    timestamp.Add(5 * time.Millisecond),
+				ID:             int64(flowIndex + 1),
+				SrcIP:          net.ParseIP(srcIP),
+				DstIP:          net.ParseIP(dstIP),
+				Protocol:       protocol,
+				PacketCountOut: 1,
+				ByteCountOut:   int64(32),
+				FirstSeen:      timestamp,
+				LastSeen:       timestamp.Add(5 * time.Millisecond),
 			}
 		}
 	}
@@ -512,28 +512,28 @@ func createRequestResponseFlows(sourceAddr, destAddr, protocol string, latency t
 		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i*2] = model.Flow{
-			ID:          int64(i*2 + 1),
-			SrcIP:       net.ParseIP(srcIP),
-			DstIP:       net.ParseIP(dstIP),
-			Protocol:    protocol,
-			PacketCount: 1,
-			ByteCount:   int64(32), // Smaller request
-			FirstSeen:   requestTime,
-			LastSeen:    requestTime.Add(5 * time.Millisecond),
+			ID:             int64(i*2 + 1),
+			SrcIP:          net.ParseIP(srcIP),
+			DstIP:          net.ParseIP(dstIP),
+			Protocol:       protocol,
+			PacketCountOut: 1,
+			ByteCountOut:   int64(32), // Smaller request
+			FirstSeen:      requestTime,
+			LastSeen:       requestTime.Add(5 * time.Millisecond),
 		}
 
 		// Response flow
 		srcIP2, _, _ := addressHelper.ParseAddress(destAddr)
 		dstIP2, _, _ := addressHelper.ParseAddress(sourceAddr)
 		flows[i*2+1] = model.Flow{
-			ID:          int64(i*2 + 2),
-			SrcIP:       net.ParseIP(srcIP2),
-			DstIP:       net.ParseIP(dstIP2),
-			Protocol:    protocol,
-			PacketCount: 1,
-			ByteCount:   int64(128), // Larger response
-			FirstSeen:   responseTime,
-			LastSeen:    responseTime.Add(10 * time.Millisecond),
+			ID:            int64(i*2 + 2),
+			SrcIP:         net.ParseIP(srcIP2),
+			DstIP:         net.ParseIP(dstIP2),
+			Protocol:      protocol,
+			PacketCountIn: 1,
+			ByteCountIn:   int64(128), // Larger response
+			FirstSeen:     responseTime,
+			LastSeen:      responseTime.Add(10 * time.Millisecond),
 		}
 	}
 
@@ -552,28 +552,28 @@ func createHighFrequencyRequestResponseFlows(sourceAddr, destAddr, protocol stri
 		srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 		dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 		flows[i*2] = model.Flow{
-			ID:          int64(i*2 + 1),
-			SrcIP:       net.ParseIP(srcIP),
-			DstIP:       net.ParseIP(dstIP),
-			Protocol:    protocol,
-			PacketCount: 1,
-			ByteCount:   int64(16),
-			FirstSeen:   requestTime,
-			LastSeen:    requestTime.Add(2 * time.Millisecond),
+			ID:             int64(i*2 + 1),
+			SrcIP:          net.ParseIP(srcIP),
+			DstIP:          net.ParseIP(dstIP),
+			Protocol:       protocol,
+			PacketCountOut: 1,
+			ByteCountOut:   int64(16),
+			FirstSeen:      requestTime,
+			LastSeen:       requestTime.Add(2 * time.Millisecond),
 		}
 
 		// Response flow
 		srcIP2, _, _ := addressHelper.ParseAddress(destAddr)
 		dstIP2, _, _ := addressHelper.ParseAddress(sourceAddr)
 		flows[i*2+1] = model.Flow{
-			ID:          int64(i*2 + 2),
-			SrcIP:       net.ParseIP(srcIP2),
-			DstIP:       net.ParseIP(dstIP2),
-			Protocol:    protocol,
-			PacketCount: 1,
-			ByteCount:   int64(32),
-			FirstSeen:   responseTime,
-			LastSeen:    responseTime.Add(5 * time.Millisecond),
+			ID:            int64(i*2 + 2),
+			SrcIP:         net.ParseIP(srcIP2),
+			DstIP:         net.ParseIP(dstIP2),
+			Protocol:      protocol,
+			PacketCountIn: 1,
+			ByteCountIn:   int64(32),
+			FirstSeen:     responseTime,
+			LastSeen:      responseTime.Add(5 * time.Millisecond),
 		}
 	}
 

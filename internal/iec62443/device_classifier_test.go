@@ -663,14 +663,14 @@ func createTestFlow(sourceAddr, destAddr, protocol string, timestamp time.Time) 
 	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
-		ID:          1,
-		SrcIP:       net.ParseIP(srcIP),
-		DstIP:       net.ParseIP(dstIP),
-		Protocol:    protocol,
-		PacketCount: 1,
-		ByteCount:   int64(64),
-		FirstSeen:   timestamp,
-		LastSeen:    timestamp.Add(10 * time.Millisecond),
+		ID:            1,
+		SrcIP:         net.ParseIP(srcIP),
+		DstIP:         net.ParseIP(dstIP),
+		Protocol:      protocol,
+		PacketCountIn: 1,
+		ByteCountIn:   int64(64),
+		FirstSeen:     timestamp,
+		LastSeen:      timestamp.Add(10 * time.Millisecond),
 	}
 }
 
@@ -678,14 +678,14 @@ func createTestRequestFlow(sourceAddr, destAddr, protocol string, timestamp time
 	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
-		ID:          1,
-		SrcIP:       net.ParseIP(srcIP),
-		DstIP:       net.ParseIP(dstIP),
-		Protocol:    protocol,
-		PacketCount: 1,
-		ByteCount:   int64(byteCount),
-		FirstSeen:   timestamp,
-		LastSeen:    timestamp.Add(5 * time.Millisecond),
+		ID:             1,
+		SrcIP:          net.ParseIP(srcIP),
+		DstIP:          net.ParseIP(dstIP),
+		Protocol:       protocol,
+		PacketCountOut: 1,
+		ByteCountOut:   int64(byteCount),
+		FirstSeen:      timestamp,
+		LastSeen:       timestamp.Add(5 * time.Millisecond),
 	}
 }
 
@@ -693,13 +693,13 @@ func createTestResponseFlow(sourceAddr, destAddr, protocol string, timestamp tim
 	srcIP, _, _ := addressHelper.ParseAddress(sourceAddr)
 	dstIP, _, _ := addressHelper.ParseAddress(destAddr)
 	return model.Flow{
-		ID:          2,
-		SrcIP:       net.ParseIP(srcIP),
-		DstIP:       net.ParseIP(dstIP),
-		Protocol:    protocol,
-		PacketCount: 1,
-		ByteCount:   int64(byteCount),
-		FirstSeen:   timestamp,
-		LastSeen:    timestamp.Add(10 * time.Millisecond),
+		ID:            2,
+		SrcIP:         net.ParseIP(srcIP),
+		DstIP:         net.ParseIP(dstIP),
+		Protocol:      protocol,
+		PacketCountIn: 1,
+		ByteCountIn:   int64(byteCount),
+		FirstSeen:     timestamp,
+		LastSeen:      timestamp.Add(10 * time.Millisecond),
 	}
 }

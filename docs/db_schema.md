@@ -30,8 +30,10 @@ class flows {
    integer src_port
    integer dst_port
    varchar(20) protocol
-   integer packet_count
-   bigint byte_count
+   integer packet_count_out
+   bigint byte_count_out
+   integer packet_count_in
+   bigint byte_count_in
    timestamp first_seen
    timestamp last_seen
    integer duration

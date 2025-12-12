@@ -58,7 +58,7 @@ func NewSQLiteRepositoryWithCanonicalizer(path string, canonicalizer helper.Flow
 		flowCanonicalizer: canonicalizer,
 		errorHandler:      &DefaultFlowErrorHandler{},
 	}
-	if err := repo.createTables(); err != nil {
+	if err = repo.createTables(); err != nil {
 		return nil, err
 	}
 	return repo, nil
@@ -209,8 +209,10 @@ func (r *SQLiteRepository) createTables() error {
 			tenant_id TEXT,
 			device_address TEXT NOT NULL,
 			protocol TEXT NOT NULL,
-			packet_count INTEGER NOT NULL,
-			byte_count INTEGER NOT NULL,
+			packet_count_out INTEGER NOT NULL DEFAULT 0,
+			byte_count_out INTEGER NOT NULL DEFAULT 0,
+			packet_count_in INTEGER NOT NULL DEFAULT 0,
+			byte_count_in INTEGER NOT NULL DEFAULT 0,
 			first_seen DATETIME NOT NULL,
 			last_seen DATETIME NOT NULL,
 			communication_role TEXT NOT NULL,
@@ -504,7 +506,7 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	// AddFlow: include bidirectional columns
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
 	result, err := r.db.Exec(
-		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
 		ipToString(flow.DstIP),
@@ -525,10 +527,6 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		string(packetRefsJSON),
 		flow.SourcePorts.ToString(),
 		flow.DestinationPorts.ToString(),
-		flow.PacketsClientToServer,
-		flow.PacketsServerToClient,
-		flow.BytesClientToServer,
-		flow.BytesServerToClient,
 	)
 	if err != nil {
 		log.Fatalf("Error inserting flow: %v", err)
@@ -542,7 +540,7 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 }
 
 func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model2.Flow, error) {
-	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client FROM flows WHERE tenant_id = ?`
+	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports FROM flows WHERE tenant_id = ?`
 	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
@@ -568,7 +566,7 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 		var tenantID sql.NullString
 		var flow model2.Flow
 
-		if err := rows.Scan(&flow.ID, &tenantID, &srcIPStr, &dstIPStr, &srcPortInt, &dstPortInt, &flow.Protocol, &packetCountOutInt, &byteCountOutInt, &packetCountInInt, &byteCountInInt, &firstSeenStr, &lastSeenStr, &durationFloat, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr, &flow.PacketsClientToServer, &flow.PacketsServerToClient, &flow.BytesClientToServer, &flow.BytesServerToClient); err != nil {
+		if err = rows.Scan(&flow.ID, &tenantID, &srcIPStr, &dstIPStr, &srcPortInt, &dstPortInt, &flow.Protocol, &packetCountOutInt, &byteCountOutInt, &packetCountInInt, &byteCountInInt, &firstSeenStr, &lastSeenStr, &durationFloat, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr); err != nil {
 			return nil, err
 		}
 
@@ -585,7 +583,7 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 			}
 		}
 
-		if err := json.Unmarshal([]byte(packetRefsJson), &flow.PacketRefs); err != nil {
+		if err = json.Unmarshal([]byte(packetRefsJson), &flow.PacketRefs); err != nil {
 			log.Printf("Error unmarshaling packet refs for flow ID %d: %v", flow.ID, err)
 			flow.PacketRefs = make([]int64, 0) // Initialize to an empty map if unmarshaling fails
 		}
@@ -988,8 +986,8 @@ func (r *SQLiteRepository) AddFlows(flows []*model2.Flow) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, packets_client_to_server, packets_server_to_client, bytes_client_to_server, bytes_server_to_client, source_device_id, destination_device_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, source_device_id, destination_device_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 	SELECT id FROM devices WHERE address = ?
 	), (
 	SELECT id FROM devices WHERE address = ?
@@ -1033,10 +1031,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 			string(packetRefsJSON),
 			sourcePorts,
 			destinationPorts,
-			flow.PacketsClientToServer,
-			flow.PacketsServerToClient,
-			flow.BytesClientToServer,
-			flow.BytesServerToClient,
 			ipToString(flow.SrcIP),
 			ipToString(flow.DstIP),
 		)
@@ -1499,7 +1493,7 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 	_, err = r.db.Exec(
 		`UPDATE flows SET tenant_id = ?, src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?, protocol = ?, packet_count_out = ?, byte_count_out = ?, packet_count_in = ?, byte_count_in = ?,
 		first_seen = ?, last_seen = ?, duration = ?, source_device_id = ?, destination_device_id = ?,
-		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?, packets_client_to_server = ?, packets_server_to_client = ?, bytes_client_to_server = ?, bytes_server_to_client = ?
+		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?
 		WHERE id = ?;`,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
@@ -1521,10 +1515,6 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 		string(packetRefsJSON),
 		sourcePorts,
 		destinationPorts,
-		flow.PacketsClientToServer,
-		flow.PacketsServerToClient,
-		flow.BytesClientToServer,
-		flow.BytesServerToClient,
 		flow.ID,
 	)
 	return err
@@ -2123,27 +2113,23 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	} else {
 		// Insert new flow in canonical form
 		canonicalFlow := &model2.Flow{
-			TenantID:              flow.TenantID,
-			SrcIP:                 stringToIP(canonicalSrc),
-			DstIP:                 stringToIP(canonicalDst),
-			Protocol:              flow.Protocol,
-			PacketCountOut:        flow.PacketCountOut,
-			ByteCountOut:          flow.ByteCountOut,
-			PacketCountIn:         flow.PacketCountIn,
-			ByteCountIn:           flow.ByteCountIn,
-			SrcPort:               flow.SrcPort,
-			DstPort:               flow.DstPort,
-			FirstSeen:             flow.FirstSeen,
-			LastSeen:              flow.LastSeen,
-			PacketRefs:            make([]int64, len(flow.PacketRefs)),
-			MinPacketSize:         flow.MinPacketSize,
-			MaxPacketSize:         flow.MaxPacketSize,
-			SourcePorts:           r.copySet(flow.SourcePorts),
-			DestinationPorts:      r.copySet(flow.DestinationPorts),
-			PacketsClientToServer: 0,
-			PacketsServerToClient: 0,
-			BytesClientToServer:   0,
-			BytesServerToClient:   0,
+			TenantID:         flow.TenantID,
+			SrcIP:            stringToIP(canonicalSrc),
+			DstIP:            stringToIP(canonicalDst),
+			Protocol:         flow.Protocol,
+			PacketCountOut:   flow.PacketCountOut,
+			ByteCountOut:     flow.ByteCountOut,
+			PacketCountIn:    flow.PacketCountIn,
+			ByteCountIn:      flow.ByteCountIn,
+			SrcPort:          flow.SrcPort,
+			DstPort:          flow.DstPort,
+			FirstSeen:        flow.FirstSeen,
+			LastSeen:         flow.LastSeen,
+			PacketRefs:       make([]int64, len(flow.PacketRefs)),
+			MinPacketSize:    flow.MinPacketSize,
+			MaxPacketSize:    flow.MaxPacketSize,
+			SourcePorts:      r.copySet(flow.SourcePorts),
+			DestinationPorts: r.copySet(flow.DestinationPorts),
 		}
 		copy(canonicalFlow.PacketRefs, flow.PacketRefs)
 
@@ -2223,15 +2209,6 @@ func (r *SQLiteRepository) updateBidirectionalFlow(existingFlow, newFlow *model2
 		// Incoming flow is in normal direction (src->dst), so it's OUT
 		existingFlow.PacketCountOut += newFlow.PacketCountOut
 		existingFlow.ByteCountOut += newFlow.ByteCountOut
-	}
-
-	// Update bidirectional stats
-	if isReversed {
-		existingFlow.PacketsServerToClient += newFlow.PacketCountOut
-		existingFlow.BytesServerToClient += newFlow.ByteCountOut
-	} else {
-		existingFlow.PacketsClientToServer += newFlow.PacketCountOut
-		existingFlow.BytesClientToServer += newFlow.ByteCountOut
 	}
 
 	// Update packet refs

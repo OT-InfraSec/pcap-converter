@@ -27,8 +27,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		stats := &model.ProtocolUsageStats{
 			DeviceID:          deviceAddress,
 			Protocol:          "ethernetip",
-			PacketCount:       100,
-			ByteCount:         5000,
+			PacketCountOut:    100,
+			ByteCountOut:      5000,
+			PacketCountIn:     0,
+			ByteCountIn:       0,
 			FirstSeen:         now,
 			LastSeen:          now.Add(time.Hour),
 			CommunicationRole: "client",
@@ -48,8 +50,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		stats := statsList[0]
 		assert.Equal(t, deviceAddress, stats.DeviceID)
 		assert.Equal(t, "ethernetip", stats.Protocol)
-		assert.Equal(t, int64(100), stats.PacketCount)
-		assert.Equal(t, int64(5000), stats.ByteCount)
+		assert.Equal(t, int64(100), stats.PacketCountOut)
+		assert.Equal(t, int64(5000), stats.ByteCountOut)
+		assert.Equal(t, int64(0), stats.PacketCountIn)
+		assert.Equal(t, int64(0), stats.ByteCountIn)
 		assert.Equal(t, "client", stats.CommunicationRole)
 		assert.ElementsMatch(t, []uint16{44818, 2222}, stats.PortsUsed)
 		assert.True(t, now.Equal(stats.FirstSeen))
@@ -72,8 +76,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		updatedStats := &model.ProtocolUsageStats{
 			DeviceID:          deviceAddress,
 			Protocol:          "ethernetip",
-			PacketCount:       200,
-			ByteCount:         10000,
+			PacketCountOut:    200,
+			ByteCountOut:      10000,
+			PacketCountIn:     50,
+			ByteCountIn:       2500,
 			FirstSeen:         now.Add(-time.Hour),    // Earlier first seen
 			LastSeen:          now.Add(time.Hour * 2), // Later last seen
 			CommunicationRole: "both",
@@ -89,8 +95,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		require.Len(t, statsList, 1)
 
 		stats := statsList[0]
-		assert.Equal(t, int64(200), stats.PacketCount)
-		assert.Equal(t, int64(10000), stats.ByteCount)
+		assert.Equal(t, int64(200), stats.PacketCountOut)
+		assert.Equal(t, int64(10000), stats.ByteCountOut)
+		assert.Equal(t, int64(50), stats.PacketCountIn)
+		assert.Equal(t, int64(2500), stats.ByteCountIn)
 		assert.Equal(t, "both", stats.CommunicationRole)
 		assert.ElementsMatch(t, []uint16{44818, 2222, 502}, stats.PortsUsed)
 	})
@@ -100,8 +108,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		upsertStats := &model.ProtocolUsageStats{
 			DeviceID:          deviceAddress,
 			Protocol:          "ethernetip",
-			PacketCount:       300,
-			ByteCount:         15000,
+			PacketCountOut:    300,
+			ByteCountOut:      15000,
+			PacketCountIn:     75,
+			ByteCountIn:       3750,
 			FirstSeen:         now.Add(-time.Hour * 2),
 			LastSeen:          now.Add(time.Hour * 3),
 			CommunicationRole: "server",
@@ -117,7 +127,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		require.Len(t, statsList, 1)
 
 		stats := statsList[0]
-		assert.Equal(t, int64(300), stats.PacketCount)
+		assert.Equal(t, int64(300), stats.PacketCountOut)
 		assert.Equal(t, "server", stats.CommunicationRole)
 	})
 
@@ -126,8 +136,10 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 		newStats := &model.ProtocolUsageStats{
 			DeviceID:          deviceAddress,
 			Protocol:          "opcua",
-			PacketCount:       50,
-			ByteCount:         2500,
+			PacketCountOut:    50,
+			ByteCountOut:      2500,
+			PacketCountIn:     25,
+			ByteCountIn:       1250,
 			FirstSeen:         now,
 			LastSeen:          now.Add(time.Minute * 30),
 			CommunicationRole: "client",
@@ -151,7 +163,7 @@ func TestSQLiteRepository_ProtocolUsageStatsOperations(t *testing.T) {
 			}
 		}
 		require.NotNil(t, opcuaStats)
-		assert.Equal(t, int64(50), opcuaStats.PacketCount)
+		assert.Equal(t, int64(50), opcuaStats.PacketCountOut)
 		assert.Equal(t, "client", opcuaStats.CommunicationRole)
 	})
 
@@ -339,8 +351,10 @@ func TestSQLiteRepository_BatchIndustrialOperations(t *testing.T) {
 			{
 				DeviceID:          "192.168.1.100",
 				Protocol:          "ethernetip",
-				PacketCount:       100,
-				ByteCount:         5000,
+				PacketCountOut:    100,
+				ByteCountOut:      5000,
+				PacketCountIn:     0,
+				ByteCountIn:       0,
 				FirstSeen:         now,
 				LastSeen:          now.Add(time.Hour),
 				CommunicationRole: "client",
@@ -349,8 +363,10 @@ func TestSQLiteRepository_BatchIndustrialOperations(t *testing.T) {
 			{
 				DeviceID:          "192.168.1.101",
 				Protocol:          "opcua",
-				PacketCount:       50,
-				ByteCount:         2500,
+				PacketCountOut:    50,
+				ByteCountOut:      2500,
+				PacketCountIn:     25,
+				ByteCountIn:       1250,
 				FirstSeen:         now,
 				LastSeen:          now.Add(time.Minute * 30),
 				CommunicationRole: "server",
@@ -433,8 +449,10 @@ func TestSQLiteRepository_ProtocolUsageStatsValidation(t *testing.T) {
 		invalidStats := &model.ProtocolUsageStats{
 			DeviceID:          "", // Invalid: empty device ID
 			Protocol:          "ethernetip",
-			PacketCount:       100,
-			ByteCount:         5000,
+			PacketCountOut:    100,
+			ByteCountOut:      5000,
+			PacketCountIn:     0,
+			ByteCountIn:       0,
 			FirstSeen:         time.Now(),
 			LastSeen:          time.Now().Add(time.Hour),
 			CommunicationRole: "client",
@@ -450,8 +468,10 @@ func TestSQLiteRepository_ProtocolUsageStatsValidation(t *testing.T) {
 		invalidStats := &model.ProtocolUsageStats{
 			DeviceID:          "192.168.1.100",
 			Protocol:          "", // Invalid: empty protocol
-			PacketCount:       100,
-			ByteCount:         5000,
+			PacketCountOut:    100,
+			ByteCountOut:      5000,
+			PacketCountIn:     0,
+			ByteCountIn:       0,
 			FirstSeen:         time.Now(),
 			LastSeen:          time.Now().Add(time.Hour),
 			CommunicationRole: "client",

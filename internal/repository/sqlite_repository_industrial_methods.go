@@ -195,13 +195,15 @@ func (r *SQLiteRepository) SaveProtocolUsageStats(stats *model2.ProtocolUsageSta
 	}
 
 	_, err = r.db.Exec(
-		`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, communication_role, ports_used) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		stats.TenantID,
 		stats.DeviceID, // DeviceID is actually the device address in our API
 		stats.Protocol,
-		stats.PacketCount,
-		stats.ByteCount,
+		stats.PacketCountOut,
+		stats.ByteCountOut,
+		stats.PacketCountIn,
+		stats.ByteCountIn,
 		stats.FirstSeen.Format(time.RFC3339Nano),
 		stats.LastSeen.Format(time.RFC3339Nano),
 		stats.CommunicationRole,
@@ -212,7 +214,7 @@ func (r *SQLiteRepository) SaveProtocolUsageStats(stats *model2.ProtocolUsageSta
 
 // GetProtocolUsageStats retrieves protocol usage statistics for a device
 func (r *SQLiteRepository) GetProtocolUsageStats(tenantID, deviceAddress string) ([]*model2.ProtocolUsageStats, error) {
-	query := `SELECT id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used 
+	query := `SELECT id, device_address, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, communication_role, ports_used 
 			  FROM protocol_usage_stats WHERE tenant_id = ? AND device_address = ?`
 	rows, err := r.db.Query(query, tenantID, deviceAddress)
 	if err != nil {
@@ -230,8 +232,10 @@ func (r *SQLiteRepository) GetProtocolUsageStats(tenantID, deviceAddress string)
 			&id,
 			&stats.DeviceID, // DeviceID is actually the device address in our API
 			&stats.Protocol,
-			&stats.PacketCount,
-			&stats.ByteCount,
+			&stats.PacketCountOut,
+			&stats.ByteCountOut,
+			&stats.PacketCountIn,
+			&stats.ByteCountIn,
 			&firstSeenStr,
 			&lastSeenStr,
 			&stats.CommunicationRole,
@@ -256,7 +260,7 @@ func (r *SQLiteRepository) GetProtocolUsageStats(tenantID, deviceAddress string)
 
 // GetProtocolUsageStatsByProtocol retrieves protocol usage statistics by protocol
 func (r *SQLiteRepository) GetProtocolUsageStatsByProtocol(tenantID, protocol string) ([]*model2.ProtocolUsageStats, error) {
-	query := `SELECT id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used 
+	query := `SELECT id, device_address, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, communication_role, ports_used 
 			  FROM protocol_usage_stats WHERE tenant_id = ? AND protocol = ?`
 	rows, err := r.db.Query(query, tenantID, protocol)
 	if err != nil {
@@ -274,8 +278,10 @@ func (r *SQLiteRepository) GetProtocolUsageStatsByProtocol(tenantID, protocol st
 			&id,
 			&stats.DeviceID, // DeviceID is actually the device address in our API
 			&stats.Protocol,
-			&stats.PacketCount,
-			&stats.ByteCount,
+			&stats.PacketCountOut,
+			&stats.ByteCountOut,
+			&stats.PacketCountIn,
+			&stats.ByteCountIn,
 			&firstSeenStr,
 			&lastSeenStr,
 			&stats.CommunicationRole,
@@ -310,11 +316,13 @@ func (r *SQLiteRepository) UpdateProtocolUsageStats(stats *model2.ProtocolUsageS
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE protocol_usage_stats SET tenant_id = ?, packet_count = ?, byte_count = ?, first_seen = ?, last_seen = ?, communication_role = ?, ports_used = ? 
+		`UPDATE protocol_usage_stats SET tenant_id = ?, packet_count_out = ?, byte_count_out = ?, packet_count_in = ?, byte_count_in = ?, first_seen = ?, last_seen = ?, communication_role = ?, ports_used = ? 
 		WHERE device_address = ? AND protocol = ?;`,
 		stats.TenantID,
-		stats.PacketCount,
-		stats.ByteCount,
+		stats.PacketCountOut,
+		stats.ByteCountOut,
+		stats.PacketCountIn,
+		stats.ByteCountIn,
 		stats.FirstSeen.Format(time.RFC3339Nano),
 		stats.LastSeen.Format(time.RFC3339Nano),
 		stats.CommunicationRole,
@@ -568,7 +576,7 @@ func (r *SQLiteRepository) SaveProtocolUsageStatsMultiple(stats []*model2.Protoc
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count, byte_count, first_seen, last_seen, communication_role, ports_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO protocol_usage_stats (tenant_id, device_address, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, communication_role, ports_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -588,8 +596,10 @@ func (r *SQLiteRepository) SaveProtocolUsageStatsMultiple(stats []*model2.Protoc
 			stat.TenantID,
 			stat.DeviceID, // DeviceID is actually the device address in our API
 			stat.Protocol,
-			stat.PacketCount,
-			stat.ByteCount,
+			stat.PacketCountOut,
+			stat.ByteCountOut,
+			stat.PacketCountIn,
+			stat.ByteCountIn,
 			stat.FirstSeen.Format(time.RFC3339Nano),
 			stat.LastSeen.Format(time.RFC3339Nano),
 			stat.CommunicationRole,

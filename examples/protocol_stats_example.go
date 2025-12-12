@@ -60,8 +60,10 @@ func main() {
 	if stats != nil {
 		fmt.Printf("Device: %s\n", stats.DeviceID)
 		fmt.Printf("Protocol: %s\n", stats.Protocol)
-		fmt.Printf("Packet Count: %d\n", stats.PacketCount)
-		fmt.Printf("Byte Count: %d\n", stats.ByteCount)
+		fmt.Printf("Packet Count (Out): %d\n", stats.PacketCountOut)
+		fmt.Printf("Byte Count (Out): %d\n", stats.ByteCountOut)
+		fmt.Printf("Packet Count (In): %d\n", stats.PacketCountIn)
+		fmt.Printf("Byte Count (In): %d\n", stats.ByteCountIn)
 		fmt.Printf("Communication Role: %s\n", stats.CommunicationRole)
 		fmt.Printf("Ports Used: %v\n", stats.PortsUsed)
 		fmt.Printf("First Seen: %s\n", stats.FirstSeen.Format(time.RFC3339))
@@ -107,8 +109,10 @@ func main() {
 
 	if opcuaStats != nil {
 		fmt.Printf("OPC UA Statistics:\n")
-		fmt.Printf("  Packet Count: %d\n", opcuaStats.PacketCount)
-		fmt.Printf("  Byte Count: %d\n", opcuaStats.ByteCount)
+		fmt.Printf("  Packet Count (Out): %d\n", opcuaStats.PacketCountOut)
+		fmt.Printf("  Byte Count (Out): %d\n", opcuaStats.ByteCountOut)
+		fmt.Printf("  Packet Count (In): %d\n", opcuaStats.PacketCountIn)
+		fmt.Printf("  Byte Count (In): %d\n", opcuaStats.ByteCountIn)
 		fmt.Printf("  Communication Role: %s\n", opcuaStats.CommunicationRole)
 
 		// Save OPC UA stats
@@ -128,8 +132,8 @@ func main() {
 
 	fmt.Printf("Found %d protocol statistics for device %s:\n", len(allStats), deviceAddress)
 	for i, stat := range allStats {
-		fmt.Printf("  %d. Protocol: %s, Packets: %d, Bytes: %d, Role: %s\n",
-			i+1, stat.Protocol, stat.PacketCount, stat.ByteCount, stat.CommunicationRole)
+		fmt.Printf("  %d. Protocol: %s, Out-Packets: %d, Out-Bytes: %d, In-Packets: %d, In-Bytes: %d, Role: %s\n",
+			i+1, stat.Protocol, stat.PacketCountOut, stat.ByteCountOut, stat.PacketCountIn, stat.ByteCountIn, stat.CommunicationRole)
 	}
 
 	// Example 4: Communication Pattern Analysis
@@ -289,8 +293,6 @@ func main() {
 				fmt.Printf("  HTTP Flow: %s:%d -> %s:%d\n", flow.SrcIP.String(), flow.SrcPort, flow.DstIP.String(), flow.DstPort)
 				fmt.Printf("    Out (src->dst): %d packets, %d bytes\n", flow.PacketCountOut, flow.ByteCountOut)
 				fmt.Printf("    In (dst->src): %d packets, %d bytes\n", flow.PacketCountIn, flow.ByteCountIn)
-				fmt.Printf("    Client->Server: %d packets, %d bytes\n", flow.PacketsClientToServer, flow.BytesClientToServer)
-				fmt.Printf("    Server->Client: %d packets, %d bytes\n", flow.PacketsServerToClient, flow.BytesServerToClient)
 				fmt.Printf("    Duration: %v\n", flow.LastSeen.Sub(flow.FirstSeen))
 			}
 		}

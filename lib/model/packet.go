@@ -215,12 +215,6 @@ type Flow struct {
 	MaxPacketSize       int
 	SourcePorts         *Set
 	DestinationPorts    *Set
-
-	// New bidirectional statistics fields
-	PacketsClientToServer int   `json:"packets_client_to_server"`
-	PacketsServerToClient int   `json:"packets_server_to_client"`
-	BytesClientToServer   int64 `json:"bytes_client_to_server"`
-	BytesServerToClient   int64 `json:"bytes_server_to_client"`
 }
 
 // DeviceRelation represents a relationship between two devices.
@@ -333,19 +327,6 @@ func (f *Flow) Validate() error {
 	}
 	if f.ByteCountIn < 0 {
 		return errors.New("byte_count_in must not be negative")
-	}
-	// Validate new directional counters are non-negative
-	if f.PacketsClientToServer < 0 {
-		return errors.New("packets_client_to_server must not be negative")
-	}
-	if f.PacketsServerToClient < 0 {
-		return errors.New("packets_server_to_client must not be negative")
-	}
-	if f.BytesClientToServer < 0 {
-		return errors.New("bytes_client_to_server must not be negative")
-	}
-	if f.BytesServerToClient < 0 {
-		return errors.New("bytes_server_to_client must not be negative")
 	}
 	if f.MinPacketSize < 0 {
 		return errors.New("minimum packet size must not be negative")

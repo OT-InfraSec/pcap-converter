@@ -119,7 +119,12 @@ func TestSQLiteRepository_AddFlow(t *testing.T) {
 func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 	repo, err := NewSQLiteRepository(":memory:")
 	require.NoError(t, err)
-	defer repo.Close()
+	defer func(repo *SQLiteRepository) {
+		err := repo.Close()
+		if err != nil {
+			t.Fatalf("failed to close repo: %v", err)
+		}
+	}(repo)
 
 	ts1 := time.Now()
 	ts2 := ts1.Add(time.Second)
@@ -174,12 +179,6 @@ func TestSQLiteRepository_BidirectionalFlowIntegration(t *testing.T) {
 	assert.Equal(t, 12345, flow.SrcPort)
 	assert.Equal(t, "192.168.1.20", flow.DstIP.String())
 	assert.Equal(t, 80, flow.DstPort)
-
-	// Verify bidirectional statistics
-	assert.Equal(t, 1, flow.PacketsClientToServer)
-	assert.Equal(t, 1, flow.PacketsServerToClient)
-	assert.Equal(t, int64(200), flow.BytesClientToServer)
-	assert.Equal(t, int64(1500), flow.BytesServerToClient)
 
 	// Verify directional totals
 	assert.Equal(t, 1, flow.PacketCountOut)
@@ -255,12 +254,6 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 	assert.Equal(t, 49152, flow.SrcPort)
 	assert.Equal(t, "192.168.1.20", flow.DstIP.String())
 	assert.Equal(t, 4840, flow.DstPort)
-
-	// Verify bidirectional statistics
-	assert.Equal(t, 1, flow.PacketsClientToServer)
-	assert.Equal(t, 1, flow.PacketsServerToClient)
-	assert.Equal(t, int64(100), flow.BytesClientToServer)
-	assert.Equal(t, int64(200), flow.BytesServerToClient)
 
 	// Verify protocol
 	assert.Equal(t, "OPC UA", flow.Protocol)

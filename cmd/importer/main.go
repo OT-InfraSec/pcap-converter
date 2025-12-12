@@ -483,19 +483,19 @@ func formatProtocolStats(stats []*model.ProtocolUsageStats, format string) error
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(stats)
 	case "csv":
-		fmt.Printf("DeviceID,Protocol,PacketCount,ByteCount,CommunicationRole,FirstSeen,LastSeen\n")
+		fmt.Printf("DeviceID,Protocol,PacketCountOut,ByteCountOut,PacketCountIn,ByteCountIn,CommunicationRole,FirstSeen,LastSeen\n")
 		for _, stat := range stats {
-			fmt.Printf("%s,%s,%d,%d,%s,%s,%s\n",
-				stat.DeviceID, stat.Protocol, stat.PacketCount, stat.ByteCount,
+			fmt.Printf("%s,%s,%d,%d,%d,%d,%s,%s,%s\n",
+				stat.DeviceID, stat.Protocol, stat.PacketCountOut, stat.ByteCountOut, stat.PacketCountIn, stat.ByteCountIn,
 				stat.CommunicationRole, stat.FirstSeen.Format(time.RFC3339),
 				stat.LastSeen.Format(time.RFC3339))
 		}
 	default: // table
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "DEVICE ID\tPROTOCOL\tPACKETS\tBYTES\tROLE\tFIRST SEEN\tLAST SEEN\n")
+		fmt.Fprintf(w, "DEVICE ID\tPROTOCOL\tOUT-PKT\tOUT-BYT\tIN-PKT\tIN-BYT\tROLE\tFIRST SEEN\tLAST SEEN\n")
 		for _, stat := range stats {
-			fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
-				stat.DeviceID, stat.Protocol, stat.PacketCount, stat.ByteCount,
+			fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n",
+				stat.DeviceID, stat.Protocol, stat.PacketCountOut, stat.ByteCountOut, stat.PacketCountIn, stat.ByteCountIn,
 				stat.CommunicationRole, stat.FirstSeen.Format("2006-01-02 15:04:05"),
 				stat.LastSeen.Format("2006-01-02 15:04:05"))
 		}
