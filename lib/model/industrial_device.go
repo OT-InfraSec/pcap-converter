@@ -13,7 +13,7 @@ const (
 	DeviceTypeHMI              IndustrialDeviceType = "HMI"
 	DeviceTypeSCADA            IndustrialDeviceType = "SCADA"
 	DeviceTypeHistorian        IndustrialDeviceType = "Historian"
-	DeviceTypeEngWorkstation   IndustrialDeviceType = "EngineeringWorkstation"
+	DeviceTypeEngWorkstation   IndustrialDeviceType = "Workstation"
 	DeviceTypeIODevice         IndustrialDeviceType = "IODevice"
 	DeviceTypeSensor           IndustrialDeviceType = "Sensor"
 	DeviceTypeActuator         IndustrialDeviceType = "Actuator"
@@ -67,10 +67,10 @@ type ProtocolUsageStats struct {
 	TenantID          string    `json:"tenant_id"`
 	DeviceID          string    `json:"device_id"`
 	Protocol          string    `json:"protocol"`
-	PacketCountIn       int64     `json:"packet_count_in"`
-	ByteCountIn         int64     `json:"byte_count_in"`
-	PacketCountOut       int64     `json:"packet_count_out"`
-	ByteCountOut         int64     `json:"byte_count_out"`
+	PacketCountIn     int64     `json:"packet_count_in"`
+	ByteCountIn       int64     `json:"byte_count_in"`
+	PacketCountOut    int64     `json:"packet_count_out"`
+	ByteCountOut      int64     `json:"byte_count_out"`
 	FirstSeen         time.Time `json:"first_seen"`
 	LastSeen          time.Time `json:"last_seen"`
 	CommunicationRole string    `json:"communication_role"` // "client", "server", "both"
