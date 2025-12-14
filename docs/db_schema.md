@@ -56,7 +56,9 @@ class packets {
    varchar(20) protocol
    integer length
    varchar(50) flags
-   bytea payload
+   varchar(255) payload_hash
+   integer ttl
+   varchar(255) capture_file
    integer id
 }
 class schema_migrations {

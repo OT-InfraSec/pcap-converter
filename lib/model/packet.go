@@ -149,8 +149,10 @@ type Packet struct {
 	DstPort   int                    // Destination port
 	Protocol  string                 // Protocol name
 	Length    int                    // Packet length in bytes
-	Flags     string                 // Packet flags (if any)
-	Payload   []byte                 // Packet payload (raw bytes)
+	Flags       string                 // Packet flags (if any)
+	PayloadHash string                 // Hash of packet payload (e.g., SHA256)
+	TTL         int                    // Time-to-live / hop limit
+	CaptureFile string                 // Source capture file name
 	Layers    map[string]interface{} // Protocol layers and their fields
 	Protocols []string               // List of protocol names
 }

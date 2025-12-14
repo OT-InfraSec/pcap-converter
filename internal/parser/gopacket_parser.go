@@ -2,12 +2,14 @@ package parser
 
 import (
 	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+	"crypto/sha256"
 
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
@@ -1748,19 +1750,39 @@ func (p *GopacketParser) ParseFile() error {
 
 		timestamp := packet.Metadata().Timestamp
 		length := len(packet.Data())
+		// Compute payload hash
+		var payloadHash string
+		if data := packet.Data(); len(data) > 0 {
+			importSha := sha256.Sum256(data)
+			payloadHash = hex.EncodeToString(importSha[:])
+		}
+		// Extract TTL/HopLimit if available
+		ttl := 0
+		if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
+			if ip4, ok := ipv4Layer.(*layers.IPv4); ok {
+				ttl = int(ip4.TTL)
+			}
+		} else if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
+			if ip6, ok := ipv6Layer.(*layers.IPv6); ok {
+				ttl = int(ip6.HopLimit)
+			}
+		}
 		modelPacket := &model2.Packet{
-			ID:        packetID,
-			TenantID:  p.TenantID,
-			SrcIP:     net.ParseIP(srcIP),
-			DstIP:     net.ParseIP(dstIP),
-			SrcPort:   int(srcPortNum),
-			DstPort:   int(dstPortNum),
-			Protocol:  flowProto,
-			Flags:     strings.Join(flags, ","),
-			Timestamp: timestamp,
-			Length:    length,
-			Layers:    layersMap,
-			Protocols: protocols,
+			ID:          packetID,
+			TenantID:    p.TenantID,
+			SrcIP:       net.ParseIP(srcIP),
+			DstIP:       net.ParseIP(dstIP),
+			SrcPort:     int(srcPortNum),
+			DstPort:     int(dstPortNum),
+			Protocol:    flowProto,
+			Flags:       strings.Join(flags, ","),
+			Timestamp:   timestamp,
+			Length:      length,
+			PayloadHash: payloadHash,
+			TTL:         ttl,
+			CaptureFile: p.PcapFile,
+			Layers:      layersMap,
+			Protocols:   protocols,
 		}
 
 		// Send the packet to the batch processing goroutine

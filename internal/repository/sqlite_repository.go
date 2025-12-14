@@ -78,7 +78,9 @@ func (r *SQLiteRepository) createTables() error {
 			protocol TEXT,
 			length INTEGER NOT NULL,
 			flags TEXT,
-			payload BLOB,
+			payload_hash TEXT,
+			ttl INTEGER,
+			capture_file TEXT,
 			layers TEXT NOT NULL,
 			protocols TEXT
 		);`,
@@ -301,7 +303,7 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 	layersJSON, _ := json.Marshal(packet.Layers)
 	protocolsJSON, _ := json.Marshal(packet.Protocols)
 	_, err := r.db.Exec(
-		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		packet.TenantID,
 		packet.FlowID,
 		packet.Timestamp.Format(time.RFC3339Nano),
@@ -312,7 +314,9 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 		packet.Protocol,
 		packet.Length,
 		packet.Flags,
-		packet.Payload,
+		packet.PayloadHash,
+		packet.TTL,
+		packet.CaptureFile,
 		string(layersJSON),
 		string(protocolsJSON),
 	)
@@ -624,7 +628,7 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 }
 
 func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error) {
-	rows, err := r.db.Query(`SELECT id, timestamp, length, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
+	rows, err := r.db.Query(`SELECT id, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -642,10 +646,14 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 			id           int64
 			tsStr        string
 			length       int
+			flags        sql.NullString
+			payloadHash  sql.NullString
+			ttl          sql.NullInt64
+			captureFile  sql.NullString
 			layersStr    string
 			protocolsStr string
 		)
-		if err := rows.Scan(&id, &tsStr, &length, &layersStr, &protocolsStr); err != nil {
+		if err := rows.Scan(&id, &tsStr, &length, &flags, &payloadHash, &ttl, &captureFile, &layersStr, &protocolsStr); err != nil {
 			return nil, err
 		}
 		ts, _ := time.Parse(time.RFC3339Nano, tsStr)
@@ -653,13 +661,26 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 		_ = json.Unmarshal([]byte(layersStr), &layers)
 		var protocols []string
 		_ = json.Unmarshal([]byte(protocolsStr), &protocols)
-		packets = append(packets, &model2.Packet{
+		p := &model2.Packet{
 			ID:        id,
 			Timestamp: ts,
 			Length:    length,
 			Layers:    layers,
 			Protocols: protocols,
-		})
+		}
+		if flags.Valid {
+			p.Flags = flags.String
+		}
+		if payloadHash.Valid {
+			p.PayloadHash = payloadHash.String
+		}
+		if ttl.Valid {
+			p.TTL = int(ttl.Int64)
+		}
+		if captureFile.Valid {
+			p.CaptureFile = captureFile.String
+		}
+		packets = append(packets, p)
 	}
 	return packets, nil
 }
@@ -901,7 +922,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -925,6 +946,10 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 			packet.DstPort,
 			packet.Timestamp.Format(time.RFC3339Nano),
 			packet.Length,
+			packet.Flags,
+			packet.PayloadHash,
+			packet.TTL,
+			packet.CaptureFile,
 			string(layersJSON),
 			string(protocolsJSON),
 		)
@@ -1183,9 +1208,13 @@ func (r *SQLiteRepository) UpdatePacket(packet *model2.Packet) error {
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE packets SET timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`,
+		`UPDATE packets SET timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ? WHERE id = ?;`,
 		packet.Timestamp.Format(time.RFC3339Nano),
 		packet.Length,
+		packet.Flags,
+		packet.PayloadHash,
+		packet.TTL,
+		packet.CaptureFile,
 		string(layersJSON),
 		string(protocolsJSON),
 		packet.ID,
@@ -1222,14 +1251,14 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 	defer tx.Rollback()
 
 	// Prepare insert statement
-	insertStmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
 	// Prepare update statement
-	updateStmt, err := tx.Prepare(`UPDATE packets SET tenant_id = ?, flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, timestamp = ?, length = ?, layers = ?, protocols = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE packets SET tenant_id = ?, flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1271,6 +1300,10 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 					packet.DstPort,
 					packet.Timestamp.Format(time.RFC3339Nano),
 					packet.Length,
+					packet.Flags,
+					packet.PayloadHash,
+					packet.TTL,
+					packet.CaptureFile,
 					string(layersJSON),
 					string(protocolsJSON),
 					packet.ID,
@@ -1292,6 +1325,10 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 			packet.DstPort,
 			packet.Timestamp.Format(time.RFC3339Nano),
 			packet.Length,
+			packet.Flags,
+			packet.PayloadHash,
+			packet.TTL,
+			packet.CaptureFile,
 			string(layersJSON),
 			string(protocolsJSON),
 		)

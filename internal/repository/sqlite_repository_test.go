@@ -38,6 +38,42 @@ func TestSQLiteRepository_AddPacketAndAllPackets(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_PacketFieldsStored(t *testing.T) {
+	repo, err := NewSQLiteRepository(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create repo: %v", err)
+	}
+	defer repo.Close()
+
+	ts := time.Now()
+	pkt := &model.Packet{
+		Timestamp:   ts,
+		Length:      100,
+		Flags:       "SYN,ACK",
+		PayloadHash: "deadbeef",
+		TTL:         64,
+		CaptureFile: "test.pcap",
+		Layers:      map[string]interface{}{"eth": map[string]interface{}{"src": "00:11:22:33:44:55"}},
+		Protocols:   []string{"eth"},
+	}
+	err = repo.AddPacket(pkt)
+	if err != nil {
+		t.Fatalf("AddPacket failed: %v", err)
+	}
+
+	packets, err := repo.AllPackets("")
+	if err != nil {
+		t.Fatalf("AllPackets failed: %v", err)
+	}
+	if len(packets) != 1 {
+		t.Fatalf("expected 1 packet, got %d", len(packets))
+	}
+	p := packets[0]
+	if p.Flags != "SYN,ACK" || p.PayloadHash != "deadbeef" || p.TTL != 64 || p.CaptureFile != "test.pcap" {
+		t.Errorf("packet fields not stored/retrieved correctly: %+v", p)
+	}
+}
+
 func TestSQLiteRepository_AddDevice(t *testing.T) {
 	repo, err := NewSQLiteRepository(":memory:")
 	if err != nil {
