@@ -100,6 +100,7 @@ func TestIntegration_DeviceDiscovery(t *testing.T) {
 	require.NoError(t, err, "ParseFile should succeed")
 
 	devices := extractDevicesFromParser(parser)
+	t.Logf("devices discovered: %d", len(devices))
 
 	// Validate we discovered multiple devices
 	assert.GreaterOrEqual(t, len(devices), 2, "Should discover at least 2 devices")
@@ -126,6 +127,7 @@ func TestIntegration_FlowCountAccuracy(t *testing.T) {
 	require.NoError(t, err, "ParseFile should succeed")
 
 	flows := extractFlowsFromParser(parser)
+	t.Logf("flows discovered: %d", len(flows))
 	require.Len(t, flows, 1, "Should create exactly 1 flow")
 
 	flow := flows[0]
@@ -368,6 +370,7 @@ func createMultiDevicePCAP(t *testing.T) string {
 		SrcPort: 12345,
 		DstPort: 80,
 	}
+	tcp1.SetNetworkLayerForChecksum(ip1)
 
 	bufPkt1 := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
@@ -395,6 +398,7 @@ func createMultiDevicePCAP(t *testing.T) string {
 		SrcPort: 80,
 		DstPort: 12345,
 	}
+	tcp2.SetNetworkLayerForChecksum(ip2)
 
 	bufPkt2 := gopacket.NewSerializeBuffer()
 	gopacket.SerializeLayers(bufPkt2, opts, eth2, ip2, tcp2)
@@ -437,6 +441,7 @@ func createKnownSizePCAP(t *testing.T, size1, size2, size3 int) string {
 			SrcPort: 5000,
 			DstPort: 6000,
 		}
+		udp.SetNetworkLayerForChecksum(ip)
 
 		// Create payload of exact size (accounting for headers)
 		// Ethernet: 14 bytes, IPv4: 20 bytes, UDP: 8 bytes = 42 bytes overhead
