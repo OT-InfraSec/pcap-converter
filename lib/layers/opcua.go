@@ -140,6 +140,56 @@ type OPCUA struct {
 	ConfigurationData map[string]interface{} // Additional configuration data
 }
 
+func (o *OPCUA) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	payload := o.BaseLayer.Payload
+	if payload == nil {
+		payload = []byte{}
+	}
+
+	// Determine header length: 8 bytes normally, 12 if SecureChannelID is included
+	includeSecureChannel := !(o.MessageType == OPCUAMessageTypeHello || o.MessageType == OPCUAMessageTypeAcknowledge)
+	headerLen := 8
+	if includeSecureChannel {
+		headerLen = 12
+	}
+
+	totalLen := headerLen + len(payload)
+
+	data, err := b.AppendBytes(totalLen)
+	if err != nil {
+		return err
+	}
+
+	// MessageType: 3 bytes
+	mt := []byte(o.MessageType)
+	if len(mt) >= 3 {
+		copy(data[0:3], mt[:3])
+	} else {
+		// pad or truncate to 3 bytes
+		copy(data[0:3], append(mt, make([]byte, 3-len(mt))...))
+	}
+
+	// ChunkType: single byte
+	if o.ChunkType == "" {
+		data[3] = byte(OPCUAChunkTypeFinal[0])
+	} else {
+		data[3] = byte(o.ChunkType[0])
+	}
+
+	// MessageSize: total message size (little endian)
+	binary.LittleEndian.PutUint32(data[4:8], uint32(totalLen))
+
+	// SecureChannelID if applicable
+	if includeSecureChannel {
+		binary.LittleEndian.PutUint32(data[8:12], o.SecureChannelID)
+		copy(data[12:], payload)
+	} else {
+		copy(data[8:], payload)
+	}
+
+	return nil
+}
+
 // LayerType returns the layer type for OPC UA
 func (o *OPCUA) LayerType() gopacket.LayerType {
 	return LayerTypeOPCUA

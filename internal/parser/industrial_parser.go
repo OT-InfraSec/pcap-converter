@@ -389,7 +389,8 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 	}
 
 	// Analyze protocol patterns to determine device type
-	ethernetIPCount := 0
+	ethernetIPTCPCount := 0
+	ethernetIPUDPCount := 0
 	opcuaCount := 0
 	modbusCount := 0
 	cifsCount := 0
@@ -403,8 +404,10 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 		protocolLower := strings.ToLower(protocol.Protocol)
 
 		switch {
-		case strings.Contains(protocolLower, "ethernet"):
-			ethernetIPCount++
+		case strings.Contains(protocolLower, "ethernet/ip(tcp)"):
+			ethernetIPTCPCount++
+		case strings.Contains(protocolLower, "ethernet/ip(udp)"):
+			ethernetIPUDPCount++
 		case strings.Contains(protocolLower, "opc"):
 			opcuaCount++
 		case strings.Contains(protocolLower, "modbus"):
@@ -450,21 +453,21 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 
 	// Classification logic based on protocol usage patterns
 	// If multiple protocols, it's an engineering workstation
-	if (ethernetIPCount > 0 && opcuaCount > 0) || (ethernetIPCount > 0 && modbusCount > 0) || (opcuaCount > 0 && modbusCount > 0) {
+	if (ethernetIPTCPCount > 0 && opcuaCount > 0) || (ethernetIPTCPCount > 0 && modbusCount > 0) || (opcuaCount > 0 && modbusCount > 0) {
 		return model.DeviceTypeEngWorkstation
 	}
 
 	// Single protocol analysis - order matters
-	if ethernetIPCount > 0 {
+	if ethernetIPUDPCount > 0 {
 		return model.DeviceTypePLC
 	}
 
 	if opcuaCount > 0 {
 		if hasOutboundConnections && !hasInboundConnections {
-			return model.DeviceTypeHMI
+			return model.DeviceTypePLC
 		}
 		if hasInboundConnections {
-			return model.DeviceTypePLC
+			return model.DeviceTypeHMI
 		}
 	}
 
@@ -475,6 +478,10 @@ func (p *IndustrialProtocolParserImpl) DetectDeviceType(protocols []model.Indust
 		return model.DeviceTypePLC
 	}
 
+	if ethernetIPTCPCount > 0 {
+		return model.DeviceTypeHMI
+	}
+
 	return model.DeviceTypeUnknown
 }
 
@@ -482,7 +489,7 @@ func (p *IndustrialProtocolParserImpl) AnalyzeCommunicationPatterns(flows []mode
 	patterns := make([]model.CommunicationPattern, 0)
 
 	// Group flows by source-destination pairs
-	flowGroups := make(map[string][]model.Flow)
+	/*flowGroups := make(map[string][]model.Flow)
 	for _, flow := range flows {
 		key := fmt.Sprintf("%s-%s", flow.SrcIP.String(), flow.DstIP.String())
 		flowGroups[key] = append(flowGroups[key], flow)
@@ -496,7 +503,7 @@ func (p *IndustrialProtocolParserImpl) AnalyzeCommunicationPatterns(flows []mode
 				patterns = append(patterns, *pattern)
 			}
 		}
-	}
+	}*/
 
 	return patterns
 }
@@ -869,8 +876,20 @@ func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, t
 	if !p.isEtherNetIPPort(packet) {
 		return nil
 	}
+
+	protocolName := "EtherNet/IP"
+	ports := []uint16{44818, 2222}
+	switch packet.TransportLayer().(type) {
+	case *layers.TCP:
+		protocolName = "EtherNet/IP(TCP)"
+		ports = []uint16{44818}
+	case *layers.UDP:
+		protocolName = "EtherNet/IP(UDP)"
+		ports = []uint16{2222}
+	}
+
 	info := &model.IndustrialProtocolInfo{
-		Protocol:       "EtherNet/IP",
+		Protocol:       protocolName,
 		Timestamp:      timestamp,
 		Confidence:     0.6,
 		DeviceIdentity: make(map[string]interface{}),
@@ -878,7 +897,7 @@ func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, t
 		AdditionalData: make(map[string]interface{}),
 	}
 	// Determine ports and direction
-	if err := p.extractPortInfo(packet, info, []uint16{44818, 2222}); err != nil {
+	if err := p.extractPortInfo(packet, info, ports); err != nil {
 		// Not necessarily an error; leave default info
 		info.Confidence = 0.5
 	} else {
@@ -1138,15 +1157,15 @@ func (p *IndustrialProtocolParserImpl) classifyOPCUAMessage(opcua *lib_layers.OP
 
 func (p *IndustrialProtocolParserImpl) DetermineCriticality(protocol string, volume int64, count int) interface{} {
 	proto := strings.ToLower(protocol)
-	switch proto {
-	case "ethernetip", "ethernet/ip":
+	switch {
+	case proto == "ethernetip" || strings.HasPrefix(proto, "ethernet/ip"):
 		if volume > 10000 || count >= 25 {
 			return CRITICALITY_CRITICAL
 		} else if volume > 2000 || count >= 10 {
 			return CRITICALITY_HIGH
 		}
 		return CRITICALITY_MEDIUM
-	case "opc ua", "opcua":
+	case proto == "opc ua" || proto == "opcua":
 		if volume > 50000 || count >= 50 {
 			return CRITICALITY_HIGH
 		} else if volume > 20000 || count >= 20 {

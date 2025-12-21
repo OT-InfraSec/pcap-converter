@@ -1,15 +1,15 @@
 package parser
 
 import (
-	"encoding/json"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
-	"crypto/sha256"
 
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
@@ -74,7 +74,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		dnsQueries:         make(map[string]*DNSQuery),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
-		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),      // Collect stats for deferred writing
+		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),       // Collect stats for deferred writing
 		repo:               repo,
 		industrialParser:   NewIndustrialProtocolParser(),
 	}
@@ -1765,6 +1765,11 @@ func (p *GopacketParser) ParseFile() error {
 		} else if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
 			if ip6, ok := ipv6Layer.(*layers.IPv6); ok {
 				ttl = int(ip6.HopLimit)
+			}
+		}
+		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+			if tcp, ok := tcpLayer.(*layers.TCP); ok {
+				length = len(tcp.Payload)
 			}
 		}
 		modelPacket := &model2.Packet{

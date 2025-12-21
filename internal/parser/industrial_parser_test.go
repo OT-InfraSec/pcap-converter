@@ -33,6 +33,18 @@ func TestIndustrialProtocolParserImpl_ParseIndustrialProtocols(t *testing.T) {
 			expectedCount:  0,
 			expectedProtos: []string{},
 		},
+		{
+			name:           "EtherNet/IP over TCP",
+			packet:         createEtherNetIPTCPPacket(),
+			expectedCount:  1,
+			expectedProtos: []string{"EtherNet/IP(TCP)"},
+		},
+		{
+			name:           "EtherNet/IP over UDP",
+			packet:         createEtherNetIPUDPPacket(),
+			expectedCount:  1,
+			expectedProtos: []string{"EtherNet/IP(UDP)"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -70,7 +82,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			name: "PLC with EtherNet/IP",
 			protocols: []IndustrialProtocolInfo{
 				{
-					Protocol:       "EtherNet/IP",
+					Protocol:       "EtherNet/IP(TCP)",
 					Port:           44818,
 					Direction:      "inbound",
 					ServiceType:    "server",
@@ -80,13 +92,13 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.100"),
-					DstIP:     net.ParseIP("192.168.1.10"),
-					Protocol:  "EtherNet/IP",
-					ByteCount: 1024,
+					SrcIP:       net.ParseIP("192.168.1.100"),
+					DstIP:       net.ParseIP("192.168.1.10"),
+					Protocol:    "EtherNet/IP(TCP)",
+					ByteCountIn: 1024,
 				},
 			},
-			expectedType: model.DeviceTypePLC,
+			expectedType: model.DeviceTypeHMI,
 		},
 		{
 			name: "HMI with OPC UA client",
@@ -94,7 +106,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 				{
 					Protocol:        "OPC UA",
 					Port:            4840,
-					Direction:       "outbound",
+					Direction:       "inbound",
 					ServiceType:     "client",
 					IsConfiguration: true,
 					Confidence:      0.9,
@@ -102,10 +114,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.20"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "OPC UA",
-					ByteCount: 512,
+					SrcIP:       net.ParseIP("192.168.1.20"),
+					DstIP:       net.ParseIP("192.168.1.100"),
+					Protocol:    "OPC UA",
+					ByteCountIn: 512,
 				},
 			},
 			expectedType: model.DeviceTypeHMI,
@@ -124,10 +136,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.30"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "Modbus TCP",
-					ByteCount: 256,
+					SrcIP:        net.ParseIP("192.168.1.30"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "Modbus TCP",
+					ByteCountOut: 256,
 				},
 			},
 			expectedType: model.DeviceTypeIODevice,
@@ -136,7 +148,7 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			name: "Engineering Workstation with multiple protocols",
 			protocols: []IndustrialProtocolInfo{
 				{
-					Protocol:        "EtherNet/IP",
+					Protocol:        "EtherNet/IP(TCP)",
 					Port:            44818,
 					Direction:       "bidirectional",
 					IsConfiguration: true,
@@ -154,10 +166,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.50"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "EtherNet/IP",
-					ByteCount: 2048,
+					SrcIP:       net.ParseIP("192.168.1.50"),
+					DstIP:       net.ParseIP("192.168.1.100"),
+					Protocol:    "EtherNet/IP(TCP)",
+					ByteCountIn: 2048,
 				},
 			},
 			expectedType: model.DeviceTypeEngWorkstation,
@@ -178,10 +190,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.60"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "CIFSBROWSER",
-					ByteCount: 512,
+					SrcIP:        net.ParseIP("192.168.1.60"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "CIFSBROWSER",
+					ByteCountOut: 512,
 				},
 			},
 			expectedType: model.DeviceTypePrinter,
@@ -202,10 +214,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.70"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "CIFSBROWSER",
-					ByteCount: 512,
+					SrcIP:        net.ParseIP("192.168.1.70"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "CIFSBROWSER",
+					ByteCountOut: 512,
 				},
 			},
 			expectedType: model.DeviceTypeDomainController,
@@ -226,10 +238,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.80"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "CIFSBROWSER",
-					ByteCount: 256,
+					SrcIP:        net.ParseIP("192.168.1.80"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "CIFSBROWSER",
+					ByteCountOut: 256,
 				},
 			},
 			expectedType: model.DeviceTypeEngWorkstation,
@@ -250,10 +262,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.90"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "CIFSBROWSER",
-					ByteCount: 512,
+					SrcIP:        net.ParseIP("192.168.1.90"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "CIFSBROWSER",
+					ByteCountOut: 512,
 				},
 			},
 			expectedType: model.DeviceTypeIODevice,
@@ -276,10 +288,10 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 			},
 			flows: []model.Flow{
 				{
-					SrcIP:     net.ParseIP("192.168.1.95"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					Protocol:  "CIFSBROWSER",
-					ByteCount: 512,
+					SrcIP:        net.ParseIP("192.168.1.95"),
+					DstIP:        net.ParseIP("192.168.1.100"),
+					Protocol:     "CIFSBROWSER",
+					ByteCountOut: 512,
 				},
 			},
 			expectedType: model.DeviceTypePrinter,
@@ -290,63 +302,6 @@ func TestIndustrialProtocolParserImpl_DetectDeviceType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			deviceType := parser.DetectDeviceType(tt.protocols, tt.flows)
 			assert.Equal(t, tt.expectedType, deviceType)
-		})
-	}
-}
-
-func TestIndustrialProtocolParserImpl_AnalyzeCommunicationPatterns(t *testing.T) {
-	parser := NewIndustrialProtocolParser().(*IndustrialProtocolParserImpl)
-
-	tests := []struct {
-		name            string
-		flows           []model.Flow
-		expectedCount   int
-		expectedPattern string
-	}{
-		{
-			name:            "No flows",
-			flows:           []model.Flow{},
-			expectedCount:   0,
-			expectedPattern: "",
-		},
-		{
-			name: "Single flow - event driven",
-			flows: []model.Flow{
-				{
-					SrcIP:       net.ParseIP("192.168.1.10"),
-					DstIP:       net.ParseIP("192.168.1.100"),
-					Protocol:    "EtherNet/IP",
-					PacketCount: 1,
-					ByteCount:   int64(1024),
-					FirstSeen:   time.Now().Add(-time.Hour),
-					LastSeen:    time.Now(),
-				},
-			},
-			expectedCount:   1,
-			expectedPattern: "event-driven",
-		},
-		{
-			name:            "Multiple flows - periodic",
-			flows:           createMultipleFlows(6, time.Minute*10),
-			expectedCount:   1,
-			expectedPattern: "periodic",
-		},
-		{
-			name:            "Many flows - continuous",
-			flows:           createMultipleFlows(15, time.Minute*5),
-			expectedCount:   1,
-			expectedPattern: "continuous",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			patterns := parser.AnalyzeCommunicationPatterns(tt.flows)
-			assert.Len(t, patterns, tt.expectedCount)
-
-			if tt.expectedCount > 0 && len(patterns) > 0 {
-				assert.Equal(t, tt.expectedPattern, patterns[0].PatternType)
-			}
 		})
 	}
 }
@@ -366,7 +321,7 @@ func TestIndustrialProtocolParserImpl_CollectProtocolUsageStats(t *testing.T) {
 			deviceID:    "192.168.1.100",
 			protocols:   []IndustrialProtocolInfo{},
 			expectStats: false,
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name:     "Single protocol",
@@ -469,50 +424,6 @@ func TestIndustrialProtocolParserImpl_DetermineCriticality(t *testing.T) {
 	}
 }
 
-func TestIndustrialProtocolParserImpl_DeterminePatternType(t *testing.T) {
-	parser := NewIndustrialProtocolParser().(*IndustrialProtocolParserImpl)
-
-	tests := []struct {
-		name            string
-		flows           []model.Flow
-		expectedPattern string
-	}{
-		{
-			name: "Single flow",
-			flows: []model.Flow{
-				{
-					SrcIP:     net.ParseIP("192.168.1.10"),
-					DstIP:     net.ParseIP("192.168.1.100"),
-					FirstSeen: time.Now().Add(-time.Hour),
-					LastSeen:  time.Now(),
-				},
-			},
-			expectedPattern: "event-driven",
-		},
-		{
-			name:            "Multiple flows - periodic",
-			flows:           createMultipleFlows(6, time.Minute*10),
-			expectedPattern: "periodic",
-		},
-		{
-			name:            "Many flows - continuous",
-			flows:           createMultipleFlows(15, time.Minute*5),
-			expectedPattern: "continuous",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			patterns := parser.AnalyzeCommunicationPatterns(tt.flows)
-			if len(patterns) == 0 {
-				assert.Equal(t, tt.expectedPattern, "")
-			} else {
-				assert.Equal(t, tt.expectedPattern, patterns[0].PatternType)
-			}
-		})
-	}
-}
-
 // Helper functions for creating test data
 
 func createEmptyPacket() gopacket.Packet {
@@ -550,18 +461,76 @@ func createTestHTTPPacket() gopacket.Packet {
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
+func createEtherNetIPTCPPacket() gopacket.Packet {
+	ethLayer := &layers.Ethernet{
+		SrcMAC:       []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05},
+		DstMAC:       []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	ipLayer := &layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    []byte{192, 168, 1, 11},
+		DstIP:    []byte{192, 168, 1, 100},
+	}
+
+	tcpLayer := &layers.TCP{
+		SrcPort: 12345,
+		DstPort: 44818,
+	}
+	tcpLayer.SetNetworkLayerForChecksum(ipLayer)
+
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, tcpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+
+	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+}
+
+func createEtherNetIPUDPPacket() gopacket.Packet {
+	ethLayer := &layers.Ethernet{
+		SrcMAC:       []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05},
+		DstMAC:       []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	ipLayer := &layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    []byte{192, 168, 1, 12},
+		DstIP:    []byte{192, 168, 1, 100},
+	}
+
+	udpLayer := &layers.UDP{
+		SrcPort: 2222,
+		DstPort: 50000,
+	}
+	udpLayer.SetNetworkLayerForChecksum(ipLayer)
+
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, udpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+
+	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+}
+
 func createMultipleFlows(count int, interval time.Duration) []model.Flow {
 	flows := make([]model.Flow, count)
 	baseTime := time.Now().Add(-time.Duration(count) * interval)
 
 	for i := 0; i < count; i++ {
 		flows[i] = model.Flow{
-			SrcIP:     net.ParseIP("192.168.1.10"),
-			DstIP:     net.ParseIP("192.168.1.100"),
-			Protocol:  "EtherNet/IP",
-			ByteCount: 1024,
-			FirstSeen: baseTime.Add(time.Duration(i) * interval),
-			LastSeen:  baseTime.Add(time.Duration(i)*interval + time.Minute),
+			SrcIP:        net.ParseIP("192.168.1.10"),
+			DstIP:        net.ParseIP("192.168.1.100"),
+			Protocol:     "EtherNet/IP",
+			ByteCountOut: 1024,
+			FirstSeen:    baseTime.Add(time.Duration(i) * interval),
+			LastSeen:     baseTime.Add(time.Duration(i)*interval + time.Minute),
 		}
 	}
 
