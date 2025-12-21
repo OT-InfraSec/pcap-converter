@@ -5,11 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	helper2 "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	model2 "github.com/InfraSecConsult/pcap-importer-go/lib/model"
@@ -1643,7 +1644,7 @@ func (p *GopacketParser) ParseFile() error {
 						answerData["ip"] = answer.IP.String()
 						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
 						if err != nil {
-							fmt.Errorf("Failed to associate ip with DNS name")
+							log.Error().Msg("Failed to associate ip with DNS name")
 						}
 					}
 				case layers.DNSTypeAAAA:
@@ -1651,7 +1652,7 @@ func (p *GopacketParser) ParseFile() error {
 						answerData["ip"] = answer.IP.String()
 						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
 						if err != nil {
-							fmt.Errorf("Failed to associate ip with DNS name")
+							log.Error().Msg("Failed to associate ip with DNS name")
 						}
 					}
 				case layers.DNSTypePTR:
@@ -1770,6 +1771,11 @@ func (p *GopacketParser) ParseFile() error {
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			if tcp, ok := tcpLayer.(*layers.TCP); ok {
 				length = len(tcp.Payload)
+			}
+		}
+		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+			if udp, ok := udpLayer.(*layers.UDP); ok {
+				length = len(udp.Payload)
 			}
 		}
 		modelPacket := &model2.Packet{
