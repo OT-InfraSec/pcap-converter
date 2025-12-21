@@ -139,22 +139,22 @@ func IsValidIPAddressPlusPort(address string) bool {
 
 // Packet represents a network packet.
 type Packet struct {
-	ID        int64                  // Database ID (optional)
-	TenantID  string                 // Optional tenant id (empty string means none)
-	FlowID    int64                  // Associated Flow ID
-	Timestamp time.Time              // Packet timestamp
-	SrcIP     net.IP                 // Source IP (converted to/from DB)
-	DstIP     net.IP                 // Destination IP (converted to/from DB)
-	SrcPort   int                    // Source port
-	DstPort   int                    // Destination port
-	Protocol  string                 // Protocol name
-	Length    int                    // Packet length in bytes
+	ID          int64                  // Database ID (optional)
+	TenantID    string                 // Optional tenant id (empty string means none)
+	FlowID      int64                  // Associated Flow ID
+	Timestamp   time.Time              // Packet timestamp
+	SrcIP       net.IP                 // Source IP (converted to/from DB)
+	DstIP       net.IP                 // Destination IP (converted to/from DB)
+	SrcPort     int                    // Source port
+	DstPort     int                    // Destination port
+	Protocol    string                 // Protocol name
+	Length      int                    // Packet length in bytes
 	Flags       string                 // Packet flags (if any)
 	PayloadHash string                 // Hash of packet payload (e.g., SHA256)
 	TTL         int                    // Time-to-live / hop limit
 	CaptureFile string                 // Source capture file name
-	Layers    map[string]interface{} // Protocol layers and their fields
-	Protocols []string               // List of protocol names
+	Layers      map[string]interface{} // Protocol layers and their fields
+	Protocols   []string               // List of protocol names
 }
 
 // Device represents a network device.
@@ -185,13 +185,15 @@ type Device struct {
 
 // Service represents a network service.
 type Service struct {
-	ID        int64
-	TenantID  string
-	IP        net.IP
-	Port      int
-	Protocol  string
-	FirstSeen time.Time
-	LastSeen  time.Time
+	ID             int64
+	TenantID       string
+	IP             net.IP
+	Port           int
+	Protocol       string
+	ServiceType    string // Type of service (http, https, modbus, etc.)
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	AdditionalData string // JSON-encoded metadata
 }
 
 // Flow represents a network flow between devices or services.

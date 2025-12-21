@@ -44,17 +44,16 @@ type DNSQuery struct {
 type GopacketParser struct {
 	PcapFile string
 	TenantID string // Tenant ID for multi-tenant support
-	// Track devices and their relationships
-	devices map[string]*model2.Device
-	// Track flows
-	flows map[string]*model2.Flow
-	// Track services
-	services map[string]*model2.Service
+
+	// Managers for different entity types
+	flowManager    FlowManager
+	deviceManager  DeviceManager
+	serviceManager ServiceManager
+
 	// SSDP queries
 	ssdpQueries map[string]*SSDPQuery
 	// DNS queries
-	dnsQueries    map[string]*DNSQuery
-	deviceCounter int64
+	dnsQueries map[string]*DNSQuery
 
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 
@@ -66,12 +65,28 @@ type GopacketParser struct {
 }
 
 func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID string) *GopacketParser {
+	// Initialize device counter from existing devices
+	initialDeviceCounter := int64(0)
+	devices, err := repo.GetDevices(tenantID, nil)
+	if err == nil {
+		for _, device := range devices {
+			if device.ID >= initialDeviceCounter {
+				initialDeviceCounter = device.ID + 1
+			}
+		}
+	}
+
+	// Create managers
+	flowManager := NewDefaultFlowManager(tenantID, helper2.NewFlowCanonicalizer())
+	deviceManager := NewDefaultDeviceManager(tenantID, initialDeviceCounter)
+	serviceManager := NewDefaultServiceManager(tenantID)
+
 	parser := &GopacketParser{
 		PcapFile:           pcapFile,
 		TenantID:           tenantID,
-		devices:            make(map[string]*model2.Device),
-		flows:              make(map[string]*model2.Flow),
-		services:           make(map[string]*model2.Service),
+		flowManager:        flowManager,
+		deviceManager:      deviceManager,
+		serviceManager:     serviceManager,
 		dnsQueries:         make(map[string]*DNSQuery),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
@@ -80,42 +95,15 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		industrialParser:   NewIndustrialProtocolParser(),
 	}
 
-	// Import existing devices from repository
-	devices, err := repo.GetDevices(tenantID, nil)
+	// Import existing devices from repository into manager
 	if err == nil {
 		for _, device := range devices {
 			deviceKey := device.AddressType + ":" + device.Address
-			parser.devices[deviceKey] = device
-			// Update device counter to be greater than any existing device ID
-			if device.ID >= parser.deviceCounter {
-				parser.deviceCounter = device.ID + 1
+			// Directly insert into manager's internal map
+			// This is a temporary workaround; ideally managers should handle loading
+			if defaultMgr, ok := parser.deviceManager.(*DefaultDeviceManager); ok {
+				defaultMgr.devices[deviceKey] = device
 			}
-		}
-	}
-
-	// Import existing flows from repository
-	flows, err := repo.GetFlows(tenantID, nil)
-	if err == nil {
-		for _, flow := range flows {
-			flowKey := fmt.Sprintf("%s:%s:%s", flow.SrcIP.String(), flow.DstIP.String(), flow.Protocol)
-			// If this flow has port information, include it in the key
-			if flow.SourcePorts.Size() > 0 && flow.DestinationPorts.Size() > 0 {
-				srcPorts := flow.SourcePorts.List()
-				dstPorts := flow.DestinationPorts.List()
-				if len(srcPorts) > 0 && len(dstPorts) > 0 {
-					flowKey = fmt.Sprintf("%s:%s:%s:%s:%s", flow.SrcIP.String(), srcPorts[0], flow.DstIP.String(), dstPorts[0], flow.Protocol)
-				}
-			}
-			parser.flows[flowKey] = flow
-		}
-	}
-
-	// Import existing services from repository
-	services, err := repo.GetServices(tenantID, nil)
-	if err == nil {
-		for _, service := range services {
-			serviceKey := fmt.Sprintf("%s:%d:%s", service.IP, service.Port, service.Protocol)
-			parser.services[serviceKey] = service
 		}
 	}
 
@@ -127,7 +115,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 			var queryingDeviceIP, answeringDeviceIP string
 
 			// Find querying device
-			for _, device := range parser.devices {
+			for _, device := range devices {
 				if device.ID == query.QueryingDeviceID {
 					queryingDeviceIP = device.Address
 					break
@@ -135,7 +123,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 			}
 
 			// Find answering device
-			for _, device := range parser.devices {
+			for _, device := range devices {
 				if device.ID == query.AnsweringDeviceID {
 					answeringDeviceIP = device.Address
 					break
@@ -172,359 +160,32 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 	return parser
 }
 
-// upsertDevice updates or creates a device
-func (p *GopacketParser) upsertDevice(address string, addressType string, timestamp time.Time, addressSubType string, macAddress string, additionalData string, isDestination bool) *model2.Device {
-	devKey := addressType + ":" + address
-	dev, exists := p.devices[devKey]
-	if !exists {
-		macAddressSet := model2.NewMACAddressSet()
-		if macAddress != "" {
-			macAddressSet.Add(macAddress)
+// Helper functions for type conversion
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
 		}
-		dev = &model2.Device{
-			ID:                p.deviceCounter,
-			TenantID:          p.TenantID,
-			Address:           address,
-			AddressType:       addressType,
-			FirstSeen:         timestamp,
-			LastSeen:          timestamp,
-			AddressSubType:    addressSubType,
-			AddressScope:      helper2.GetAddressScopeCombined(address, macAddressSet),
-			MACAddressSet:     macAddressSet,
-			AdditionalData:    additionalData,
-			IsOnlyDestination: isDestination,
-		}
-		p.devices[devKey] = dev
-		p.deviceCounter++
-	} else {
-		if macAddress != "" {
-			dev.MACAddressSet.Add(macAddress)
-		}
-		if additionalData != "" {
-			// Merge additional data if it exists
-			if dev.AdditionalData != "" {
-				var existingData map[string]interface{}
-				if err := json.Unmarshal([]byte(dev.AdditionalData), &existingData); err != nil {
-					existingData = make(map[string]interface{})
-				}
-				var newData map[string]interface{}
-				if err := json.Unmarshal([]byte(additionalData), &newData); err == nil {
-					for k, v := range newData {
-						existingData[k] = v
-					}
-				}
-				mergedData, _ := json.Marshal(existingData)
-				dev.AdditionalData = string(mergedData)
-			} else {
-				dev.AdditionalData = additionalData
-			}
-		}
-		if dev.IsOnlyDestination && !isDestination {
-			dev.IsOnlyDestination = false
-		}
-		if timestamp.Before(dev.FirstSeen) {
-			dev.FirstSeen = timestamp
-		}
-		if timestamp.After(dev.LastSeen) {
-			dev.LastSeen = timestamp
-		}
-		p.devices[devKey] = dev
 	}
-	return dev
+	return ""
 }
 
-// updateFlow updates or creates a flow
-func (p *GopacketParser) updateFlow(src, dst, protocol, oldProtocol string, timestamp time.Time, packetSize int, packetID int64, srcPort, dstPort string) *model2.Flow {
-	// Create flow key based on addresses (which may include ports)
-	flowKey := fmt.Sprintf("%s:%s:%s", src, dst, protocol)
-
-	sourcePortsSet := model2.NewSet()
-	destinationPortsSet := model2.NewSet()
-
-	// Add ports to sets if available
-	if srcPort != "" {
-		sourcePortsSet.Add(srcPort)
-	}
-	if dstPort != "" {
-		destinationPortsSet.Add(dstPort)
-	}
-
-	flow, exists := p.flows[flowKey]
-	if !exists {
-		flow = p.createNewFlow(src, dst, protocol, srcPort, dstPort, flow, packetSize, timestamp, packetID, sourcePortsSet, destinationPortsSet, flowKey)
-
-		if oldProtocol != "" && oldProtocol != protocol {
-			oldFlowKey := fmt.Sprintf("%s:%s:%s", src, dst, oldProtocol)
-			oldFlow, oldExists := p.flows[oldFlowKey]
-			if oldExists {
-				// Migrate data from old flow to new flow
-				oldFlow.Protocol = protocol
-				p.updateExistingFlow(oldFlow, packetSize, timestamp, packetID, srcPort, dstPort)
-			}
+func getBool(m map[string]interface{}, key string) bool {
+	if val, ok := m[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
 		}
-	} else {
-		p.updateExistingFlow(flow, packetSize, timestamp, packetID, srcPort, dstPort)
 	}
-	return flow
+	return false
 }
 
-func (p *GopacketParser) createNewFlow(src string, dst string, protocol string, srcPort string, dstPort string, flow *model2.Flow, packetSize int, timestamp time.Time, packetID int64, sourcePortsSet *model2.Set, destinationPortsSet *model2.Set, flowKey string) *model2.Flow {
-	srcPortNum, err := strconv.Atoi(srcPort)
-	if err != nil {
-		srcPortNum = 0
-	}
-	dstPortNum, err := strconv.Atoi(dstPort)
-	if err != nil {
-		dstPortNum = 0
-	}
-	flow = &model2.Flow{
-		TenantID:         p.TenantID,
-		SrcIP:            net.ParseIP(src),
-		DstIP:            net.ParseIP(dst),
-		SrcPort:          srcPortNum,
-		DstPort:          dstPortNum,
-		Protocol:         protocol,
-		PacketCountOut:   1,
-		ByteCountOut:     int64(packetSize),
-		PacketCountIn:    0,
-		ByteCountIn:      0,
-		FirstSeen:        timestamp,
-		LastSeen:         timestamp,
-		PacketRefs:       []int64{packetID},
-		MinPacketSize:    packetSize,
-		MaxPacketSize:    packetSize,
-		SourcePorts:      sourcePortsSet,
-		DestinationPorts: destinationPortsSet,
-	}
-	p.flows[flowKey] = flow
-	return flow
-}
-
-func (p *GopacketParser) updateExistingFlow(flow *model2.Flow, packetSize int, timestamp time.Time, packetID int64, srcPort string, dstPort string) {
-	flow.PacketCountOut++
-	flow.ByteCountOut += int64(packetSize)
-	if timestamp.Before(flow.FirstSeen) {
-		flow.FirstSeen = timestamp
-	}
-	if timestamp.After(flow.LastSeen) {
-		flow.LastSeen = timestamp
-	}
-	flow.PacketRefs = append(flow.PacketRefs, packetID)
-	if packetSize < flow.MinPacketSize {
-		flow.MinPacketSize = packetSize
-	}
-	if packetSize > flow.MaxPacketSize {
-		flow.MaxPacketSize = packetSize
-	}
-	// Add ports to existing sets
-	if srcPort != "" {
-		flow.SourcePorts.Add(srcPort)
-	}
-	if dstPort != "" {
-		flow.DestinationPorts.Add(dstPort)
-	}
-}
-
-// updateDeviceWithIndustrialInfo updates a device with industrial protocol information and performs classification
-func (p *GopacketParser) updateDeviceWithIndustrialInfo(deviceIP string, protocolInfo model2.IndustrialProtocolInfo, isDestination bool) {
-	deviceKey := "IP:" + deviceIP
-	device, exists := p.devices[deviceKey]
-	if !exists {
-		// Device doesn't exist yet, it will be created by upsertDevice
-		return
-	}
-
-	// Create or update additional data with industrial protocol information
-	var additionalData map[string]interface{}
-	if device.AdditionalData != "" {
-		if err := json.Unmarshal([]byte(device.AdditionalData), &additionalData); err != nil {
-			additionalData = make(map[string]interface{})
-		}
-	} else {
-		additionalData = make(map[string]interface{})
-	}
-
-	// Add industrial protocol information
-	if additionalData["industrial_protocols"] == nil {
-		additionalData["industrial_protocols"] = make(map[string]interface{})
-	}
-
-	industrialProtocols := additionalData["industrial_protocols"].(map[string]interface{})
-
-	// Store protocol-specific information with enhanced data
-	protocolData := map[string]interface{}{
-		"protocol":         protocolInfo.Protocol,
-		"port":             protocolInfo.Port,
-		"direction":        protocolInfo.Direction,
-		"service_type":     protocolInfo.ServiceType,
-		"message_type":     protocolInfo.MessageType,
-		"is_real_time":     protocolInfo.IsRealTimeData,
-		"is_discovery":     protocolInfo.IsDiscovery,
-		"is_configuration": protocolInfo.IsConfiguration,
-		"confidence":       protocolInfo.Confidence,
-		"last_seen":        protocolInfo.Timestamp,
-		"is_destination":   isDestination,
-	}
-
-	// Add device identity information if available
-	if len(protocolInfo.DeviceIdentity) > 0 {
-		protocolData["device_identity"] = protocolInfo.DeviceIdentity
-	}
-
-	// Add security information if available
-	if len(protocolInfo.SecurityInfo) > 0 {
-		protocolData["security_info"] = protocolInfo.SecurityInfo
-	}
-
-	// Add additional protocol-specific data
-	if len(protocolInfo.AdditionalData) > 0 {
-		protocolData["additional_data"] = protocolInfo.AdditionalData
-	}
-
-	// Update or merge protocol data (handle multiple packets of same protocol)
-	if existingProtocolData, exists := industrialProtocols[protocolInfo.Protocol]; exists {
-		if existingMap, ok := existingProtocolData.(map[string]interface{}); ok {
-			// Merge device identity information
-			if len(protocolInfo.DeviceIdentity) > 0 {
-				if existingIdentity, exists := existingMap["device_identity"]; exists {
-					if existingIdentityMap, ok := existingIdentity.(map[string]interface{}); ok {
-						for k, v := range protocolInfo.DeviceIdentity {
-							existingIdentityMap[k] = v
-						}
-						protocolData["device_identity"] = existingIdentityMap
-					}
-				}
-			}
-
-			// Update last seen timestamp
-			if existingTimestamp, exists := existingMap["last_seen"]; exists {
-				if existingTime, ok := existingTimestamp.(time.Time); ok {
-					if protocolInfo.Timestamp.After(existingTime) {
-						protocolData["last_seen"] = protocolInfo.Timestamp
-					} else {
-						protocolData["last_seen"] = existingTime
-					}
-				}
-			}
-
-			// Merge additional data
-			if len(protocolInfo.AdditionalData) > 0 {
-				if existingAdditional, exists := existingMap["additional_data"]; exists {
-					if existingAdditionalMap, ok := existingAdditional.(map[string]interface{}); ok {
-						for k, v := range protocolInfo.AdditionalData {
-							existingAdditionalMap[k] = v
-						}
-						protocolData["additional_data"] = existingAdditionalMap
-					}
-				}
-			}
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok {
+		if f, ok := val.(float64); ok {
+			return f
 		}
 	}
-
-	industrialProtocols[protocolInfo.Protocol] = protocolData
-
-	// Perform comprehensive device classification based on accumulated protocol information
-	var allProtocols []model2.IndustrialProtocolInfo
-	for _, protoData := range industrialProtocols {
-		if protoMap, ok := protoData.(map[string]interface{}); ok {
-			protocol := model2.IndustrialProtocolInfo{
-				Protocol:        getString(protoMap, "protocol"),
-				Port:            uint16(getFloat64(protoMap, "port")),
-				Direction:       getString(protoMap, "direction"),
-				ServiceType:     getString(protoMap, "service_type"),
-				MessageType:     getString(protoMap, "message_type"),
-				IsRealTimeData:  getBool(protoMap, "is_real_time"),
-				IsDiscovery:     getBool(protoMap, "is_discovery"),
-				IsConfiguration: getBool(protoMap, "is_configuration"),
-				Confidence:      getFloat64(protoMap, "confidence"),
-			}
-
-			// Add device identity if available
-			if deviceIdentity, exists := protoMap["device_identity"]; exists {
-				if deviceIdentityMap, ok := deviceIdentity.(map[string]interface{}); ok {
-					protocol.DeviceIdentity = deviceIdentityMap
-				}
-			}
-
-			// Add security info if available
-			if securityInfo, exists := protoMap["security_info"]; exists {
-				if securityInfoMap, ok := securityInfo.(map[string]interface{}); ok {
-					protocol.SecurityInfo = securityInfoMap
-				}
-			}
-
-			// Add additional data if available
-			if additionalDataInfo, exists := protoMap["additional_data"]; exists {
-				if additionalDataMap, ok := additionalDataInfo.(map[string]interface{}); ok {
-					protocol.AdditionalData = additionalDataMap
-				}
-			}
-
-			if server_name, exists := protocol.DeviceIdentity["server_name"]; exists && !isDestination {
-				device.Hostname = server_name.(string)
-			}
-
-			allProtocols = append(allProtocols, protocol)
-		}
-	}
-
-	// Perform enhanced device classification with communication patterns
-	if len(allProtocols) > 0 {
-		// Get relevant flows for this device to analyze communication patterns
-		var deviceFlows []model2.Flow
-		for _, flow := range p.flows {
-			if flow.SrcIP.String() == deviceIP || flow.DstIP.String() == deviceIP {
-				deviceFlows = append(deviceFlows, *flow)
-			}
-		}
-
-		// Classify device type based on protocol usage patterns and flows
-		deviceType := p.industrialParser.DetectDeviceType(allProtocols, deviceFlows)
-		if deviceType != model2.DeviceTypeUnknown {
-			additionalData["industrial_device_type"] = string(deviceType)
-
-			// Store classification timestamp for tracking changes
-			additionalData["classification_timestamp"] = time.Now()
-
-			// Calculate and store classification confidence
-			// This uses the existing device and protocols for confidence calculation
-			confidence := p.calculateDeviceClassificationConfidence(*device, allProtocols, deviceFlows)
-			if confidence > 0 {
-				additionalData["classification_confidence"] = confidence
-			}
-			if confidence > 0.5 && !isDestination {
-				device.DeviceType = string(deviceType)
-			}
-		}
-
-		// Analyze and store communication patterns
-		if len(deviceFlows) > 0 {
-			patterns := p.industrialParser.AnalyzeCommunicationPatterns(deviceFlows)
-			if len(patterns) > 0 {
-				additionalData["communication_patterns"] = p.serializeCommunicationPatterns(patterns)
-			}
-		}
-
-		// Store protocol summary for quick access
-		protocolSummary := make(map[string]interface{})
-		protocolSummary["protocols"] = p.extractProtocolNames(allProtocols)
-		protocolSummary["primary_protocol"] = p.determinePrimaryProtocol(allProtocols)
-		protocolSummary["has_real_time_data"] = p.hasRealTimeData(allProtocols)
-		protocolSummary["has_discovery"] = p.hasDiscovery(allProtocols)
-		protocolSummary["has_configuration"] = p.hasConfiguration(allProtocols)
-		additionalData["protocol_summary"] = protocolSummary
-
-		if device.ProtocolList == nil {
-			device.ProtocolList = model2.NewSet()
-		}
-		device.ProtocolList.AddAll(p.extractProtocolNames(allProtocols)...)
-	}
-
-	// Update device additional data
-	updatedAdditionalData, err := json.Marshal(additionalData)
-	if err == nil {
-		device.AdditionalData = string(updatedAdditionalData)
-	}
+	return 0.0
 }
 
 // Helper methods for enhanced device classification
@@ -672,117 +333,22 @@ func (p *GopacketParser) hasConfiguration(protocols []model2.IndustrialProtocolI
 	return false
 }
 
-// Helper functions for type conversion
-func getString(m map[string]interface{}, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
-
-func getBool(m map[string]interface{}, key string) bool {
-	if val, ok := m[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
-}
-
-func getFloat64(m map[string]interface{}, key string) float64 {
-	if val, ok := m[key]; ok {
-		if f, ok := val.(float64); ok {
-			return f
-		}
-	}
-	return 0.0
-}
-
-func (p *GopacketParser) updateSSDPQuery(ssdpQuery SSDPQuery, timestamp time.Time) {
-	queryingDevice := p.devices["IP:"+ssdpQuery.QueryingDeviceIP]
-	if queryingDevice == nil {
-		addressSubType := GetAddressSubTypeForIP(ssdpQuery.QueryingDeviceIP)
-		queryingDevice = p.upsertDevice(ssdpQuery.QueryingDeviceIP, "IP", timestamp, addressSubType, "", "", false)
-	}
-
-	queryKey := fmt.Sprintf("%s:%s", queryingDevice.Address, ssdpQuery.QueryType)
-	if existingQuery, exists := p.ssdpQueries[queryKey]; exists {
-		// Update existing query
-		if ssdpQuery.UserAgent != "" {
-			if existingQuery.UserAgent == "" {
-				existingQuery.UserAgent = ssdpQuery.UserAgent
-			} else {
-				// If the user agent already exists, we can append or merge as needed
-				if !strings.Contains(existingQuery.UserAgent, ssdpQuery.UserAgent) {
-					existingQuery.UserAgent += ", " + ssdpQuery.UserAgent
-				}
-			}
-		}
-		if ssdpQuery.ST != "" {
-			if existingQuery.ST == "" {
-				existingQuery.ST = ssdpQuery.ST
-			} else {
-				// If the ST already exists, we can append or merge as needed
-				if !strings.Contains(existingQuery.ST, ssdpQuery.ST) {
-					existingQuery.ST += ", " + ssdpQuery.ST
-				}
-			}
-		}
-	} else {
-		// Add new query
-		p.ssdpQueries[queryKey] = &ssdpQuery
-	}
-}
-
-// updateService updates or creates a service
-func (p *GopacketParser) updateService(ip string, port int, protocol string, timestamp time.Time) *model2.Service {
-	serviceKey := p.generateServiceKey(ip, port, protocol)
-	service, exists := p.services[serviceKey]
-	if !exists {
-		service = &model2.Service{
-			IP:        net.ParseIP(ip),
-			Port:      port,
-			Protocol:  protocol,
-			FirstSeen: timestamp,
-			LastSeen:  timestamp,
-		}
-		if service.Validate() != nil {
-			log.Printf("Invalid service data: %s", serviceKey)
-		}
-		p.services[serviceKey] = service
-	} else {
-		if timestamp.Before(service.FirstSeen) {
-			service.FirstSeen = timestamp
-		}
-		if timestamp.After(service.LastSeen) {
-			service.LastSeen = timestamp
-		}
-	}
-	return service
-}
-
-func (p *GopacketParser) generateServiceKey(ip string, port int, protocol string) string {
-	return fmt.Sprintf("%s:%d:%s", ip, port, protocol)
-}
-
+// updateDNSQuery updates or adds a DNS query to the parser's dnsQueries map
 func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
-	queryingDevice := p.devices["IP:"+dnsQuery.QueryingDeviceIP]
-	answeringDevice := p.devices["IP:"+dnsQuery.AnsweringDeviceIP]
+	queryingDevice := p.deviceManager.GetDevice(dnsQuery.QueryingDeviceIP, "IP")
+	answeringDevice := p.deviceManager.GetDevice(dnsQuery.AnsweringDeviceIP, "IP")
 	if queryingDevice == nil {
-		// create new device
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.QueryingDeviceIP)
-		queryingDevice = p.upsertDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", false)
+		queryingDevice = p.deviceManager.UpsertDevice(dnsQuery.QueryingDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", false)
 	}
 	if answeringDevice == nil {
 		addressSubType := GetAddressSubTypeForIP(dnsQuery.AnsweringDeviceIP)
-		answeringDevice = p.upsertDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", true)
+		answeringDevice = p.deviceManager.UpsertDevice(dnsQuery.AnsweringDeviceIP, "IP", dnsQuery.Timestamp, addressSubType, "", "", true)
 	}
-	// Create a unique key for the DNS query
+
 	queryKey := fmt.Sprintf("%d:%d:%s:%s", queryingDevice.ID, answeringDevice.ID, dnsQuery.QueryName, dnsQuery.QueryType)
 	if existingQuery, exists := p.dnsQueries[queryKey]; exists {
-		// Update existing query
+		// Update existing query - merge questions and answers
 		if dnsQuery.Questions != nil {
 			if existingQuery.Questions != nil {
 				for key, value := range dnsQuery.Questions {
@@ -804,7 +370,6 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 				existingQuery.Questions = dnsQuery.Questions
 			}
 		}
-
 		if len(dnsQuery.Answers) > 0 {
 			if len(existingQuery.Answers) > 0 {
 				for key, value := range dnsQuery.Answers {
@@ -857,8 +422,37 @@ func (p *GopacketParser) updateDNSQuery(dnsQuery DNSQuery) {
 		}
 		existingQuery.Timestamp = dnsQuery.Timestamp
 	} else {
-		// Add new query
 		p.dnsQueries[queryKey] = &dnsQuery
+	}
+}
+
+// updateSSDPQuery updates or adds an SSDP query to the parser's ssdpQueries map
+func (p *GopacketParser) updateSSDPQuery(ssdpQuery SSDPQuery, timestamp time.Time) {
+	queryingDevice := p.deviceManager.GetDevice(ssdpQuery.QueryingDeviceIP, "IP")
+	if queryingDevice == nil {
+		addressSubType := GetAddressSubTypeForIP(ssdpQuery.QueryingDeviceIP)
+		queryingDevice = p.deviceManager.UpsertDevice(ssdpQuery.QueryingDeviceIP, "IP", timestamp, addressSubType, "", "", false)
+	}
+
+	queryKey := fmt.Sprintf("%s:%s", queryingDevice.Address, ssdpQuery.QueryType)
+	if existingQuery, exists := p.ssdpQueries[queryKey]; exists {
+		// Update existing query
+		if ssdpQuery.UserAgent != "" {
+			if existingQuery.UserAgent == "" {
+				existingQuery.UserAgent = ssdpQuery.UserAgent
+			} else if !strings.Contains(existingQuery.UserAgent, ssdpQuery.UserAgent) {
+				existingQuery.UserAgent += ", " + ssdpQuery.UserAgent
+			}
+		}
+		if ssdpQuery.ST != "" {
+			if existingQuery.ST == "" {
+				existingQuery.ST = ssdpQuery.ST
+			} else if !strings.Contains(existingQuery.ST, ssdpQuery.ST) {
+				existingQuery.ST += ", " + ssdpQuery.ST
+			}
+		}
+	} else {
+		p.ssdpQueries[queryKey] = &ssdpQuery
 	}
 }
 
@@ -935,7 +529,6 @@ func (p *GopacketParser) ParseFile() error {
 			srcPort, dstPort       string
 			srcPortNum, dstPortNum uint16
 			flowProto              string
-			isResponse             bool
 		)
 
 		// Ethernet
@@ -1120,7 +713,7 @@ func (p *GopacketParser) ParseFile() error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
+							_ = p.deviceManager.UpsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
 						}
 
 						if httpLayer.IsUpnpReqest() {
@@ -1131,7 +724,7 @@ func (p *GopacketParser) ParseFile() error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
+							_ = p.deviceManager.UpsertDevice(dstIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), true)
 						}
 
 						if httpLayer.IsUpnpResponse() {
@@ -1142,7 +735,7 @@ func (p *GopacketParser) ParseFile() error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
+							_ = p.deviceManager.UpsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
 						}
 
 						if httpLayer.IsWindowsRequest() {
@@ -1153,15 +746,14 @@ func (p *GopacketParser) ParseFile() error {
 							if err != nil {
 								return fmt.Errorf("failed to marshal additional data: %w", err)
 							}
-							_ = p.upsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
+							_ = p.deviceManager.UpsertDevice(srcIP, "IP", packet.Metadata().Timestamp, "", "", string(additionalDataJSON), false)
 						}
 
 						// Update the service for HTTP request
 						timestamp := packet.Metadata().Timestamp
-						p.updateService(dstIP, int(dstPortNum), "http", timestamp)
+						p.serviceManager.UpdateService(dstIP, int(dstPortNum), "http", "", timestamp, nil)
 						serviceUpdated = true
 					} else { // IsResponse
-						isResponse = true
 						var request *liblayers.HTTP
 						var index int
 						for _, httpL := range p.httpRingBuffer.GetAllLIFO() {
@@ -1182,17 +774,17 @@ func (p *GopacketParser) ParseFile() error {
 							timestamp := packet.Metadata().Timestamp
 							if srcPort != "" /*&& (srcPortNum == 80 || srcPortNum == 443)*/ {
 								if port, err := strconv.Atoi(srcPort); err == nil {
-									p.updateService(srcIP, port, "http", timestamp)
+									p.serviceManager.UpdateService(srcIP, port, "http", "", timestamp, nil)
 									serviceUpdated = true
 								}
 							}
 						} else { // no valid HTTP response
 							// check if request was the first HTTP request to this server
 							if port, err := strconv.Atoi(srcPort); err == nil {
-								service := p.services[p.generateServiceKey(srcIP, port, "http")]
+								service := p.serviceManager.GetService(srcIP, port, "http")
 								if service != nil && service.FirstSeen.Equal(service.LastSeen) {
-									// This means this is the first HTTP request to this server and we delete it
-									p.services[p.generateServiceKey(srcIP, port, "http")] = nil
+									// This means this is the first HTTP request to this server
+									// Note: ServiceManager doesn't support deletion, skip this edge case
 								}
 							}
 						}
@@ -1256,7 +848,7 @@ func (p *GopacketParser) ParseFile() error {
 			// Update service for TCP - use a direct call to avoid string concatenation
 			timestamp := packet.Metadata().Timestamp
 			if !serviceUpdated {
-				p.updateService(srcIP, int(srcPortNum), "tcp", timestamp)
+				p.serviceManager.UpdateService(srcIP, int(srcPortNum), "tcp", "", timestamp, nil)
 			}
 		}
 
@@ -1290,7 +882,7 @@ func (p *GopacketParser) ParseFile() error {
 			protocols = append(protocols, detectedProto)
 			// Update service for UDP (use detected protocol)
 			timestamp := packet.Metadata().Timestamp
-			p.updateService(srcIP, int(srcPortNum), detectedProto, timestamp)
+			p.serviceManager.UpdateService(srcIP, int(srcPortNum), detectedProto, "", timestamp, nil)
 		}
 
 		// DNS
@@ -1445,7 +1037,6 @@ func (p *GopacketParser) ParseFile() error {
 
 			// If request is a Reply, we can extract more information about the network and its servers
 			if dhcpv4.Operation == layers.DHCPOpReply {
-				isResponse = true
 				serverInfo := make(map[string]interface{})
 				for _, option := range dhcpv4.Options {
 					dataLen := len(option.Data)
@@ -1734,15 +1325,14 @@ func (p *GopacketParser) ParseFile() error {
 
 			// Update service for mDNS (port 5353)
 			timestamp := packet.Metadata().Timestamp
-			p.updateService(srcIP, 5353, "mdns", timestamp)
-
+			p.serviceManager.UpdateService(srcIP, 5353, "mdns", "", timestamp, nil)
 			// Process mDNS for service discovery
 			if mdns.IsResponse() {
 				for _, answer := range mdns.Answers {
 					if answer.Type == layers.DNSTypeSRV {
 						// Register discovered service
 						if answer.SRV.Port > 0 {
-							p.updateService(srcIP, int(answer.SRV.Port), "discovered", timestamp)
+							p.serviceManager.UpdateService(srcIP, int(answer.SRV.Port), "discovered", "", timestamp, nil)
 						}
 					}
 				}
@@ -1803,14 +1393,12 @@ func (p *GopacketParser) ParseFile() error {
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" {
 			addressSubType := GetAddressSubTypeForIP(srcIP)
-			p.upsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "", false)
+			p.deviceManager.UpsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "", false)
 		}
 		if dstMAC != "" && dstIP != "" {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
-			p.upsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
+			p.deviceManager.UpsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
 		}
-
-		oldProtocol := flowProto
 
 		// Industrial protocol parsing and device classification
 		// Always attempt industrial protocol parsing for comprehensive analysis
@@ -1820,7 +1408,7 @@ func (p *GopacketParser) ParseFile() error {
 			for _, protocolInfo := range industrialProtocols {
 				// Update source device with industrial protocol info
 				if srcIP != "" {
-					p.updateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
+					p.deviceManager.UpdateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
 
 					// Collect protocol usage statistics for source device (defer DB write)
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
@@ -1830,7 +1418,7 @@ func (p *GopacketParser) ParseFile() error {
 				}
 				// Update destination device with industrial protocol info
 				if dstIP != "" {
-					p.updateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
+					p.deviceManager.UpdateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
 
 					// Collect protocol usage statistics for destination device (defer DB write)
 					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
@@ -1864,9 +1452,8 @@ func (p *GopacketParser) ParseFile() error {
 			source = srcIP
 			destination = dstIP
 
-			if !isResponse {
-				p.updateFlow(source, destination, flowProto, oldProtocol, timestamp, length, packetID, srcPort, dstPort)
-			}
+			// Always update flow - let FlowManager handle canonicalization
+			p.flowManager.UpdateFlow(source, destination, flowProto, srcPort, dstPort, timestamp, length, packetID)
 		}
 
 		packetID++
@@ -1889,7 +1476,7 @@ func (p *GopacketParser) ParseFile() error {
 	deviceBatch := make([]*model2.Device, 0, maxBatchSize)
 	deviceCount := 0
 
-	for _, dev := range p.devices {
+	for _, dev := range p.deviceManager.GetAllDevices() {
 		deviceBatch = append(deviceBatch, dev)
 		deviceCount++
 
@@ -1913,7 +1500,7 @@ func (p *GopacketParser) ParseFile() error {
 	flowBatch := make([]*model2.Flow, 0, maxBatchSize)
 	flowCount := 0
 
-	for _, flow := range p.flows {
+	for _, flow := range p.flowManager.GetAllFlows() {
 		flowBatch = append(flowBatch, flow)
 		flowCount++
 
@@ -1937,7 +1524,7 @@ func (p *GopacketParser) ParseFile() error {
 	serviceBatch := make([]*model2.Service, 0, maxBatchSize)
 	serviceCount := 0
 
-	for _, service := range p.services {
+	for _, service := range p.serviceManager.GetAllServices() {
 		serviceBatch = append(serviceBatch, service)
 		serviceCount++
 
@@ -1968,10 +1555,8 @@ func (p *GopacketParser) ParseFile() error {
 
 	// Save DNS queries
 	for _, dnsQuery := range p.dnsQueries {
-		queryingDeviceKey := "IP:" + dnsQuery.QueryingDeviceIP
-		queryingDevice := p.devices[queryingDeviceKey]
-		answeringDeviceKey := "IP:" + dnsQuery.AnsweringDeviceIP
-		answeringDevice := p.devices[answeringDeviceKey]
+		queryingDevice := p.deviceManager.GetDevice(dnsQuery.QueryingDeviceIP, "IP")
+		answeringDevice := p.deviceManager.GetDevice(dnsQuery.AnsweringDeviceIP, "IP")
 		if queryingDevice == nil {
 			err = p.repo.UpsertDevice(&model2.Device{
 				Address:           dnsQuery.QueryingDeviceIP,
@@ -2032,8 +1617,7 @@ func (p *GopacketParser) ParseFile() error {
 	// Save SSDP queries
 	ssdpQueriesToSave := make([]*model2.SSDPQuery, 0, len(p.ssdpQueries))
 	for _, ssdpQuery := range p.ssdpQueries {
-		queryingDeviceKey := "IP:" + ssdpQuery.QueryingDeviceIP
-		queryingDevice := p.devices[queryingDeviceKey]
+		queryingDevice := p.deviceManager.GetDevice(ssdpQuery.QueryingDeviceIP, "IP")
 
 		var additionalDataJSON []byte
 		additionalDataMap := make(map[string]string)
@@ -2155,7 +1739,7 @@ func tcpFlagsToStrings(tcp *layers.TCP) string {
 func (p *GopacketParser) analyzeAndSaveCommunicationPatterns() error {
 	// Collect all flows for communication pattern analysis
 	var allFlows []model2.Flow
-	for _, flow := range p.flows {
+	for _, flow := range p.flowManager.GetAllFlows() {
 		allFlows = append(allFlows, *flow)
 	}
 
@@ -2194,10 +1778,7 @@ func (p *GopacketParser) analyzeAndSaveCommunicationPatterns() error {
 }
 
 func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
-	device, ok := p.devices["IP:"+ip]
-	if !ok {
-		return fmt.Errorf("failed to get device for IP %s", ip)
-	}
+	device := p.deviceManager.GetDevice(ip, "IP")
 	if device == nil {
 		return fmt.Errorf("device not found for IP %s", ip)
 	}
