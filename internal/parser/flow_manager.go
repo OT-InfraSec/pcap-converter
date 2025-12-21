@@ -99,6 +99,10 @@ func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol
 	// If reversed, we need to create the flow with swapped ports
 	var flowSrcPort, flowDstPort int
 	var flowSourcePorts, flowDestPorts *model.Set
+	// Set initial counters based on whether first packet is reversed
+	var packetCountOut, packetCountIn int
+	var byteCountOut, byteCountIn int64
+
 
 	if isReversed {
 		// Original packet was server->client, canonical is client->server
@@ -107,12 +111,22 @@ func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol
 		flowDstPort = srcPortNum
 		flowSourcePorts = destinationPortsSet
 		flowDestPorts = sourcePortsSet
+		// First packet is server->client (reversed), count as IN
+		packetCountOut = 0
+		packetCountIn = 1
+		byteCountOut = 0
+		byteCountIn = int64(packetSize)
 	} else {
 		// Normal direction
 		flowSrcPort = srcPortNum
 		flowDstPort = dstPortNum
 		flowSourcePorts = sourcePortsSet
 		flowDestPorts = destinationPortsSet
+		// First packet is client->server (canonical), count as OUT
+		packetCountOut = 1
+		packetCountIn = 0
+		byteCountOut = int64(packetSize)
+		byteCountIn = 0
 	}
 
 	flow := &model.Flow{
@@ -122,10 +136,10 @@ func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol
 		SrcPort:          flowSrcPort,
 		DstPort:          flowDstPort,
 		Protocol:         protocol,
-		PacketCountOut:   1,
-		ByteCountOut:     int64(packetSize),
-		PacketCountIn:    0, // Always 0 per requirements
-		ByteCountIn:      0, // Always 0 per requirements
+		PacketCountOut:   packetCountOut,
+		ByteCountOut:     byteCountOut,
+		PacketCountIn:    packetCountIn,
+		ByteCountIn:      byteCountIn,
 		FirstSeen:        timestamp,
 		LastSeen:         timestamp,
 		PacketRefs:       []int64{packetID},
@@ -142,9 +156,16 @@ func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol
 func (fm *DefaultFlowManager) updateExistingFlow(flow *model.Flow, packetSize int,
 	timestamp time.Time, packetID int64, srcPort, dstPort string, isReversed bool) {
 
-	// Always increment OUT counters (IN always stays 0 per requirements)
-	flow.PacketCountOut++
-	flow.ByteCountOut += int64(packetSize)
+	// Increment proper counters based on packet direction
+	if isReversed {
+		// Packet is in reverse direction (server->client), update IN counters
+		flow.PacketCountIn++
+		flow.ByteCountIn += int64(packetSize)
+	} else {
+		// Packet is in canonical direction (client->server), update OUT counters
+		flow.PacketCountOut++
+		flow.ByteCountOut += int64(packetSize)
+	}
 
 	// Update timestamps
 	if timestamp.Before(flow.FirstSeen) {
