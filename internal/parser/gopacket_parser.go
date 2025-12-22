@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -463,6 +464,7 @@ func (p *GopacketParser) ParseFile() error {
 		return fmt.Errorf("failed to open pcap: %w", err)
 	}
 	defer handle.Close()
+	pcapFileName := filepath.Base(p.PcapFile)
 
 	liblayers.InitLayerLLDP()
 	liblayers.InitLayerEIGRP()
@@ -1381,7 +1383,7 @@ func (p *GopacketParser) ParseFile() error {
 			Length:      length,
 			PayloadHash: payloadHash,
 			TTL:         ttl,
-			CaptureFile: p.PcapFile,
+			CaptureFile: pcapFileName,
 			Layers:      layersMap,
 			Protocols:   protocols,
 		}
