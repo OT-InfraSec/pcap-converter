@@ -628,7 +628,7 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 }
 
 func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error) {
-	rows, err := r.db.Query(`SELECT id, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
+	rows, err := r.db.Query(`SELECT id, tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -644,6 +644,13 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 	for rows.Next() {
 		var (
 			id           int64
+			tenantIDStr  string
+			flowID       sql.NullInt64
+			srcIPStr     sql.NullString
+			srcPort      sql.NullInt64
+			dstIPStr     sql.NullString
+			dstPort      sql.NullInt64
+			protocol     sql.NullString
 			tsStr        string
 			length       int
 			flags        sql.NullString
@@ -653,7 +660,7 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 			layersStr    string
 			protocolsStr string
 		)
-		if err := rows.Scan(&id, &tsStr, &length, &flags, &payloadHash, &ttl, &captureFile, &layersStr, &protocolsStr); err != nil {
+		if err := rows.Scan(&id, &tenantIDStr, &flowID, &srcIPStr, &srcPort, &dstIPStr, &dstPort, &protocol, &tsStr, &length, &flags, &payloadHash, &ttl, &captureFile, &layersStr, &protocolsStr); err != nil {
 			return nil, err
 		}
 		ts, _ := time.Parse(time.RFC3339Nano, tsStr)
@@ -663,10 +670,29 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 		_ = json.Unmarshal([]byte(protocolsStr), &protocols)
 		p := &model2.Packet{
 			ID:        id,
+			TenantID:  tenantIDStr,
 			Timestamp: ts,
 			Length:    length,
 			Layers:    layers,
 			Protocols: protocols,
+		}
+		if flowID.Valid {
+			p.FlowID = flowID.Int64
+		}
+		if srcIPStr.Valid {
+			p.SrcIP = net.ParseIP(srcIPStr.String)
+		}
+		if srcPort.Valid {
+			p.SrcPort = int(srcPort.Int64)
+		}
+		if dstIPStr.Valid {
+			p.DstIP = net.ParseIP(dstIPStr.String)
+		}
+		if dstPort.Valid {
+			p.DstPort = int(dstPort.Int64)
+		}
+		if protocol.Valid {
+			p.Protocol = protocol.String
 		}
 		if flags.Valid {
 			p.Flags = flags.String
@@ -2401,4 +2427,63 @@ func (r *SQLiteRepository) GetAllKeyValues() (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+// LinkPacketsToFlows updates packet records to link them with their corresponding flows
+// by matching on tenant_id, src_ip, dst_ip, protocol, and src_port.
+// It accounts for flow canonicalization by checking both directions (packet→flow and flow→packet).
+// Returns the number of packets updated and any error encountered.
+func (r *SQLiteRepository) LinkPacketsToFlows(tenantID string) (int64, error) {
+	// SQL UPDATE query that matches packets to flows considering bidirectional canonicalization
+	// We need to match in BOTH directions because flows are canonicalized but packets store actual wire data
+	query := `
+		UPDATE packets
+		SET flow_id = (
+			SELECT f.id
+			FROM flows f
+			WHERE f.tenant_id = packets.tenant_id
+			  AND f.protocol = packets.protocol
+			  AND (
+				  -- Match in canonical direction (packet src→dst matches flow src→dst)
+				  (f.src_ip = packets.src_ip 
+				   AND f.dst_ip = packets.dst_ip 
+				   AND f.src_port = packets.src_port)
+				  OR
+				  -- Match in reversed direction (packet src→dst matches flow dst→src)
+				  (f.src_ip = packets.dst_ip 
+				   AND f.dst_ip = packets.src_ip 
+				   AND f.src_port = packets.dst_port)
+			  )
+			LIMIT 1
+		)
+		WHERE packets.tenant_id = ?
+		  AND (packets.flow_id IS NULL OR packets.flow_id = 0)
+		  AND EXISTS (
+			  SELECT 1
+			  FROM flows f
+			  WHERE f.tenant_id = packets.tenant_id
+				AND f.protocol = packets.protocol
+				AND (
+					(f.src_ip = packets.src_ip 
+					 AND f.dst_ip = packets.dst_ip 
+					 AND f.src_port = packets.src_port)
+					OR
+					(f.src_ip = packets.dst_ip 
+					 AND f.dst_ip = packets.src_ip 
+					 AND f.src_port = packets.dst_port)
+				)
+		  );
+	`
+
+	result, err := r.db.Exec(query, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to link packets to flows: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected count: %w", err)
+	}
+
+	return rowsAffected, nil
 }

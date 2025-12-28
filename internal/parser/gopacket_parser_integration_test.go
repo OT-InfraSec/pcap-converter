@@ -167,8 +167,6 @@ func createHTTPRequestResponsePCAP(t *testing.T) string {
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ipReq := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
 		SrcIP:    clientIP,
 		DstIP:    serverIP,
 		Protocol: layers.IPProtocolTCP,
@@ -181,6 +179,7 @@ func createHTTPRequestResponsePCAP(t *testing.T) string {
 		SYN:     false,
 		ACK:     true,
 	}
+	tcpReq.SetNetworkLayerForChecksum(ipReq)
 	payload := []byte("GET / HTTP/1.1\r\nHost: server\r\n\r\n")
 
 	bufReq := gopacket.NewSerializeBuffer()
@@ -199,8 +198,6 @@ func createHTTPRequestResponsePCAP(t *testing.T) string {
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ipResp := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
 		SrcIP:    serverIP,
 		DstIP:    clientIP,
 		Protocol: layers.IPProtocolTCP,
@@ -213,6 +210,7 @@ func createHTTPRequestResponsePCAP(t *testing.T) string {
 		SYN:     false,
 		ACK:     true,
 	}
+	tcpResp.SetNetworkLayerForChecksum(ipResp)
 	respPayload := []byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello")
 
 	bufResp := gopacket.NewSerializeBuffer()
@@ -243,8 +241,6 @@ func createOPCUARequestResponsePCAP(t *testing.T) string {
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ipReq := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
 		SrcIP:    clientIP,
 		DstIP:    serverIP,
 		Protocol: layers.IPProtocolTCP,
@@ -257,6 +253,7 @@ func createOPCUARequestResponsePCAP(t *testing.T) string {
 		SYN:     false,
 		ACK:     true,
 	}
+	tcpReq.SetNetworkLayerForChecksum(ipReq)
 	opcPayload := []byte{0x48, 0x45, 0x4c, 0x46} // OPC UA header
 
 	bufReq := gopacket.NewSerializeBuffer()
@@ -275,8 +272,6 @@ func createOPCUARequestResponsePCAP(t *testing.T) string {
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ipResp := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
 		SrcIP:    serverIP,
 		DstIP:    clientIP,
 		Protocol: layers.IPProtocolTCP,
@@ -289,6 +284,7 @@ func createOPCUARequestResponsePCAP(t *testing.T) string {
 		SYN:     false,
 		ACK:     true,
 	}
+	tcpResp.SetNetworkLayerForChecksum(ipResp)
 	respPayload := []byte{0x41, 0x43, 0x4b, 0x00}
 
 	bufResp := gopacket.NewSerializeBuffer()
@@ -490,4 +486,113 @@ func writePCAPFile(t *testing.T, filename string, buf *bytes.Buffer) string {
 	require.NoError(t, err, "Failed to close PCAP file")
 
 	return filename
+}
+
+// TestIntegration_PacketsLinkedToFlows validates that all packets are properly linked to flows
+// This test verifies Fix C implementation for the bug where packets had no flow_id
+func TestIntegration_PacketsLinkedToFlows(t *testing.T) {
+	pcapFile := createHTTPRequestResponsePCAP(t)
+	defer os.Remove(pcapFile)
+
+	repo := &testutil.MockRepository{}
+	parser := NewGopacketParser(pcapFile, repo, "test-tenant")
+
+	err := parser.ParseFile()
+	require.NoError(t, err, "ParseFile should succeed")
+
+	// Debug output - check FlowManager directly
+	flowMgrFlows := parser.flowManager.GetAllFlows()
+	t.Logf("FlowManager flows: %d", len(flowMgrFlows))
+	for i, flow := range flowMgrFlows {
+		t.Logf("FlowMgr Flow %d: Src=%v:%d, Dst=%v:%d, Proto=%s",
+			i, flow.SrcIP, flow.SrcPort, flow.DstIP, flow.DstPort, flow.Protocol)
+	}
+
+	// Verify flows were created
+	flows := repo.Flows
+	require.NotEmpty(t, flows, "Should have created flows")
+
+	// Verify all packets have flow_id assigned (mock LinkPacketsToFlows runs automatically)
+	packets := repo.Packets
+	require.NotEmpty(t, packets, "Should have created packets")
+
+	linkedCount := int64(0)
+	for _, pkt := range packets {
+		if pkt.FlowID != 0 {
+			linkedCount++
+			// Verify the flow_id points to a valid flow
+			flowFound := false
+			for _, flow := range flows {
+				if flow.ID == pkt.FlowID {
+					flowFound = true
+					// Verify packet attributes match flow (accounting for bidirectional)
+					srcMatch := pkt.SrcIP.String() == flow.SrcIP.String() &&
+						pkt.DstIP.String() == flow.DstIP.String()
+					dstMatch := pkt.SrcIP.String() == flow.DstIP.String() &&
+						pkt.DstIP.String() == flow.SrcIP.String()
+					assert.True(t, srcMatch || dstMatch,
+						"Packet IPs should match flow in either direction")
+					assert.Equal(t, flow.Protocol, pkt.Protocol,
+						"Packet protocol should match flow protocol")
+					break
+				}
+			}
+			assert.True(t, flowFound, "Packet flow_id should reference a valid flow")
+		}
+	}
+
+	// All packets should be linked after ParseFile completes
+	assert.Equal(t, len(packets), int(linkedCount),
+		"All packets should be linked to flows")
+}
+
+// TestIntegration_PacketsLinkedToFlows_WithRealDatabase validates packet-flow linking
+// with actual SQLite database (not just mock)
+func TestIntegration_PacketsLinkedToFlows_WithRealDatabase(t *testing.T) {
+	pcapFile := createHTTPRequestResponsePCAP(t)
+	defer os.Remove(pcapFile)
+
+	// Use real SQLite repository
+	repo, err := testutil.NewTestRepository()
+	require.NoError(t, err, "Failed to create test repository")
+	defer repo.Close()
+
+	parser := NewGopacketParser(pcapFile, repo, "test-tenant")
+
+	err = parser.ParseFile()
+	require.NoError(t, err, "ParseFile should succeed")
+
+	// Query packets from database
+	packets, err := repo.AllPackets("test-tenant")
+	require.NoError(t, err, "Failed to query packets")
+	require.NotEmpty(t, packets, "Should have packets in database")
+
+	// Query flows from database
+	flows, err := repo.GetFlows("test-tenant", nil)
+	require.NoError(t, err, "Failed to query flows")
+	require.NotEmpty(t, flows, "Should have flows in database")
+
+	// Verify all packets have flow_id
+	unlinkedCount := 0
+	for _, pkt := range packets {
+		if pkt.FlowID == 0 {
+			unlinkedCount++
+			t.Logf("Unlinked packet: src=%s:%d dst=%s:%d proto=%s",
+				pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Protocol)
+		} else {
+			// Verify flow exists
+			flowFound := false
+			for _, flow := range flows {
+				if flow.ID == pkt.FlowID {
+					flowFound = true
+					break
+				}
+			}
+			assert.True(t, flowFound,
+				"Packet flow_id=%d should reference existing flow", pkt.FlowID)
+		}
+	}
+
+	assert.Equal(t, 0, unlinkedCount,
+		"All packets should be linked to flows (found %d unlinked)", unlinkedCount)
 }

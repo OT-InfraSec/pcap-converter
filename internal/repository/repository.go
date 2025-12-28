@@ -50,6 +50,9 @@ type Repository interface {
 	// Batch flow operations for performance
 	AddFlows(flows []*model.Flow) error
 	UpsertFlows(flows []*model.Flow) error
+	// LinkPacketsToFlows updates packet records to link them with their corresponding flows
+	// by matching on tenant_id, src_ip, dst_ip, protocol, and src_port (accounting for flow canonicalization)
+	LinkPacketsToFlows(tenantID string) (int64, error)
 
 	// DNS operations
 	AddDNSQuery(query *model.DNSQuery) error

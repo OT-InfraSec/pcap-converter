@@ -1522,6 +1522,13 @@ func (p *GopacketParser) ParseFile() error {
 		}
 	}
 
+	// Link packets to their flows now that all flows have been saved with database IDs
+	updatedCount, err := p.repo.LinkPacketsToFlows(p.TenantID)
+	if err != nil {
+		return fmt.Errorf("failed to link packets to flows: %w", err)
+	}
+	log.Debug().Msgf("Linked %d packets to flows\n", updatedCount)
+
 	// Batch process services
 	serviceBatch := make([]*model2.Service, 0, maxBatchSize)
 	serviceCount := 0

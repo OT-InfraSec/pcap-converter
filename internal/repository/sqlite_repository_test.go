@@ -294,3 +294,145 @@ func TestSQLiteRepository_OPCUABidirectionalIntegration(t *testing.T) {
 	// Verify protocol
 	assert.Equal(t, "OPC UA", flow.Protocol)
 }
+
+func TestSQLiteRepository_LinkPacketsToFlows(t *testing.T) {
+	repo, err := NewSQLiteRepository(":memory:")
+	require.NoError(t, err)
+	defer repo.Close()
+
+	tenantID := "test-tenant"
+
+	// Create test devices
+	device1 := &model.Device{
+		TenantID:       tenantID,
+		Address:        "192.168.1.10",
+		AddressType:    "IP",
+		AddressSubType: "IPv4",
+		FirstSeen:      time.Now(),
+		LastSeen:       time.Now(),
+		MACAddressSet:  model.NewMACAddressSet(),
+	}
+	device2 := &model.Device{
+		TenantID:       tenantID,
+		Address:        "192.168.1.20",
+		AddressType:    "IP",
+		AddressSubType: "IPv4",
+		FirstSeen:      time.Now(),
+		LastSeen:       time.Now(),
+		MACAddressSet:  model.NewMACAddressSet(),
+	}
+	require.NoError(t, repo.UpsertDevice(device1))
+	require.NoError(t, repo.UpsertDevice(device2))
+
+	// Create flow (will get database ID assigned)
+	flow := &model.Flow{
+		TenantID:         tenantID,
+		SrcIP:            net.ParseIP("192.168.1.10"),
+		DstIP:            net.ParseIP("192.168.1.20"),
+		SrcPort:          12345,
+		DstPort:          80,
+		Protocol:         "tcp",
+		PacketCountOut:   1,
+		ByteCountOut:     100,
+		PacketCountIn:    0,
+		ByteCountIn:      0,
+		FirstSeen:        time.Now(),
+		LastSeen:         time.Now(),
+		PacketRefs:       []int64{},
+		SourcePorts:      model.NewSet(),
+		DestinationPorts: model.NewSet(),
+	}
+	flow.SourcePorts.Add("12345")
+	flow.DestinationPorts.Add("80")
+	require.NoError(t, repo.AddFlow(flow))
+	require.NotZero(t, flow.ID, "Flow should have database ID assigned")
+
+	// Create packets without flow_id (simulating the bug)
+	packet1 := &model.Packet{
+		TenantID:  tenantID,
+		FlowID:    0, // Not linked yet
+		Timestamp: time.Now(),
+		SrcIP:     net.ParseIP("192.168.1.10"),
+		DstIP:     net.ParseIP("192.168.1.20"),
+		SrcPort:   12345,
+		DstPort:   80,
+		Protocol:  "tcp",
+		Length:    100,
+		Layers:    map[string]interface{}{},
+		Protocols: []string{"tcp"},
+	}
+	packet2 := &model.Packet{
+		TenantID:  tenantID,
+		FlowID:    0, // Not linked yet (reverse direction)
+		Timestamp: time.Now(),
+		SrcIP:     net.ParseIP("192.168.1.20"),
+		DstIP:     net.ParseIP("192.168.1.10"),
+		SrcPort:   80,
+		DstPort:   12345,
+		Protocol:  "tcp",
+		Length:    200,
+		Layers:    map[string]interface{}{},
+		Protocols: []string{"tcp"},
+	}
+	// Packet from different tenant - should not be linked
+	packet3 := &model.Packet{
+		TenantID:  "other-tenant",
+		FlowID:    0,
+		Timestamp: time.Now(),
+		SrcIP:     net.ParseIP("192.168.1.10"),
+		DstIP:     net.ParseIP("192.168.1.20"),
+		SrcPort:   12345,
+		DstPort:   80,
+		Protocol:  "tcp",
+		Length:    150,
+		Layers:    map[string]interface{}{},
+		Protocols: []string{"tcp"},
+	}
+
+	require.NoError(t, repo.UpsertPacket(packet1))
+	require.NoError(t, repo.UpsertPacket(packet2))
+	require.NoError(t, repo.UpsertPacket(packet3))
+
+	// Verify packets don't have flow_id initially
+	packets, err := repo.AllPackets(tenantID)
+	require.NoError(t, err)
+	require.Len(t, packets, 2)
+	assert.Zero(t, packets[0].FlowID, "Packet should not have flow_id before linking")
+	assert.Zero(t, packets[1].FlowID, "Packet should not have flow_id before linking")
+
+	// Debug: Check flow details
+	flows, err := repo.GetFlows(tenantID, nil)
+	require.NoError(t, err)
+	require.Len(t, flows, 1)
+	t.Logf("Flow: ID=%d, Src=%s:%d, Dst=%s:%d, Proto=%s",
+		flows[0].ID, flows[0].SrcIP, flows[0].SrcPort, flows[0].DstIP, flows[0].DstPort, flows[0].Protocol)
+	for i, pkt := range packets {
+		t.Logf("Packet %d: Src=%s:%d, Dst=%s:%d, Proto=%s, FlowID=%d",
+			i, pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Protocol, pkt.FlowID)
+	}
+
+	// Link packets to flows
+	linkedCount, err := repo.LinkPacketsToFlows(tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), linkedCount, "Should link 2 packets (forward and reverse)")
+
+	// Verify packets now have flow_id
+	packets, err = repo.AllPackets(tenantID)
+	require.NoError(t, err)
+	require.Len(t, packets, 2)
+
+	for _, pkt := range packets {
+		assert.Equal(t, flow.ID, pkt.FlowID, "Packet should be linked to flow")
+	}
+
+	// Verify packet from other tenant was not linked
+	otherPackets, err := repo.AllPackets("other-tenant")
+	require.NoError(t, err)
+	require.Len(t, otherPackets, 1)
+	assert.Zero(t, otherPackets[0].FlowID, "Packet from other tenant should not be linked")
+
+	// Test idempotency - running again should link 0 packets
+	linkedCount, err = repo.LinkPacketsToFlows(tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), linkedCount, "Should link 0 packets on second run (all already linked)")
+}

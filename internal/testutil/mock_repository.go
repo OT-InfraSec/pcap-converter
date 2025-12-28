@@ -5,6 +5,11 @@ import (
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 )
 
+// NewTestRepository creates a new in-memory SQLite repository for testing
+func NewTestRepository() (repository.Repository, error) {
+	return repository.NewSQLiteRepository(":memory:")
+}
+
 type MockRepository struct {
 	repository.Repository
 	Packets               []*model.Packet
@@ -35,6 +40,10 @@ func (m *MockRepository) AddFlow(flow *model.Flow) error {
 	// Validiere den Flow, bevor er hinzugefügt wird
 	if err := flow.Validate(); err != nil {
 		return err
+	}
+	// Simulate database auto-increment ID assignment
+	if flow.ID == 0 {
+		flow.ID = int64(len(m.Flows) + 1)
 	}
 	m.Flows = append(m.Flows, flow)
 	return nil
@@ -495,4 +504,39 @@ func (m *MockRepository) GetAllKeyValues() (map[string]string, error) {
 		result[k] = v
 	}
 	return result, nil
+}
+
+// LinkPacketsToFlows mock implementation
+func (m *MockRepository) LinkPacketsToFlows(tenantID string) (int64, error) {
+	// Simple mock: link packets to flows by matching src_ip, dst_ip, protocol, src_port
+	var linkedCount int64
+	for _, packet := range m.Packets {
+		if packet.TenantID != tenantID || packet.FlowID != 0 {
+			continue // Skip packets from other tenants or already linked
+		}
+
+		// Try to find matching flow
+		for _, flow := range m.Flows {
+			if flow.TenantID != tenantID {
+				continue
+			}
+
+			// Check both directions for match
+			srcIPMatch := packet.SrcIP.String() == flow.SrcIP.String()
+			dstIPMatch := packet.DstIP.String() == flow.DstIP.String()
+			srcIPMatchRev := packet.SrcIP.String() == flow.DstIP.String()
+			dstIPMatchRev := packet.DstIP.String() == flow.SrcIP.String()
+			protoMatch := packet.Protocol == flow.Protocol
+			srcPortMatch := packet.SrcPort == flow.SrcPort
+			dstPortMatch := packet.DstPort == flow.SrcPort // reversed direction
+
+			if protoMatch && ((srcIPMatch && dstIPMatch && srcPortMatch) ||
+				(srcIPMatchRev && dstIPMatchRev && dstPortMatch)) {
+				packet.FlowID = flow.ID
+				linkedCount++
+				break
+			}
+		}
+	}
+	return linkedCount, nil
 }
