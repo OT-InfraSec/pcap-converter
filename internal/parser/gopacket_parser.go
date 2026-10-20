@@ -1877,6 +1877,19 @@ var ProtocolColorMap = map[string]string{
 	"rdpudp": "#ff69b4",
 }
 
+func init() {
+	// Some switches use 0x9100 instead of the 802.1ad ethertype for the outer QinQ tag;
+	// gopacket does not know it, so decode it as an 802.1Q tag as well.
+	layers.EthernetTypeMetadata[ethernetTypeQinQLegacy] = layers.EnumMetadata{
+		DecodeWith: layers.LayerTypeDot1Q,
+		Name:       "QinQ (0x9100)",
+		LayerType:  layers.LayerTypeDot1Q,
+	}
+}
+
+// ethernetTypeQinQLegacy is the non-standard 0x9100 outer-tag ethertype.
+const ethernetTypeQinQLegacy layers.EthernetType = 0x9100
+
 // extractVLANTag returns the outer and (QinQ) inner 802.1Q VLAN IDs of a packet.
 // Untagged frames yield the zero tag (NULL in the database, never VLAN 1).
 // VID 0 marks a priority-only tag without VLAN membership, so it is skipped.

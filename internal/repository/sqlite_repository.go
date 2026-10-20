@@ -417,46 +417,46 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 	row := r.db.QueryRow(query, tenantID, address)
 
 	var device model2.Device
-	var firstSeenStr, lastSeenStr, macAddressesStr, protocolListStr, dnsNamesStr, hostname, deviceType, vendor, os string
+	var firstSeenStr, lastSeenStr string
+	// Columns that UpsertDevices does not write are NULL, so scan them nullable
+	var macAddressesStr, additionalData, protocolListStr, dnsNamesStr, hostname, deviceType, vendor, os, addressSubType, addressScope sql.NullString
 	var dbTenantID sql.NullString
 	var isRouter, isOnlyDestination, isExternal sql.NullBool
 	var confidence sql.NullFloat64
 	var description, vlansStr sql.NullString
 
 	if err := row.Scan(&device.ID, &dbTenantID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description, &vlansStr); err != nil {
+		&addressSubType, &addressScope, &macAddressesStr, &additionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description, &vlansStr); err != nil {
 		return nil, err
 	}
 
 	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
+	device.AddressSubType = addressSubType.String
+	device.AddressScope = addressScope.String
+	device.AdditionalData = additionalData.String
+
 	device.MACAddressSet = model2.NewMACAddressSet()
 	// Try to unmarshal as JSON array first
 	var macs []string
-	if macAddressesStr != "" {
-		if err := json.Unmarshal([]byte(macAddressesStr), &macs); err != nil {
+	if macAddressesStr.String != "" {
+		if err := json.Unmarshal([]byte(macAddressesStr.String), &macs); err != nil {
 			// fallback to comma-separated list
-			macs = strings.Split(macAddressesStr, ",")
-		}
-	}
-	// Convert macs into MACAddressSet in device
-	for _, mac := range macs {
-		if mac != "" && device.MACAddressSet != nil {
-			device.MACAddressSet.Add(mac)
+			macs = strings.Split(macAddressesStr.String, ",")
 		}
 	}
 	for _, mac := range macs {
-		if mac != "" && device.MACAddressSet != nil {
+		if mac != "" {
 			device.MACAddressSet.Add(mac)
 		}
 	}
-	device.ProtocolList = model2.SetFromSlice(jsonArrayToSlice(protocolListStr))
-	device.DNSNames = model2.SetFromSlice(jsonArrayToSlice(dnsNamesStr))
-	device.Hostname = hostname
-	device.DeviceType = deviceType
-	device.Vendor = vendor
-	device.OS = os
+	device.ProtocolList = model2.SetFromSlice(jsonArrayToSlice(protocolListStr.String))
+	device.DNSNames = model2.SetFromSlice(jsonArrayToSlice(dnsNamesStr.String))
+	device.Hostname = hostname.String
+	device.DeviceType = deviceType.String
+	device.Vendor = vendor.String
+	device.OS = os.String
 	if dbTenantID.Valid {
 		device.TenantID = dbTenantID.String
 	}
@@ -1023,7 +1023,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -1045,6 +1045,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 			packet.SrcPort,
 			ipToString(packet.DstIP),
 			packet.DstPort,
+			packet.Protocol,
 			packet.Timestamp.Format(time.RFC3339Nano),
 			packet.Length,
 			packet.Flags,
@@ -1315,7 +1316,8 @@ func (r *SQLiteRepository) UpdatePacket(packet *model2.Packet) error {
 	}
 
 	_, err = r.db.Exec(
-		`UPDATE packets SET timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ? WHERE id = ?;`,
+		`UPDATE packets SET flow_id = ?, timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ?, vlan_id = ?, vlan_inner_id = ? WHERE id = ?;`,
+		packet.FlowID,
 		packet.Timestamp.Format(time.RFC3339Nano),
 		packet.Length,
 		packet.Flags,
@@ -1324,6 +1326,8 @@ func (r *SQLiteRepository) UpdatePacket(packet *model2.Packet) error {
 		packet.CaptureFile,
 		string(layersJSON),
 		string(protocolsJSON),
+		intPtrToArg(packet.VlanID),
+		intPtrToArg(packet.VlanInnerID),
 		packet.ID,
 	)
 	return err

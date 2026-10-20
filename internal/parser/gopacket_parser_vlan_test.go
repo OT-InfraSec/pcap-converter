@@ -154,3 +154,16 @@ func TestIntegration_UntaggedCaptureHasNoVLANs(t *testing.T) {
 		assert.Nil(t, p.VlanInnerID)
 	}
 }
+
+func TestExtractVLANTag_LegacyQinQEthertype(t *testing.T) {
+	frame := vlanFrame(t, 10, 200)
+	// Rewrite the outer ethertype from 802.1ad (0x88a8) to the legacy 0x9100
+	require.Equal(t, []byte{0x88, 0xa8}, frame[12:14])
+	frame[12], frame[13] = 0x91, 0x00
+
+	got := extractVLANTag(gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default))
+	require.NotNil(t, got.Outer)
+	require.NotNil(t, got.Inner)
+	assert.Equal(t, 10, *got.Outer)
+	assert.Equal(t, 200, *got.Inner)
+}

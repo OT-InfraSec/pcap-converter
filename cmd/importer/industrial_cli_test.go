@@ -55,7 +55,7 @@ func TestIndustrialCLICommands(t *testing.T) {
 		{
 			name:     "protocol stats for specific device",
 			args:     []string{"industrial", "protocol-stats", "192.168.1.10", "--db-path", tmpDB, "--format", "table"},
-			expected: []string{"DEVICE ID", "PROTOCOL", "PACKETS", "192.168.1.10", "EtherNet/IP"},
+			expected: []string{"DEVICE ID", "PROTOCOL", "OUT-PKT", "192.168.1.10", "EtherNet/IP"},
 		},
 		{
 			name:     "communication patterns for specific device",
@@ -299,8 +299,8 @@ func setupIndustrialTestData(t *testing.T, dbPath string) {
 		{
 			DeviceID:          "192.168.1.10",
 			Protocol:          "EtherNet/IP",
-			PacketCount:       1500,
-			ByteCount:         75000,
+			PacketCountOut:    1500,
+			ByteCountOut:      75000,
 			FirstSeen:         now.Add(-time.Hour),
 			LastSeen:          now,
 			CommunicationRole: "server",
@@ -309,8 +309,8 @@ func setupIndustrialTestData(t *testing.T, dbPath string) {
 		{
 			DeviceID:          "192.168.1.20",
 			Protocol:          "OPC UA",
-			PacketCount:       800,
-			ByteCount:         40000,
+			PacketCountOut:    800,
+			ByteCountOut:      40000,
 			FirstSeen:         now.Add(-time.Hour),
 			LastSeen:          now,
 			CommunicationRole: "client",

@@ -172,6 +172,11 @@ func (m *mockRepo) UpdateDeviceRelation(relation *model.DeviceRelation) error {
 	panic("unimplemented")
 }
 
+// LinkPacketsToFlows implements repository.Repository.
+func (m *mockRepo) LinkPacketsToFlows(tenantID string) (int64, error) {
+	panic("unimplemented")
+}
+
 // UpdateFlow implements repository.Repository.
 func (m *mockRepo) UpdateFlow(flow *model.Flow) error {
 	panic("unimplemented")

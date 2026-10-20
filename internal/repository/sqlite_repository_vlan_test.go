@@ -87,6 +87,12 @@ func TestSQLiteRepository_DeviceVLANSetRoundTrip(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "untagged,10,10.20", got[0].VLANSet.ToString())
 
+	// GetDevice must cope with the NULL columns UpsertDevices leaves empty
+	single, err := repo.GetDevice("t", "10.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, "untagged,10,10.20", single.VLANSet.ToString())
+	assert.Equal(t, 0, single.ProtocolList.Size())
+
 	// A second upsert replaces the set (the device manager holds the full set)
 	dev.VLANSet.Add(vlanPtr(30), nil)
 	require.NoError(t, repo.UpsertDevices([]*model.Device{dev}))
@@ -163,4 +169,36 @@ func vlanTestDevice(addr string) *model.Device {
 		MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
 		VLANSet: model.NewVLANSet(),
 	}
+}
+
+func TestSQLiteRepository_AddPacketsStoresProtocol(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	require.NoError(t, repo.AddPackets([]*model.Packet{{
+		TenantID: "t", Timestamp: time.Now(), Length: 60, Protocol: "tcp", Layers: map[string]interface{}{},
+	}}))
+
+	packets, err := repo.AllPackets("t")
+	require.NoError(t, err)
+	require.Len(t, packets, 1)
+	assert.Equal(t, "tcp", packets[0].Protocol)
+}
+
+func TestSQLiteRepository_UpdatePacketStoresVLANAndFlow(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	require.NoError(t, repo.AddPacket(&model.Packet{TenantID: "t", Timestamp: time.Now(), Length: 60, Layers: map[string]interface{}{}}))
+
+	updated := &model.Packet{
+		ID: 1, TenantID: "t", FlowID: 7, Timestamp: time.Now(), Length: 60, Layers: map[string]interface{}{},
+		VlanID: vlanPtr(10), VlanInnerID: vlanPtr(200),
+	}
+	require.NoError(t, repo.UpdatePacket(updated))
+
+	packets, err := repo.AllPackets("t")
+	require.NoError(t, err)
+	require.Len(t, packets, 1)
+	assert.EqualValues(t, 7, packets[0].FlowID)
+	require.NotNil(t, packets[0].VlanID)
+	assert.Equal(t, 10, *packets[0].VlanID)
+	require.NotNil(t, packets[0].VlanInnerID)
+	assert.Equal(t, 200, *packets[0].VlanInnerID)
 }
