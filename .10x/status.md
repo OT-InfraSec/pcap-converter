@@ -1,17 +1,17 @@
 # Project Status
 
 ## Project: pcap-converter
-**Current Phase:** Implementation (cycle 1: vlan-data)
+**Current Phase:** Cycle 1 (vlan-data) implemented and verified; cycle 2 (subnets) next
 **Last Updated:** 2026-10-20 by 10x-team (requirements split)
 **Health:** On Track
 
 ## Progress
 
 ### Done
-(none yet)
+- Cycle 1 vlan-data (R1, R2, R3, R5): implemented, tests green for touched packages (see reviews/2026-10-20-qa-report.md)
 
 ### In Progress
-- Cycle 1 design drafted: `specs/2026-10-20-vlan-data-design.md` (awaiting user review)
+- Cycle 2 subnets (R4): brainstorm pending; cycle 3 CDP queued
 - Queued: cycle 2 subnet data (R4), cycle 3 CDP (nice to have)
 
 ### Pending
