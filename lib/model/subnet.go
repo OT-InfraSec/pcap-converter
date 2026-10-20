@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Subnet sources. Only dhcp and ra are written today; the others are reserved
+// Subnet sources. dhcp, ra and cdp are written today; the others are reserved
 // so the visualizer contract stays stable when more evidence is decoded.
 const (
 	SubnetSourceDHCP     = "dhcp"
@@ -23,6 +23,9 @@ const (
 const (
 	SubnetKindOnLink    = "on-link"
 	SubnetKindDelegated = "delegated"
+	// SubnetKindAdvertised: a neighbor (CDP) claims to be connected to the prefix. It is not
+	// proof that the prefix is on-link in the VLAN of the frame.
+	SubnetKindAdvertised = "advertised"
 )
 
 // Subnet is an IP prefix observed in a VLAN. VlanID is the outer tag; nil means
@@ -53,7 +56,7 @@ func (s *Subnet) Validate() error {
 		return fmt.Errorf("subnet CIDR %q is not canonical (want %s)", s.CIDR, CanonicalCIDR(p))
 	}
 	switch s.Kind {
-	case SubnetKindOnLink, SubnetKindDelegated:
+	case SubnetKindOnLink, SubnetKindDelegated, SubnetKindAdvertised:
 	default:
 		return fmt.Errorf("unknown subnet kind %q", s.Kind)
 	}

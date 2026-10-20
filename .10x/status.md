@@ -12,7 +12,7 @@
 - Cycle 1 vlan-data (R1, R2, R3, R5): implemented, tests green for touched packages (see reviews/2026-10-20-qa-report.md)
 
 ### In Progress
-- Cycle 3 cdp-data: design approved, ADR-004 written, tasks 1-6 in decisions/engineering-manager/cdp-data.md
+- Cycle 3 cdp-data: Phase 4 complete (tasks 1-6 implemented, tests green except the 5 known iec62443 failures); Phase 5 (QA + Security) next, see decisions/sde/cdp-data.md
 - Cycle 2 subnets (R4): design approved, ADR-002 written, tasks 1-7 in decisions/engineering-manager/subnet-data.md; cycle 3 CDP queued
 - Queued: cycle 2 subnet data (R4), cycle 3 CDP (nice to have)
 

@@ -188,6 +188,25 @@ func (r *SQLiteRepository) createTables() error {
 			first_seen TEXT NOT NULL,
 			last_seen TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS cdp_neighbors (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
+			src_mac TEXT NOT NULL,
+			port_id TEXT NOT NULL,
+			vlan_id INTEGER,
+			device_id TEXT NOT NULL,
+			platform TEXT NOT NULL,
+			software_version TEXT NOT NULL,
+			sys_name TEXT NOT NULL,
+			capabilities TEXT NOT NULL,
+			addresses TEXT NOT NULL,
+			mgmt_addresses TEXT NOT NULL,
+			native_vlan INTEGER,
+			management_vlan INTEGER,
+			fingerprint TEXT NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL
+		);`,
 		`CREATE TABLE IF NOT EXISTS packet_protocols (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			packet_id INTEGER NOT NULL,
@@ -300,6 +319,7 @@ func (r *SQLiteRepository) createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_flows_vlan ON flows(vlan_id, vlan_inner_id);`,
 		// COALESCE makes untagged (NULL) subnets unique too; plain NULLs never collide in a UNIQUE index.
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_subnets_key ON subnets(tenant_id, cidr, COALESCE(vlan_id, -1), source, kind);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_cdp_neighbors_key ON cdp_neighbors(tenant_id, src_mac, port_id, COALESCE(vlan_id, -1), fingerprint);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(src_ip, dst_ip, protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(dst_ip, src_ip, protocol);`,
 	}

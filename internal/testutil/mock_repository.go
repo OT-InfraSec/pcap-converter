@@ -16,6 +16,7 @@ type MockRepository struct {
 	Devices               []*model.Device
 	Flows                 []*model.Flow
 	Subnets               []*model.Subnet
+	CDPNeighbors          []*model.CDPNeighbor
 	DNSQueries            []*model.DNSQuery
 	DeviceRelations       []*model.DeviceRelation
 	ProtocolStats         []*model.ProtocolUsageStats
@@ -550,4 +551,14 @@ func (m *MockRepository) UpsertSubnets(subnets []*model.Subnet) error {
 
 func (m *MockRepository) GetSubnets(tenantID string, filters map[string]interface{}) ([]*model.Subnet, error) {
 	return m.Subnets, nil
+}
+
+// UpsertCDPNeighbors records neighbors without merging, for assertions on what the parser emitted.
+func (m *MockRepository) UpsertCDPNeighbors(neighbors []*model.CDPNeighbor) error {
+	m.CDPNeighbors = append(m.CDPNeighbors, neighbors...)
+	return nil
+}
+
+func (m *MockRepository) GetCDPNeighbors(tenantID string, filters map[string]interface{}) ([]*model.CDPNeighbor, error) {
+	return m.CDPNeighbors, nil
 }

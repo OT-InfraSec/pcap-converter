@@ -51,6 +51,7 @@ type GopacketParser struct {
 	deviceManager  DeviceManager
 	serviceManager ServiceManager
 	subnetManager  SubnetManager
+	cdpManager     CDPManager
 
 	// SSDP queries
 	ssdpQueries map[string]*SSDPQuery
@@ -90,6 +91,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		deviceManager:      deviceManager,
 		serviceManager:     serviceManager,
 		subnetManager:      NewDefaultSubnetManager(tenantID),
+		cdpManager:         NewDefaultCDPManager(tenantID),
 		dnsQueries:         make(map[string]*DNSQuery),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
@@ -550,6 +552,19 @@ func (p *GopacketParser) ParseFile() error {
 				"ethernet_type": eth.EthernetType.String(),
 			}
 			protocols = append(protocols, "ethernet")
+
+			// CDP: frames carry no IP header, the interface is identified by the Ethernet source.
+			if info := cdpInfoFromPacket(packet); info != nil {
+				ts := packet.Metadata().Timestamp
+				if neighbor, ok := cdpNeighborFromInfo(info); ok {
+					neighbor.SrcMAC = srcMAC
+					neighbor.VlanID = vlan.Outer
+					p.cdpManager.Observe(neighbor, ts)
+				}
+				for _, prefix := range cdpPrefixes(info) {
+					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceCDP, model2.SubnetKindAdvertised, ts)
+				}
+			}
 		}
 
 		// ARP
@@ -1579,6 +1594,12 @@ func (p *GopacketParser) ParseFile() error {
 	if subnets := p.subnetManager.GetAllSubnets(); len(subnets) > 0 {
 		if err = p.repo.UpsertSubnets(subnets); err != nil {
 			return fmt.Errorf("failed to save subnets: %w", err)
+		}
+	}
+
+	if neighbors := p.cdpManager.GetAllNeighbors(); len(neighbors) > 0 {
+		if err = p.repo.UpsertCDPNeighbors(neighbors); err != nil {
+			return fmt.Errorf("failed to save CDP neighbors: %w", err)
 		}
 	}
 

@@ -61,6 +61,13 @@ type Repository interface {
 	// GetSubnets returns a tenant's subnets; a nil filter value matches NULL (untagged VLAN).
 	GetSubnets(tenantID string, filters map[string]interface{}) ([]*model.Subnet, error)
 
+	// CDP neighbor operations
+	// UpsertCDPNeighbors inserts neighbors or widens the first_seen/last_seen range of
+	// existing rows with the same key (interface, VLAN, advertised values).
+	UpsertCDPNeighbors(neighbors []*model.CDPNeighbor) error
+	// GetCDPNeighbors returns a tenant's neighbors; a nil filter value matches NULL (untagged VLAN).
+	GetCDPNeighbors(tenantID string, filters map[string]interface{}) ([]*model.CDPNeighbor, error)
+
 	// DNS operations
 	AddDNSQuery(query *model.DNSQuery) error
 	GetDNSQueries(tenantID string, eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error)

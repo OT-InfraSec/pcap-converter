@@ -242,6 +242,16 @@ func (m *mockRepo) GetSubnets(tenantID string, filters map[string]interface{}) (
 	panic("unimplemented")
 }
 
+// UpsertCDPNeighbors implements repository.Repository.
+func (m *mockRepo) UpsertCDPNeighbors(neighbors []*model.CDPNeighbor) error {
+	panic("unimplemented")
+}
+
+// GetCDPNeighbors implements repository.Repository.
+func (m *mockRepo) GetCDPNeighbors(tenantID string, filters map[string]interface{}) ([]*model.CDPNeighbor, error) {
+	panic("unimplemented")
+}
+
 // UpsertPacket implements repository.Repository.
 func (m *mockRepo) UpsertPacket(packet *model.Packet) error {
 	panic("unimplemented")
