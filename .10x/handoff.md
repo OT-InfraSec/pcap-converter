@@ -8,7 +8,7 @@
 
 ### Context
 Project state initialized. Ready for the first role to begin work.
-Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRepos/pcap-importer/web_visualizer_go/docs/pcap-importer-requirements.md. Open scoping question: split R1-R3+R5 (VLAN + schema version) from R4 (subnets)?
+Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRepos/pcap-importer/web_visualizer_go/docs/pcap-importer-requirements.md. Requirements split into cycles (see `specs/2026-10-20-segment-data-overview.md`): cycle 1 VLAN (R1,R2,R3,R5), cycle 2 subnets (R4), cycle 3 CDP. Next: brainstorm/design cycle 1.
 
 ### Open Questions
 - What are we building?
