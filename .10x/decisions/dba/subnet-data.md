@@ -1,0 +1,2 @@
+# DBA: subnet-data
+Table `subnets(id, tenant_id, cidr, vlan_id NULL, source, first_seen, last_seen)`. Unique index `idx_subnets_key(tenant_id, cidr, COALESCE(vlan_id,-1), source)` because a plain UNIQUE treats NULLs as distinct. VLAN IDs are 1..4094 so -1 never collides. Times are RFC3339Nano text like other tables; widening is done in Go because strings with different zone offsets do not order lexicographically. No migration, `user_version` stays 1. Lookups are by tenant (+vlan); table is small, no further index.

@@ -27,3 +27,5 @@ Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRe
 > Cycle 1 complete (commit feat: store VLAN tags). Visualizer contract: NULL = untagged; devices.vlans tokens `untagged,10,10.200`; user_version=1. Open items: tech debt in decisions/sde/vlan-data.md. Next: brainstorm cycle 2 (subnets, R4).
 
 > Phase 3 complete (cycle 2 subnet-data): spec specs/2026-10-20-subnet-data-design.md, ADR-002, tasks in decisions/engineering-manager/subnet-data.md. Next: user reviews spec, then SDE implements tasks 1-7 (use tdd, synthesized pcaps).
+
+> Phase 4 complete (cycle 2 subnet-data): see decisions/sde/subnet-data.md and decisions/dba/subnet-data.md. Test: extractors with malformed bytes (security: parser handles untrusted packets), IA_PD semantics, VLAN/NULL handling, re-import widening. Known gaps: DHCPv6 relay messages not unwrapped; db_schema.md class diagram lacks subnets. Next: QA + Security verification.
