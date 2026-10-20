@@ -8,7 +8,7 @@
 
 ### Context
 Project state initialized. Ready for the first role to begin work.
-Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRepos/pcap-importer/web_visualizer_go/docs/pcap-importer-requirements.md. Requirements split into cycles (see `specs/2026-10-20-segment-data-overview.md`): cycle 1 VLAN (R1,R2,R3,R5), cycle 2 subnets (R4), cycle 3 CDP. Next: brainstorm/design cycle 1.
+Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRepos/pcap-importer/web_visualizer_go/docs/pcap-importer-requirements.md. Requirements split into cycles (see `specs/2026-10-20-segment-data-overview.md`): cycle 1 VLAN (R1,R2,R3,R5), cycle 2 subnets (R4), cycle 3 CDP. Schema/version question resolved: breaking changes OK, no migrations, `user_version = 1` set in cycle 1 only (see decisions.md). Next: brainstorm/design cycle 1.
 
 ### Open Questions
 - What are we building?

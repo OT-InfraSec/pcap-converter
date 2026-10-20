@@ -18,6 +18,9 @@ Part of [segment data overview](2026-10-20-segment-data-overview.md).
 - Set `PRAGMA user_version` to 1 or higher (visualizer ADR 0005) once the database contains the data, so the visualizer can detect databases from older converters and disable segment grouping with a "please re-import" notice.
 
 ## Open questions for design
-- R5 says the marker is set once R1-R4 data exists. With the split, should cycle 1 set `user_version = 1` (VLAN only) and cycle 2 bump it to 2? Otherwise a v1 database would lack subnets. Needs confirmation against visualizer ADR 0005.
+- ~~Version marker sequencing~~ Resolved 2026-10-20: cycle 1 sets `user_version = 1`; a database lacking subnets in the interim is acceptable. No per-cycle versions (see decision below).
 - Flow key change: how do existing flow canonicalizer and `flow_manager.go` handle the added VLAN dimension, and how are `packets.flow_id` links affected?
 - Device set encoding for "seen untagged": follow `mac_addresses` text-set pattern with a sentinel, or a separate representation?
+
+## Decisions
+- 2026-10-20 (user): Breaking changes are allowed and no old data is kept. The schema is changed in place and databases are regenerated; no migrations, no backward-compatible readers, no intermediate schema versions. An interim database that lacks subnet data is acceptable.

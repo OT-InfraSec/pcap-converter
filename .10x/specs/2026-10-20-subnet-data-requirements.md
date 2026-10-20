@@ -19,4 +19,6 @@ One row per detected Subnet:
 ## Open questions for design
 - Which evidence sources are in scope for the first delivery (DHCP only vs. also CDP/EIGRP/OSPF)? EIGRP TLV decoding and OSPF support are sizeable on their own.
 - Inference rules and confidence for `inferred` prefixes.
-- Schema version bump (see cycle 1 open questions).
+
+## Decisions
+- 2026-10-20 (user): Breaking schema changes are allowed; no migrations or intermediate versions (see cycle 1 spec). Cycle 2 does not require a separate version bump.
