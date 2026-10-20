@@ -1,0 +1,2 @@
+# Senior Engineer: subnet-data
+Extractors take (option bytes) and return []netip.Prefix; parser passes VLAN from extractVLANTag and packet timestamp. DHCPv4: reuse the existing option loop at the DHCPv4 reply block. RA: parse ICMPv6 payload options manually (type 3, len 4, prefix len, flags byte with L=0x80, prefix at offset 16 of the option... verify against RFC 4861 section 4.6.2 in tests). DHCPv6: iterate options 25/26 only. Unique index must be NULL-safe (COALESCE(vlan_id,-1)).

@@ -25,3 +25,5 @@ Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRe
 > Phase 3 complete: ADR-001, tasks in decisions/engineering-manager/vlan-data.md. SDE implements tasks 1-5.
 
 > Cycle 1 complete (commit feat: store VLAN tags). Visualizer contract: NULL = untagged; devices.vlans tokens `untagged,10,10.200`; user_version=1. Open items: tech debt in decisions/sde/vlan-data.md. Next: brainstorm cycle 2 (subnets, R4).
+
+> Phase 3 complete (cycle 2 subnet-data): spec specs/2026-10-20-subnet-data-design.md, ADR-002, tasks in decisions/engineering-manager/subnet-data.md. Next: user reviews spec, then SDE implements tasks 1-7 (use tdd, synthesized pcaps).

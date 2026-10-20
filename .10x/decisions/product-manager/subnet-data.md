@@ -1,0 +1,2 @@
+# PM: subnet-data
+Goal: analyst sees each VLAN's subnets with provenance. Stories: (1) DHCPv4 subnet from mask+offer validated by router; (2) IPv6 on-link prefixes from RA; (3) IA_PD prefixes via DHCPv6 stored as dhcp; (4) same prefix in two VLANs = two rows; untagged = NULL. Success: synthesized pcaps produce expected rows; no row on malformed/unvalidated evidence. Out: inference, CDP/EIGRP/OSPF, membership.

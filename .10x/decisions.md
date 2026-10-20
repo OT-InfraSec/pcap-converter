@@ -22,3 +22,10 @@ Started: 2026-10-20
 - **Alternatives considered:** Per-cycle version bumps (v1 VLAN, v2 subnets).
 - **Trade-offs accepted:** Interim databases lack subnets; visualizer sees `user_version = 1` without subnet data.
 - **Impacts:** DBA/Architect (in-place schema edits in `createTables`), SDE (no migration code), cycle 2 (no version bump).
+
+### 2026-10-20 — User + 10x-team: Subnet evidence scope (cycle 2)
+- **Decision:** Sources are DHCPv4 (mask + offered address, validated by router option), DHCPv6 IA_PD and ICMPv6 RA on-link prefixes. No inference. New `source` value `ra`; DHCPv4 and DHCPv6 both `dhcp`. Row key is `(cidr, vlan, source)`.
+- **Why:** Evidence-backed first; CDP/EIGRP/OSPF are sizeable and deferred. See ADR-002.
+- **Alternatives considered:** DHCP only; inference of /24 and /64; extra `dhcpv6`/`dhcp-pd` source values.
+- **Trade-offs accepted:** Networks without DHCP router option or RA give no row; IA_PD rows may not be on-link and are indistinguishable by `source`.
+- **Impacts:** Visualizer needs a label for `ra` and a note on delegated prefixes; repository interface and mocks change.
