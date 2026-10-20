@@ -14,10 +14,10 @@ import (
 type FlowManager interface {
 	// UpdateFlow updates or creates a flow with the given parameters
 	// Returns the flow and whether it was reversed during canonicalization
-	UpdateFlow(src, dst, protocol string, srcPort, dstPort string, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool)
+	UpdateFlow(src, dst, protocol string, srcPort, dstPort string, vlan model.VLANTag, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool)
 
 	// GetFlow retrieves a flow by its canonical key
-	GetFlow(src, dst, protocol string) *model.Flow
+	GetFlow(src, dst, protocol string, vlan model.VLANTag) *model.Flow
 
 	// GetAllFlows returns all tracked flows
 	GetAllFlows() []*model.Flow
@@ -47,7 +47,7 @@ func NewDefaultFlowManager(tenantID string, flowCanonicalizer helper.FlowCanonic
 }
 
 // UpdateFlow updates or creates a flow with proper canonicalization
-func (fm *DefaultFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dstPort string, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool) {
+func (fm *DefaultFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dstPort string, vlan model.VLANTag, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool) {
 	// Create port sets for canonicalization
 	sourcePortsSet := model.NewSet()
 	destinationPortsSet := model.NewSet()
@@ -64,13 +64,14 @@ func (fm *DefaultFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dst
 		src, dst, *sourcePortsSet, *destinationPortsSet, protocol)
 
 	// Create flow key using canonical direction
-	flowKey := fmt.Sprintf("%s:%s:%s", canonicalSrc, canonicalDst, protocol)
+	// The same traffic in two VLANs is two flows, so VLAN is part of the key
+	flowKey := fmt.Sprintf("%s:%s:%s:%s", canonicalSrc, canonicalDst, protocol, vlan.Token())
 
 	// Check if flow already exists
 	flow, exists := fm.flows[flowKey]
 	if !exists {
 		// Create new flow in canonical direction
-		flow = fm.createNewFlow(canonicalSrc, canonicalDst, protocol, srcPort, dstPort,
+		flow = fm.createNewFlow(canonicalSrc, canonicalDst, protocol, srcPort, dstPort, vlan,
 			packetSize, timestamp, packetID, sourcePortsSet, destinationPortsSet, isReversed)
 		fm.flows[flowKey] = flow
 	} else {
@@ -82,7 +83,7 @@ func (fm *DefaultFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dst
 }
 
 // createNewFlow creates a new flow record
-func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol, srcPort, dstPort string,
+func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol, srcPort, dstPort string, vlan model.VLANTag,
 	packetSize int, timestamp time.Time, packetID int64,
 	sourcePortsSet, destinationPortsSet *model.Set, isReversed bool) *model.Flow {
 
@@ -147,6 +148,8 @@ func (fm *DefaultFlowManager) createNewFlow(canonicalSrc, canonicalDst, protocol
 		MaxPacketSize:    packetSize,
 		SourcePorts:      flowSourcePorts,
 		DestinationPorts: flowDestPorts,
+		VlanID:           vlan.Outer,
+		VlanInnerID:      vlan.Inner,
 	}
 
 	return flow
@@ -204,13 +207,13 @@ func (fm *DefaultFlowManager) updateExistingFlow(flow *model.Flow, packetSize in
 }
 
 // GetFlow retrieves a flow by canonical key
-func (fm *DefaultFlowManager) GetFlow(src, dst, protocol string) *model.Flow {
+func (fm *DefaultFlowManager) GetFlow(src, dst, protocol string, vlan model.VLANTag) *model.Flow {
 	// We need to canonicalize to get the right key
 	emptyPorts := model.NewSet()
 	canonicalSrc, canonicalDst, _ := fm.flowCanonicalizer.CanonicalizeFlow(
 		src, dst, *emptyPorts, *emptyPorts, protocol)
 
-	flowKey := fmt.Sprintf("%s:%s:%s", canonicalSrc, canonicalDst, protocol)
+	flowKey := fmt.Sprintf("%s:%s:%s:%s", canonicalSrc, canonicalDst, protocol, vlan.Token())
 	return fm.flows[flowKey]
 }
 

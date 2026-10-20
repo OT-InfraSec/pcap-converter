@@ -10,6 +10,7 @@ import (
 type MockDeviceManager struct {
 	UpsertDeviceFunc                   func(address, addressType string, timestamp time.Time, addressSubType, macAddress, additionalData string, isDestination bool) *model.Device
 	GetDeviceFunc                      func(address, addressType string) *model.Device
+	RecordVLANFunc                     func(address, addressType string, vlan model.VLANTag)
 	GetAllDevicesFunc                  func() []*model.Device
 	UpdateDeviceWithIndustrialInfoFunc func(deviceIP string, protocolInfo model.IndustrialProtocolInfo, isDestination bool)
 	GetDeviceCounterFunc               func() int64
@@ -17,6 +18,7 @@ type MockDeviceManager struct {
 
 	UpsertDeviceCalls                   []MockDeviceManagerUpsertDeviceCall
 	GetDeviceCalls                      []MockDeviceManagerGetDeviceCall
+	RecordVLANCalls                     []MockDeviceManagerRecordVLANCall
 	GetAllDevicesCalls                  int
 	UpdateDeviceWithIndustrialInfoCalls []MockDeviceManagerUpdateIndustrialInfoCall
 	GetDeviceCounterCalls               int
@@ -27,6 +29,11 @@ type MockDeviceManagerUpsertDeviceCall struct {
 	Address, AddressType, AddressSubType, MACAddress, AdditionalData string
 	Timestamp                                                        time.Time
 	IsDestination                                                    bool
+}
+
+type MockDeviceManagerRecordVLANCall struct {
+	Address, AddressType string
+	VLAN                 model.VLANTag
 }
 
 type MockDeviceManagerGetDeviceCall struct {
@@ -54,6 +61,16 @@ func (m *MockDeviceManager) UpsertDevice(address, addressType string, timestamp 
 	return &model.Device{
 		Address:     address,
 		AddressType: addressType,
+	}
+}
+
+func (m *MockDeviceManager) RecordVLAN(address, addressType string, vlan model.VLANTag) {
+	m.RecordVLANCalls = append(m.RecordVLANCalls, MockDeviceManagerRecordVLANCall{
+		Address: address, AddressType: addressType, VLAN: vlan,
+	})
+
+	if m.RecordVLANFunc != nil {
+		m.RecordVLANFunc(address, addressType, vlan)
 	}
 }
 

@@ -13,6 +13,9 @@ type DeviceManager interface {
 	// UpsertDevice updates or creates a device
 	UpsertDevice(address, addressType string, timestamp time.Time, addressSubType, macAddress, additionalData string, isDestination bool) *model.Device
 
+	// RecordVLAN adds the VLAN a device was seen in; unknown devices are ignored
+	RecordVLAN(address, addressType string, vlan model.VLANTag)
+
 	// GetDevice retrieves a device by address and type
 	GetDevice(address, addressType string) *model.Device
 
@@ -71,6 +74,7 @@ func (dm *DefaultDeviceManager) UpsertDevice(address, addressType string, timest
 			MACAddressSet:     macAddressSet,
 			AdditionalData:    additionalData,
 			IsOnlyDestination: isDestination,
+			VLANSet:           model.NewVLANSet(),
 		}
 		dm.devices[devKey] = dev
 		dm.deviceCounter++
@@ -119,6 +123,19 @@ func (dm *DefaultDeviceManager) UpsertDevice(address, addressType string, timest
 	}
 
 	return dev
+}
+
+// RecordVLAN adds the frame's VLAN to the device's VLAN set. A device seen in
+// several VLANs keeps one row; the set records each VLAN (and "untagged").
+func (dm *DefaultDeviceManager) RecordVLAN(address, addressType string, vlan model.VLANTag) {
+	dev, exists := dm.devices[addressType+":"+address]
+	if !exists {
+		return
+	}
+	if dev.VLANSet == nil {
+		dev.VLANSet = model.NewVLANSet()
+	}
+	dev.VLANSet.AddTag(vlan)
 }
 
 // GetDevice retrieves a device by address and type

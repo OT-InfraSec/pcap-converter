@@ -64,7 +64,34 @@ func NewSQLiteRepositoryWithCanonicalizer(path string, canonicalizer helper.Flow
 	return repo, nil
 }
 
+// schemaVersion is stored in PRAGMA user_version once the database contains
+// VLAN data, so consumers can detect databases written by older importers.
+const schemaVersion = 1
+
+// checkSchemaVersion rejects databases created before the version marker
+// existed: they hold tables without the VLAN columns and are not migrated.
+func (r *SQLiteRepository) checkSchemaVersion() error {
+	var version int
+	if err := r.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("failed to read schema version: %w", err)
+	}
+	if version >= schemaVersion {
+		return nil
+	}
+	var tables int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'packets'`).Scan(&tables); err != nil {
+		return fmt.Errorf("failed to inspect database schema: %w", err)
+	}
+	if tables > 0 {
+		return fmt.Errorf("database schema is outdated (user_version %d, need %d): delete the database and re-import", version, schemaVersion)
+	}
+	return nil
+}
+
 func (r *SQLiteRepository) createTables() error {
+	if err := r.checkSchemaVersion(); err != nil {
+		return err
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS packets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +109,9 @@ func (r *SQLiteRepository) createTables() error {
 			ttl INTEGER,
 			capture_file TEXT,
 			layers TEXT NOT NULL,
-			protocols TEXT
+			protocols TEXT,
+			vlan_id INTEGER,
+			vlan_inner_id INTEGER
 		);`,
 		`CREATE TABLE IF NOT EXISTS devices (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,7 +134,8 @@ func (r *SQLiteRepository) createTables() error {
 			is_only_destination BOOLEAN,
 			is_external BOOLEAN,
 			confidence REAL,
-			description TEXT
+			description TEXT,
+			vlans TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS services (
 			element_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +173,8 @@ func (r *SQLiteRepository) createTables() error {
 			packets_server_to_client INTEGER NOT NULL DEFAULT 0,
 			bytes_client_to_server INTEGER NOT NULL DEFAULT 0,
 			bytes_server_to_client INTEGER NOT NULL DEFAULT 0,
+			vlan_id INTEGER,
+			vlan_inner_id INTEGER,
 			FOREIGN KEY (source_device_id) REFERENCES devices (id),
 			FOREIGN KEY (destination_device_id) REFERENCES devices (id)
 		);`,
@@ -255,6 +287,7 @@ func (r *SQLiteRepository) createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_source ON communication_patterns(source_device_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_dest ON communication_patterns(destination_device_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_protocol ON communication_patterns(protocol);`,
+		`CREATE INDEX IF NOT EXISTS idx_flows_vlan ON flows(vlan_id, vlan_inner_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(src_ip, dst_ip, protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(dst_ip, src_ip, protocol);`,
 	}
@@ -269,7 +302,27 @@ func (r *SQLiteRepository) createTables() error {
 			return err
 		}
 	}
+	if _, err := r.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		return fmt.Errorf("failed to set schema version: %w", err)
+	}
 	return nil
+}
+
+// intPtrToArg converts an optional VLAN ID to a SQL argument (nil -> NULL).
+func intPtrToArg(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// nullIntToPtr converts a scanned nullable integer to an optional VLAN ID.
+func nullIntToPtr(n sql.NullInt64) *int {
+	if !n.Valid {
+		return nil
+	}
+	v := int(n.Int64)
+	return &v
 }
 
 // Helper for converting net.IP to string for DB stores
@@ -303,7 +356,7 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 	layersJSON, _ := json.Marshal(packet.Layers)
 	protocolsJSON, _ := json.Marshal(packet.Protocols)
 	_, err := r.db.Exec(
-		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO packets (tenant_id, flow_id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		packet.TenantID,
 		packet.FlowID,
 		packet.Timestamp.Format(time.RFC3339Nano),
@@ -319,6 +372,8 @@ func (r *SQLiteRepository) AddPacket(packet *model2.Packet) error {
 		packet.CaptureFile,
 		string(layersJSON),
 		string(protocolsJSON),
+		intPtrToArg(packet.VlanID),
+		intPtrToArg(packet.VlanInnerID),
 	)
 	return err
 }
@@ -331,7 +386,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 	macAddressesList := device.MACAddressSet.ToString()
 
 	_, err := r.db.Exec(
-		`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description, vlans) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		device.TenantID,
 		device.Address,
 		device.AddressType,
@@ -352,12 +407,13 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.IsExternal,
 		device.Confidence,
 		device.Description,
+		device.VLANSet.ToString(),
 	)
 	return err
 }
 
 func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, error) {
-	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description FROM devices WHERE tenant_id = ? AND address = ?`
+	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, protocol_list, dns_names, hostname, device_type, vendor, os, is_router, is_only_destination, is_external, confidence, description, vlans FROM devices WHERE tenant_id = ? AND address = ?`
 	row := r.db.QueryRow(query, tenantID, address)
 
 	var device model2.Device
@@ -365,10 +421,10 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 	var dbTenantID sql.NullString
 	var isRouter, isOnlyDestination, isExternal sql.NullBool
 	var confidence sql.NullFloat64
-	var description sql.NullString
+	var description, vlansStr sql.NullString
 
 	if err := row.Scan(&device.ID, &dbTenantID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description); err != nil {
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &protocolListStr, &dnsNamesStr, &hostname, &deviceType, &vendor, &os, &isRouter, &isOnlyDestination, &isExternal, &confidence, &description, &vlansStr); err != nil {
 		return nil, err
 	}
 
@@ -419,12 +475,13 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 	if description.Valid {
 		device.Description = description.String
 	}
+	device.VLANSet = model2.VLANSetFromString(vlansStr.String)
 
 	return &device, nil
 }
 
 func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interface{}) ([]*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination FROM devices WHERE tenant_id = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans FROM devices WHERE tenant_id = ?`
 	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
@@ -443,10 +500,11 @@ func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interf
 	var devices []*model2.Device
 	for rows.Next() {
 		var firstSeenStr, lastSeenStr, macAddressesStr string
+		var vlansStr sql.NullString
 		var device model2.Device
 
 		if err := rows.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination); err != nil {
+			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination, &vlansStr); err != nil {
 			return nil, err
 		}
 
@@ -454,6 +512,7 @@ func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interf
 		device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
 		device.MACAddressSet = model2.NewMACAddressSet()
+		device.VLANSet = model2.VLANSetFromString(vlansStr.String)
 
 		for _, mac := range strings.Split(macAddressesStr, ",") {
 			if mac != "" {
@@ -510,7 +569,7 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	// AddFlow: include bidirectional columns
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
 	result, err := r.db.Exec(
-		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
 		ipToString(flow.DstIP),
@@ -531,6 +590,8 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		string(packetRefsJSON),
 		flow.SourcePorts.ToString(),
 		flow.DestinationPorts.ToString(),
+		intPtrToArg(flow.VlanID),
+		intPtrToArg(flow.VlanInnerID),
 	)
 	if err != nil {
 		log.Fatalf("Error inserting flow: %v", err)
@@ -544,11 +605,16 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 }
 
 func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model2.Flow, error) {
-	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports FROM flows WHERE tenant_id = ?`
+	query := `SELECT id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id FROM flows WHERE tenant_id = ?`
 	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
 		for key, value := range filters {
+			if value == nil {
+				// NULL (e.g. untagged VLAN) never matches "= ?"
+				query += " AND " + key + " IS NULL"
+				continue
+			}
 			query += " AND " + key + " = ?"
 			params = append(params, value)
 		}
@@ -568,9 +634,10 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 		var packetCountOutInt, byteCountOutInt, packetCountInInt, byteCountInInt sql.NullInt64
 		var durationFloat sql.NullFloat64
 		var tenantID sql.NullString
+		var vlanID, vlanInnerID sql.NullInt64
 		var flow model2.Flow
 
-		if err = rows.Scan(&flow.ID, &tenantID, &srcIPStr, &dstIPStr, &srcPortInt, &dstPortInt, &flow.Protocol, &packetCountOutInt, &byteCountOutInt, &packetCountInInt, &byteCountInInt, &firstSeenStr, &lastSeenStr, &durationFloat, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr); err != nil {
+		if err = rows.Scan(&flow.ID, &tenantID, &srcIPStr, &dstIPStr, &srcPortInt, &dstPortInt, &flow.Protocol, &packetCountOutInt, &byteCountOutInt, &packetCountInInt, &byteCountInInt, &firstSeenStr, &lastSeenStr, &durationFloat, &flow.SourceDeviceID, &flow.DestinationDeviceID, &flow.MinPacketSize, &flow.MaxPacketSize, &packetRefsJson, &sourcePortsStr, &destinationPortsStr, &vlanID, &vlanInnerID); err != nil {
 			return nil, err
 		}
 
@@ -596,6 +663,8 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 		flow.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 		flow.SrcIP = stringToIP(srcIPStr)
 		flow.DstIP = stringToIP(dstIPStr)
+		flow.VlanID = nullIntToPtr(vlanID)
+		flow.VlanInnerID = nullIntToPtr(vlanInnerID)
 		if srcPortInt.Valid {
 			flow.SrcPort = int(srcPortInt.Int64)
 		}
@@ -628,7 +697,7 @@ func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interfac
 }
 
 func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error) {
-	rows, err := r.db.Query(`SELECT id, tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols FROM packets WHERE tenant_id = ?`, tenantID)
+	rows, err := r.db.Query(`SELECT id, tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id FROM packets WHERE tenant_id = ?`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -659,8 +728,10 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 			captureFile  sql.NullString
 			layersStr    string
 			protocolsStr string
+			vlanID       sql.NullInt64
+			vlanInnerID  sql.NullInt64
 		)
-		if err := rows.Scan(&id, &tenantIDStr, &flowID, &srcIPStr, &srcPort, &dstIPStr, &dstPort, &protocol, &tsStr, &length, &flags, &payloadHash, &ttl, &captureFile, &layersStr, &protocolsStr); err != nil {
+		if err := rows.Scan(&id, &tenantIDStr, &flowID, &srcIPStr, &srcPort, &dstIPStr, &dstPort, &protocol, &tsStr, &length, &flags, &payloadHash, &ttl, &captureFile, &layersStr, &protocolsStr, &vlanID, &vlanInnerID); err != nil {
 			return nil, err
 		}
 		ts, _ := time.Parse(time.RFC3339Nano, tsStr)
@@ -669,12 +740,14 @@ func (r *SQLiteRepository) AllPackets(tenantID string) ([]*model2.Packet, error)
 		var protocols []string
 		_ = json.Unmarshal([]byte(protocolsStr), &protocols)
 		p := &model2.Packet{
-			ID:        id,
-			TenantID:  tenantIDStr,
-			Timestamp: ts,
-			Length:    length,
-			Layers:    layers,
-			Protocols: protocols,
+			ID:          id,
+			TenantID:    tenantIDStr,
+			Timestamp:   ts,
+			Length:      length,
+			Layers:      layers,
+			Protocols:   protocols,
+			VlanID:      nullIntToPtr(vlanID),
+			VlanInnerID: nullIntToPtr(vlanInnerID),
 		}
 		if flowID.Valid {
 			p.FlowID = flowID.Int64
@@ -904,14 +977,15 @@ func (r *SQLiteRepository) GetDNSQueries(tenantID string, eqFilters map[string]i
 }
 
 func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data FROM devices WHERE address = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, vlans FROM devices WHERE address = ?`
 	row := r.db.QueryRow(query, address)
 
 	var device model2.Device
 	var firstSeenStr, lastSeenStr, macAddressesStr string
+	var vlansStr sql.NullString
 
 	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData); err != nil {
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &vlansStr); err != nil {
 		return nil, err
 	}
 
@@ -919,6 +993,7 @@ func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model2.Device, 
 	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
 
 	device.MACAddressSet = model2.NewMACAddressSet()
+	device.VLANSet = model2.VLANSetFromString(vlansStr.String)
 
 	for _, mac := range strings.Split(macAddressesStr, ",") {
 		if mac != "" {
@@ -948,7 +1023,7 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -978,6 +1053,8 @@ func (r *SQLiteRepository) AddPackets(packets []*model2.Packet) error {
 			packet.CaptureFile,
 			string(layersJSON),
 			string(protocolsJSON),
+			intPtrToArg(packet.VlanID),
+			intPtrToArg(packet.VlanInnerID),
 		)
 		if err != nil {
 			return err
@@ -994,7 +1071,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	stmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
@@ -1016,6 +1093,7 @@ func (r *SQLiteRepository) AddDevices(devices []*model2.Device) error {
 			macs,
 			device.AdditionalData,
 			device.IsOnlyDestination,
+			device.VLANSet.ToString(),
 		)
 		if err != nil {
 			return err
@@ -1037,8 +1115,8 @@ func (r *SQLiteRepository) AddFlows(flows []*model2.Flow) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, source_device_id, destination_device_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
+	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id, source_device_id, destination_device_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 	SELECT id FROM devices WHERE address = ?
 	), (
 	SELECT id FROM devices WHERE address = ?
@@ -1082,6 +1160,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 			string(packetRefsJSON),
 			sourcePorts,
 			destinationPorts,
+			intPtrToArg(flow.VlanID),
+			intPtrToArg(flow.VlanInnerID),
 			ipToString(flow.SrcIP),
 			ipToString(flow.DstIP),
 		)
@@ -1202,7 +1282,7 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ? WHERE id = ?;`,
+		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, vlans = ? WHERE id = ?;`,
 		device.TenantID,
 		device.Address,
 		device.AddressType,
@@ -1212,6 +1292,7 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 		device.AddressScope,
 		macAddresses,
 		device.AdditionalData,
+		device.VLANSet.ToString(),
 		device.ID,
 	)
 	return err
@@ -1277,14 +1358,14 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 	defer tx.Rollback()
 
 	// Prepare insert statement
-	insertStmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO packets (tenant_id, flow_id, src_ip, src_port, dst_ip, dst_port, protocol, timestamp, length, flags, payload_hash, ttl, capture_file, layers, protocols, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
 	// Prepare update statement
-	updateStmt, err := tx.Prepare(`UPDATE packets SET tenant_id = ?, flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, protocol = ?, timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE packets SET tenant_id = ?, flow_id = ?, src_ip = ?, src_port = ?, dst_ip = ?, dst_port = ?, protocol = ?, timestamp = ?, length = ?, flags = ?, payload_hash = ?, ttl = ?, capture_file = ?, layers = ?, protocols = ?, vlan_id = ?, vlan_inner_id = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1333,6 +1414,8 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 					packet.CaptureFile,
 					string(layersJSON),
 					string(protocolsJSON),
+					intPtrToArg(packet.VlanID),
+					intPtrToArg(packet.VlanInnerID),
 					packet.ID,
 				)
 				if err != nil {
@@ -1359,6 +1442,8 @@ func (r *SQLiteRepository) UpsertPackets(packets []*model2.Packet) error {
 			packet.CaptureFile,
 			string(layersJSON),
 			string(protocolsJSON),
+			intPtrToArg(packet.VlanID),
+			intPtrToArg(packet.VlanInnerID),
 		)
 		if err != nil {
 			return err
@@ -1395,13 +1480,13 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1439,6 +1524,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				macs,
 				device.AdditionalData,
 				device.IsOnlyDestination,
+				device.VLANSet.ToString(),
 				deviceID,
 			)
 			if err != nil {
@@ -1463,6 +1549,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				macs,
 				device.AdditionalData,
 				device.IsOnlyDestination,
+				device.VLANSet.ToString(),
 			)
 			if err != nil {
 				return err
@@ -1558,7 +1645,8 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 	_, err = r.db.Exec(
 		`UPDATE flows SET tenant_id = ?, src_ip = ?, dst_ip = ?, src_port = ?, dst_port = ?, protocol = ?, packet_count_out = ?, byte_count_out = ?, packet_count_in = ?, byte_count_in = ?,
 		first_seen = ?, last_seen = ?, duration = ?, source_device_id = ?, destination_device_id = ?,
-		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?
+		min_packet_size = ?, max_packet_size = ?, packet_refs = ?, source_ports = ?, destination_ports = ?,
+		vlan_id = ?, vlan_inner_id = ?
 		WHERE id = ?;`,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
@@ -1580,6 +1668,8 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 		string(packetRefsJSON),
 		sourcePorts,
 		destinationPorts,
+		intPtrToArg(flow.VlanID),
+		intPtrToArg(flow.VlanInnerID),
 		flow.ID,
 	)
 	return err
@@ -2160,9 +2250,11 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	// Check if a canonical flow already exists
 	var existingFlow *model2.Flow
 	existingFlows, err := r.GetFlows(flow.TenantID, map[string]interface{}{
-		"src_ip":   canonicalSrc,
-		"dst_ip":   canonicalDst,
-		"protocol": flow.Protocol,
+		"src_ip":        canonicalSrc,
+		"dst_ip":        canonicalDst,
+		"protocol":      flow.Protocol,
+		"vlan_id":       intPtrToArg(flow.VlanID),
+		"vlan_inner_id": intPtrToArg(flow.VlanInnerID),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to check for existing flow: %w", err)
@@ -2195,6 +2287,8 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 			MaxPacketSize:    flow.MaxPacketSize,
 			SourcePorts:      r.copySet(flow.SourcePorts),
 			DestinationPorts: r.copySet(flow.DestinationPorts),
+			VlanID:           flow.VlanID,
+			VlanInnerID:      flow.VlanInnerID,
 		}
 		copy(canonicalFlow.PacketRefs, flow.PacketRefs)
 
@@ -2443,6 +2537,8 @@ func (r *SQLiteRepository) LinkPacketsToFlows(tenantID string) (int64, error) {
 			FROM flows f
 			WHERE f.tenant_id = packets.tenant_id
 			  AND f.protocol = packets.protocol
+			  AND f.vlan_id IS packets.vlan_id
+			  AND f.vlan_inner_id IS packets.vlan_inner_id
 			  AND (
 				  -- Match in canonical direction (packet src→dst matches flow src→dst)
 				  (f.src_ip = packets.src_ip 
@@ -2463,6 +2559,8 @@ func (r *SQLiteRepository) LinkPacketsToFlows(tenantID string) (int64, error) {
 			  FROM flows f
 			  WHERE f.tenant_id = packets.tenant_id
 				AND f.protocol = packets.protocol
+				AND f.vlan_id IS packets.vlan_id
+				AND f.vlan_inner_id IS packets.vlan_inner_id
 				AND (
 					(f.src_ip = packets.src_ip 
 					 AND f.dst_ip = packets.dst_ip 

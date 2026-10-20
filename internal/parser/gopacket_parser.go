@@ -479,7 +479,9 @@ func (p *GopacketParser) ParseFile() error {
 	packetSource.DecodeOptions.NoCopy = true
 	packetSource.DecodeOptions.SkipDecodeRecovery = true
 
-	packetID := int64(0)
+	// Start at 1 to match SQLite's AUTOINCREMENT ids. Starting at 0 made packet 1 look
+	// like an existing row in UpsertPackets, overwriting the first packet of every capture.
+	packetID := int64(1)
 
 	// Pre-allocate for better performance
 	const batchSize = 1000
@@ -532,6 +534,8 @@ func (p *GopacketParser) ParseFile() error {
 			srcPortNum, dstPortNum uint16
 			flowProto              string
 		)
+
+		vlan := extractVLANTag(packet)
 
 		// Ethernet
 		if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {
@@ -1386,6 +1390,8 @@ func (p *GopacketParser) ParseFile() error {
 			CaptureFile: pcapFileName,
 			Layers:      layersMap,
 			Protocols:   protocols,
+			VlanID:      vlan.Outer,
+			VlanInnerID: vlan.Inner,
 		}
 
 		// Send the packet to the batch processing goroutine
@@ -1396,10 +1402,12 @@ func (p *GopacketParser) ParseFile() error {
 		if srcMAC != "" && srcIP != "" {
 			addressSubType := GetAddressSubTypeForIP(srcIP)
 			p.deviceManager.UpsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "", false)
+			p.deviceManager.RecordVLAN(srcIP, "IP", vlan)
 		}
 		if dstMAC != "" && dstIP != "" {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
 			p.deviceManager.UpsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
+			p.deviceManager.RecordVLAN(dstIP, "IP", vlan)
 		}
 
 		// Industrial protocol parsing and device classification
@@ -1455,7 +1463,7 @@ func (p *GopacketParser) ParseFile() error {
 			destination = dstIP
 
 			// Always update flow - let FlowManager handle canonicalization
-			p.flowManager.UpdateFlow(source, destination, flowProto, srcPort, dstPort, timestamp, length, packetID)
+			p.flowManager.UpdateFlow(source, destination, flowProto, srcPort, dstPort, vlan, timestamp, length, packetID)
 		}
 
 		packetID++
@@ -1867,4 +1875,25 @@ var ProtocolColorMap = map[string]string{
 	"ntp":        "#c5b0d5",
 	// Color for RDP over UDP flows
 	"rdpudp": "#ff69b4",
+}
+
+// extractVLANTag returns the outer and (QinQ) inner 802.1Q VLAN IDs of a packet.
+// Untagged frames yield the zero tag (NULL in the database, never VLAN 1).
+// VID 0 marks a priority-only tag without VLAN membership, so it is skipped.
+func extractVLANTag(packet gopacket.Packet) model2.VLANTag {
+	var tag model2.VLANTag
+	for _, layer := range packet.Layers() {
+		dot1q, ok := layer.(*layers.Dot1Q)
+		if !ok || dot1q.VLANIdentifier == 0 {
+			continue
+		}
+		id := int(dot1q.VLANIdentifier)
+		switch {
+		case tag.Outer == nil:
+			tag.Outer = &id
+		case tag.Inner == nil:
+			tag.Inner = &id
+		}
+	}
+	return tag
 }

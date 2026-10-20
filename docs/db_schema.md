@@ -21,6 +21,7 @@ class devices {
    boolean is_external
    numeric(5,4) confidence
    text description
+   text vlans
    integer id
 }
 class flows {
@@ -38,6 +39,8 @@ class flows {
    timestamp last_seen
    integer duration
    integer id
+   integer vlan_id
+   integer vlan_inner_id
 }
 class kv_store {
    text key
@@ -59,6 +62,8 @@ class packets {
    varchar(255) payload_hash
    integer ttl
    varchar(255) capture_file
+   integer vlan_id
+   integer vlan_inner_id
    integer id
 }
 class schema_migrations {
@@ -187,3 +192,10 @@ ssdp_queries  -->  devices : querying_device_id:id
 industrial_devices  -->  tenants : tenant_id:id
 protocol_usage_stats  -->  tenants : tenant_id:id
 communication_patterns  -->  tenants : tenant_id:id
+
+## VLAN columns and schema version
+
+- `packets.vlan_id` / `packets.vlan_inner_id` and `flows.vlan_id` / `flows.vlan_inner_id`: outer 802.1Q VLAN ID and, for QinQ, the inner ID. **NULL means untagged** (never stored as 1). A priority-only tag (VID 0) counts as untagged.
+- The VLAN pair is part of the flow key: the same 5-tuple in two VLANs is two `flows` rows.
+- `devices.vlans`: sorted, comma-joined set of the VLANs the device was seen in, with the tokens `untagged`, `<outer>` (e.g. `100`) and `<outer>.<inner>` for QinQ (e.g. `100.200`). Example: `untagged,10,10.200`. A device seen in several VLANs stays one row.
+- `PRAGMA user_version = 1` marks databases that contain this data. An older database (user_version 0 with existing tables) is rejected on open with a "delete the database and re-import" error; there are no migrations.

@@ -353,3 +353,19 @@ func TestDefaultDeviceManager_MultipleAddressTypes(t *testing.T) {
 	devices := dm.GetAllDevices()
 	assert.Len(t, devices, 2)
 }
+
+func TestDefaultDeviceManager_RecordVLANKeepsOneDevicePerIP(t *testing.T) {
+	dm := NewDefaultDeviceManager("t", 1)
+	ts := time.Now()
+	ten, twenty, inner := 10, 20, 7
+
+	dm.UpsertDevice("10.0.0.1", "IP", ts, "", "00:11:22:33:44:55", "", false)
+	dm.RecordVLAN("10.0.0.1", "IP", model.VLANTag{})
+	dm.RecordVLAN("10.0.0.1", "IP", model.VLANTag{Outer: &ten})
+	dm.RecordVLAN("10.0.0.1", "IP", model.VLANTag{Outer: &twenty, Inner: &inner})
+	dm.RecordVLAN("10.0.0.1", "IP", model.VLANTag{Outer: &ten}) // duplicate
+	dm.RecordVLAN("10.0.0.9", "IP", model.VLANTag{Outer: &ten}) // unknown device is ignored
+
+	assert.Len(t, dm.GetAllDevices(), 1, "device must not be split per VLAN")
+	assert.Equal(t, "untagged,10,20.7", dm.GetDevice("10.0.0.1", "IP").VLANSet.ToString())
+}

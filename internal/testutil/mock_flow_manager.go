@@ -8,8 +8,8 @@ import (
 
 // MockFlowManager is a mock implementation of FlowManager for testing
 type MockFlowManager struct {
-	UpdateFlowFunc  func(src, dst, protocol string, srcPort, dstPort string, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool)
-	GetFlowFunc     func(src, dst, protocol string) *model.Flow
+	UpdateFlowFunc  func(src, dst, protocol string, srcPort, dstPort string, vlan model.VLANTag, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool)
+	GetFlowFunc     func(src, dst, protocol string, vlan model.VLANTag) *model.Flow
 	GetAllFlowsFunc func() []*model.Flow
 	ClearFunc       func()
 
@@ -22,6 +22,7 @@ type MockFlowManager struct {
 type MockFlowManagerUpdateFlowCall struct {
 	Src, Dst, Protocol string
 	SrcPort, DstPort   string
+	VLAN               model.VLANTag
 	Timestamp          time.Time
 	PacketSize         int
 	PacketID           int64
@@ -29,30 +30,31 @@ type MockFlowManagerUpdateFlowCall struct {
 
 type MockFlowManagerGetFlowCall struct {
 	Src, Dst, Protocol string
+	VLAN               model.VLANTag
 }
 
-func (m *MockFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dstPort string, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool) {
+func (m *MockFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dstPort string, vlan model.VLANTag, timestamp time.Time, packetSize int, packetID int64) (*model.Flow, bool) {
 	m.UpdateFlowCalls = append(m.UpdateFlowCalls, MockFlowManagerUpdateFlowCall{
 		Src: src, Dst: dst, Protocol: protocol,
-		SrcPort: srcPort, DstPort: dstPort,
+		SrcPort: srcPort, DstPort: dstPort, VLAN: vlan,
 		Timestamp: timestamp, PacketSize: packetSize, PacketID: packetID,
 	})
 
 	if m.UpdateFlowFunc != nil {
-		return m.UpdateFlowFunc(src, dst, protocol, srcPort, dstPort, timestamp, packetSize, packetID)
+		return m.UpdateFlowFunc(src, dst, protocol, srcPort, dstPort, vlan, timestamp, packetSize, packetID)
 	}
 
 	// Default implementation
 	return &model.Flow{}, false
 }
 
-func (m *MockFlowManager) GetFlow(src, dst, protocol string) *model.Flow {
+func (m *MockFlowManager) GetFlow(src, dst, protocol string, vlan model.VLANTag) *model.Flow {
 	m.GetFlowCalls = append(m.GetFlowCalls, MockFlowManagerGetFlowCall{
-		Src: src, Dst: dst, Protocol: protocol,
+		Src: src, Dst: dst, Protocol: protocol, VLAN: vlan,
 	})
 
 	if m.GetFlowFunc != nil {
-		return m.GetFlowFunc(src, dst, protocol)
+		return m.GetFlowFunc(src, dst, protocol, vlan)
 	}
 
 	return nil

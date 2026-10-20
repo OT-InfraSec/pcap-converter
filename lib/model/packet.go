@@ -155,6 +155,8 @@ type Packet struct {
 	CaptureFile string                 // Source capture file name
 	Layers      map[string]interface{} // Protocol layers and their fields
 	Protocols   []string               // List of protocol names
+	VlanID      *int                   // Outer 802.1Q VLAN ID (nil = untagged)
+	VlanInnerID *int                   // Inner VLAN ID for QinQ (nil = no inner tag)
 }
 
 // Device represents a network device.
@@ -181,6 +183,7 @@ type Device struct {
 	Confidence        float64
 	Description       string
 	IndustrialInfo    *IndustrialDeviceInfo // Industrial device information
+	VLANSet           *VLANSet              // VLANs the device was seen in (includes "untagged")
 }
 
 // Service represents a network service.
@@ -219,6 +222,8 @@ type Flow struct {
 	MaxPacketSize       int
 	SourcePorts         *Set
 	DestinationPorts    *Set
+	VlanID              *int // Outer 802.1Q VLAN ID (nil = untagged); part of the flow key
+	VlanInnerID         *int // Inner VLAN ID for QinQ (nil = no inner tag); part of the flow key
 }
 
 // DeviceRelation represents a relationship between two devices.
