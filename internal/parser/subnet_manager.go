@@ -7,13 +7,18 @@ import (
 	"time"
 
 	model "github.com/InfraSecConsult/pcap-importer-go/lib/model"
+	"github.com/rs/zerolog/log"
 )
+
+// maxSubnets bounds memory: a hostile capture can announce millions of distinct
+// prefixes (e.g. one Router Advertisement option each). Real networks have far fewer.
+const maxSubnets = 100000
 
 // SubnetManager collects subnet evidence in memory during parsing. Writing is
 // deferred to the end of ParseFile to avoid concurrent SQLite writes.
 type SubnetManager interface {
 	// Observe records evidence for a prefix seen in the VLAN's outer tag.
-	Observe(prefix netip.Prefix, vlan model.VLANTag, source string, timestamp time.Time)
+	Observe(prefix netip.Prefix, vlan model.VLANTag, source, kind string, timestamp time.Time)
 
 	// GetAllSubnets returns all collected subnets in a stable order.
 	GetAllSubnets() []*model.Subnet
@@ -26,6 +31,7 @@ type SubnetManager interface {
 type DefaultSubnetManager struct {
 	subnets  map[string]*model.Subnet
 	tenantID string
+	capped   bool // true once the limit was hit and logged
 }
 
 // NewDefaultSubnetManager creates a new subnet manager.
@@ -33,14 +39,15 @@ func NewDefaultSubnetManager(tenantID string) *DefaultSubnetManager {
 	return &DefaultSubnetManager{subnets: make(map[string]*model.Subnet), tenantID: tenantID}
 }
 
-// Observe records evidence. The key is prefix + outer VLAN + source: the inner
-// QinQ tag is not part of a subnet's identity, and each source stays visible.
-func (sm *DefaultSubnetManager) Observe(prefix netip.Prefix, vlan model.VLANTag, source string, timestamp time.Time) {
+// Observe records evidence. The key is prefix + outer VLAN + source + kind: the
+// inner QinQ tag is not part of a subnet's identity, and each source and kind
+// stays visible.
+func (sm *DefaultSubnetManager) Observe(prefix netip.Prefix, vlan model.VLANTag, source, kind string, timestamp time.Time) {
 	if !prefix.IsValid() {
 		return
 	}
 	cidr := model.CanonicalCIDR(prefix)
-	key := fmt.Sprintf("%s|%s|%s", cidr, vlanKeyPart(vlan.Outer), source)
+	key := fmt.Sprintf("%s|%s|%s|%s", cidr, vlanKeyPart(vlan.Outer), source, kind)
 
 	if existing, ok := sm.subnets[key]; ok {
 		if timestamp.Before(existing.FirstSeen) {
@@ -48,6 +55,14 @@ func (sm *DefaultSubnetManager) Observe(prefix netip.Prefix, vlan model.VLANTag,
 		}
 		if timestamp.After(existing.LastSeen) {
 			existing.LastSeen = timestamp
+		}
+		return
+	}
+
+	if len(sm.subnets) >= maxSubnets {
+		if !sm.capped {
+			sm.capped = true
+			log.Warn().Int("limit", maxSubnets).Msg("subnet limit reached, ignoring further new subnets")
 		}
 		return
 	}
@@ -62,6 +77,7 @@ func (sm *DefaultSubnetManager) Observe(prefix netip.Prefix, vlan model.VLANTag,
 		CIDR:      cidr,
 		VlanID:    outer,
 		Source:    source,
+		Kind:      kind,
 		FirstSeen: timestamp,
 		LastSeen:  timestamp,
 	}
@@ -91,4 +107,5 @@ func (sm *DefaultSubnetManager) GetAllSubnets() []*model.Subnet {
 // Clear removes all collected subnets.
 func (sm *DefaultSubnetManager) Clear() {
 	sm.subnets = make(map[string]*model.Subnet)
+	sm.capped = false
 }

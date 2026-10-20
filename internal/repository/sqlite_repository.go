@@ -184,6 +184,7 @@ func (r *SQLiteRepository) createTables() error {
 			cidr TEXT NOT NULL,
 			vlan_id INTEGER,
 			source TEXT NOT NULL,
+			kind TEXT NOT NULL,
 			first_seen TEXT NOT NULL,
 			last_seen TEXT NOT NULL
 		);`,
@@ -298,7 +299,7 @@ func (r *SQLiteRepository) createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_protocol ON communication_patterns(protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_vlan ON flows(vlan_id, vlan_inner_id);`,
 		// COALESCE makes untagged (NULL) subnets unique too; plain NULLs never collide in a UNIQUE index.
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_subnets_key ON subnets(tenant_id, cidr, COALESCE(vlan_id, -1), source);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_subnets_key ON subnets(tenant_id, cidr, COALESCE(vlan_id, -1), source, kind);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(src_ip, dst_ip, protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(dst_ip, src_ip, protocol);`,
 	}

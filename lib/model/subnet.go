@@ -17,6 +17,14 @@ const (
 	SubnetSourceInferred = "inferred"
 )
 
+// Subnet kinds tell the visualizer what a prefix means. A delegated prefix
+// (DHCPv6 IA_PD) is handed to a router for downstream use and need not be
+// on-link in the VLAN where it was observed.
+const (
+	SubnetKindOnLink    = "on-link"
+	SubnetKindDelegated = "delegated"
+)
+
 // Subnet is an IP prefix observed in a VLAN. VlanID is the outer tag; nil means
 // untagged. The same prefix in two VLANs, or from two sources, is two rows.
 type Subnet struct {
@@ -25,6 +33,7 @@ type Subnet struct {
 	CIDR      string
 	VlanID    *int
 	Source    string
+	Kind      string
 	FirstSeen time.Time
 	LastSeen  time.Time
 }
@@ -42,6 +51,11 @@ func (s *Subnet) Validate() error {
 	}
 	if CanonicalCIDR(p) != s.CIDR {
 		return fmt.Errorf("subnet CIDR %q is not canonical (want %s)", s.CIDR, CanonicalCIDR(p))
+	}
+	switch s.Kind {
+	case SubnetKindOnLink, SubnetKindDelegated:
+	default:
+		return fmt.Errorf("unknown subnet kind %q", s.Kind)
 	}
 	switch s.Source {
 	case SubnetSourceDHCP, SubnetSourceRA, SubnetSourceCDP, SubnetSourceEIGRP, SubnetSourceOSPF, SubnetSourceInferred:

@@ -10,7 +10,7 @@ import (
 )
 
 func subnetAt(cidr string, vlan *int, source string, first, last time.Time) *model.Subnet {
-	return &model.Subnet{TenantID: "t1", CIDR: cidr, VlanID: vlan, Source: source, FirstSeen: first, LastSeen: last}
+	return &model.Subnet{TenantID: "t1", CIDR: cidr, VlanID: vlan, Source: source, Kind: model.SubnetKindOnLink, FirstSeen: first, LastSeen: last}
 }
 
 func TestSQLiteRepository_SubnetRoundTripAndNullVLAN(t *testing.T) {
@@ -78,6 +78,24 @@ func TestSQLiteRepository_SubnetSourceIsPartOfKey(t *testing.T) {
 	assert.Len(t, got, 2)
 }
 
+func TestSQLiteRepository_SubnetKindIsPartOfKeyAndFilterable(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	now := time.Now()
+	delegated := subnetAt("2001:db8:1::/64", nil, model.SubnetSourceDHCP, now, now)
+	delegated.Kind = model.SubnetKindDelegated
+	require.NoError(t, repo.UpsertSubnets([]*model.Subnet{
+		subnetAt("2001:db8:1::/64", nil, model.SubnetSourceDHCP, now, now),
+		delegated,
+	}))
+	all, err := repo.GetSubnets("t1", nil)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+	got, err := repo.GetSubnets("t1", map[string]interface{}{"kind": model.SubnetKindDelegated})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, model.SubnetKindDelegated, got[0].Kind)
+}
+
 func TestSQLiteRepository_UpsertSubnetsRejectsInvalid(t *testing.T) {
 	repo := newVLANTestRepo(t)
 	now := time.Now()
@@ -87,4 +105,13 @@ func TestSQLiteRepository_UpsertSubnetsRejectsInvalid(t *testing.T) {
 
 func TestSQLiteRepository_SubnetsKeepSchemaVersion(t *testing.T) {
 	assert.Equal(t, 1, schemaVersion, "cycle 2 must not bump user_version")
+}
+
+// Filter keys are concatenated into SQL, so anything outside the whitelist must be refused.
+func TestSQLiteRepository_GetSubnetsRejectsUnknownFilterKey(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	_, err := repo.GetSubnets("t1", map[string]interface{}{"1=1; DROP TABLE subnets; --": "x"})
+	require.Error(t, err)
+	_, err = repo.GetSubnets("t1", map[string]interface{}{"first_seen": "x"})
+	require.Error(t, err)
 }

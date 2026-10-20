@@ -85,7 +85,7 @@ func importFrames(t *testing.T, frames [][]byte) repository.Repository {
 }
 
 type subnetKey struct {
-	cidr, vlan, source string
+	cidr, vlan, source, kind string
 }
 
 func subnetKeys(t *testing.T, repo repository.Repository) map[subnetKey]bool {
@@ -94,7 +94,7 @@ func subnetKeys(t *testing.T, repo repository.Repository) map[subnetKey]bool {
 	require.NoError(t, err)
 	out := map[subnetKey]bool{}
 	for _, s := range subnets {
-		out[subnetKey{s.CIDR, model.VLANToken(s.VlanID, nil), s.Source}] = true
+		out[subnetKey{s.CIDR, model.VLANToken(s.VlanID, nil), s.Source, s.Kind}] = true
 	}
 	return out
 }
@@ -111,10 +111,10 @@ func TestIntegration_SubnetsEndToEnd(t *testing.T) {
 	})
 
 	assert.Equal(t, map[subnetKey]bool{
-		{"10.0.1.0/24", "untagged", "dhcp"}:        true,
-		{"10.0.1.0/24", "10", "dhcp"}:              true,
-		{"2001:db8:1::/64", "20", "ra"}:            true,
-		{"2001:db8:aa00::/56", "untagged", "dhcp"}: true,
+		{"10.0.1.0/24", "untagged", "dhcp", "on-link"}:          true,
+		{"10.0.1.0/24", "10", "dhcp", "on-link"}:                true,
+		{"2001:db8:1::/64", "20", "ra", "on-link"}:              true,
+		{"2001:db8:aa00::/56", "untagged", "dhcp", "delegated"}: true,
 	}, subnetKeys(t, repo))
 
 	untagged, err := repo.GetSubnets("t", map[string]interface{}{"vlan_id": nil})
@@ -130,4 +130,18 @@ func TestIntegration_NoSubnetEvidenceNoRows(t *testing.T) {
 	subnets, err := repo.GetSubnets("t", nil)
 	require.NoError(t, err)
 	assert.Empty(t, subnets)
+}
+
+// A relayed client's Reply reaches the capture as a Relay-Reply to the relay agent (UDP 547 -> 547).
+func TestIntegration_RelayedDHCPv6ReplyYieldsSubnet(t *testing.T) {
+	inner := &layers.DHCPv6{MsgType: layers.DHCPv6MsgTypeReply, TransactionID: []byte{1, 2, 3},
+		Options: layers.DHCPv6Options{iaPD(iaPrefix(56, "2001:db8:aa00::"))}}
+	relay := relayReply(t, inner)
+
+	ip := &layers.IPv6{Version: 6, SrcIP: net.ParseIP("fe80::1"), DstIP: net.ParseIP("fe80::2"), NextHeader: layers.IPProtocolUDP, HopLimit: 64}
+	udp := &layers.UDP{SrcPort: 547, DstPort: 547}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	repo := importFrames(t, [][]byte{subnetFrame(t, 30, layers.EthernetTypeIPv6, ip, udp, relay)})
+
+	assert.Equal(t, map[subnetKey]bool{{"2001:db8:aa00::/56", "30", "dhcp", "delegated"}: true}, subnetKeys(t, repo))
 }

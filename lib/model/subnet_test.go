@@ -27,7 +27,7 @@ func TestCanonicalCIDR(t *testing.T) {
 
 func TestSubnetValidate(t *testing.T) {
 	now := time.Now()
-	valid := Subnet{CIDR: "10.0.1.0/24", Source: SubnetSourceDHCP, FirstSeen: now, LastSeen: now}
+	valid := Subnet{CIDR: "10.0.1.0/24", Source: SubnetSourceDHCP, Kind: SubnetKindOnLink, FirstSeen: now, LastSeen: now}
 	require.NoError(t, valid.Validate())
 
 	bad := valid
@@ -42,9 +42,18 @@ func TestSubnetValidate(t *testing.T) {
 	bad.Source = "bogus"
 	assert.Error(t, bad.Validate())
 
+	bad = valid
+	bad.Kind = ""
+	assert.Error(t, bad.Validate())
+	bad.Kind = "bogus"
+	assert.Error(t, bad.Validate())
+	ok := valid
+	ok.Kind = SubnetKindDelegated
+	assert.NoError(t, ok.Validate())
+
 	for _, s := range []string{SubnetSourceDHCP, SubnetSourceCDP, SubnetSourceEIGRP, SubnetSourceOSPF, SubnetSourceRA, SubnetSourceInferred} {
-		ok := valid
-		ok.Source = s
-		assert.NoError(t, ok.Validate(), s)
+		withSource := valid
+		withSource.Source = s
+		assert.NoError(t, withSource.Validate(), s)
 	}
 }

@@ -635,7 +635,7 @@ func (p *GopacketParser) ParseFile() error {
 			if raLayer := packet.Layer(layers.LayerTypeICMPv6RouterAdvertisement); raLayer != nil {
 				ra := raLayer.(*layers.ICMPv6RouterAdvertisement)
 				for _, prefix := range routerAdvertisementPrefixes(ra.Options) {
-					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceRA, packet.Metadata().Timestamp)
+					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceRA, model2.SubnetKindOnLink, packet.Metadata().Timestamp)
 				}
 			}
 		}
@@ -1051,7 +1051,7 @@ func (p *GopacketParser) ParseFile() error {
 			// If request is a Reply, we can extract more information about the network and its servers
 			if dhcpv4.Operation == layers.DHCPOpReply {
 				if prefix, ok := dhcpv4SubnetEvidence(dhcpv4); ok {
-					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, packet.Metadata().Timestamp)
+					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, model2.SubnetKindOnLink, packet.Metadata().Timestamp)
 				}
 				serverInfo := make(map[string]interface{})
 				for _, option := range dhcpv4.Options {
@@ -1107,7 +1107,7 @@ func (p *GopacketParser) ParseFile() error {
 			protocols = append(protocols, "dhcpv6")
 
 			for _, prefix := range dhcpv6DelegatedPrefixes(dhcpv6) {
-				p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, packet.Metadata().Timestamp)
+				p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, model2.SubnetKindDelegated, packet.Metadata().Timestamp)
 			}
 		}
 

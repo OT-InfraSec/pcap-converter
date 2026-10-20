@@ -5,6 +5,7 @@ import (
 	"math/bits"
 	"net/netip"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -18,6 +19,9 @@ const (
 	dhcpv6IAPrefix   = 26
 	dhcpv6IAPDHeader = 12 // IAID, T1, T2
 	dhcpv6IAPrefixSz = 25 // preferred, valid, prefix length, 16-byte prefix
+
+	// RFC 8415 caps relay nesting at 8 hops; deeper messages are malformed or hostile.
+	maxDHCPv6RelayDepth = 8
 )
 
 // dhcpv4SubnetEvidence derives the client's subnet from a DHCP reply: the
@@ -90,14 +94,41 @@ func routerAdvertisementPrefixes(opts layers.ICMPv6Options) []netip.Prefix {
 }
 
 // dhcpv6DelegatedPrefixes returns the prefixes of IA_PD options in a DHCPv6
-// Reply. IA_NA carries no prefix length and yields nothing. A delegated prefix
-// is meant for downstream use and need not be on-link where it was observed.
+// Reply, including Replies wrapped in Relay-Reply messages. IA_NA carries no
+// prefix length and yields nothing. A delegated prefix is meant for downstream
+// use and need not be on-link where it was observed.
 func dhcpv6DelegatedPrefixes(d *layers.DHCPv6) []netip.Prefix {
-	if d.MsgType != layers.DHCPv6MsgTypeReply {
-		return nil
+	return dhcpv6DelegatedPrefixesAt(d, 0)
+}
+
+func dhcpv6DelegatedPrefixesAt(d *layers.DHCPv6, depth int) []netip.Prefix {
+	switch d.MsgType {
+	case layers.DHCPv6MsgTypeReply:
+		return iaPDPrefixes(d.Options)
+	case layers.DHCPv6MsgTypeRelayReply:
+		// Server replies to relayed clients arrive wrapped; unwrap each embedded message.
+		if depth >= maxDHCPv6RelayDepth {
+			return nil
+		}
+		var out []netip.Prefix
+		for _, opt := range d.Options {
+			if opt.Code != layers.DHCPv6OptRelayMessage {
+				continue
+			}
+			inner := &layers.DHCPv6{}
+			if err := inner.DecodeFromBytes(opt.Data, gopacket.NilDecodeFeedback); err != nil {
+				continue
+			}
+			out = append(out, dhcpv6DelegatedPrefixesAt(inner, depth+1)...)
+		}
+		return out
 	}
+	return nil
+}
+
+func iaPDPrefixes(opts layers.DHCPv6Options) []netip.Prefix {
 	var out []netip.Prefix
-	for _, opt := range d.Options {
+	for _, opt := range opts {
 		if opt.Code != layers.DHCPv6OptIAPD || len(opt.Data) < dhcpv6IAPDHeader {
 			continue
 		}

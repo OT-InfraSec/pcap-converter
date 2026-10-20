@@ -6,8 +6,10 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func dhcp4Reply(yourIP string, opts ...layers.DHCPOption) *layers.DHCPv4 {
@@ -143,5 +145,51 @@ func TestDHCPv6DelegatedPrefixes(t *testing.T) {
 		lenLies := iaPD([]byte{0, 26, 0xff, 0xff, 1, 2, 3})
 		tiny := dhcp6Opt(layers.DHCPv6OptIAPD, []byte{1, 2, 3})
 		assert.Empty(t, dhcpv6DelegatedPrefixes(reply(short, tooLong, zero, lenLies, tiny)))
+	})
+}
+
+// relayReply wraps an encoded inner message in a Relay-Reply (RFC 8415 section 9).
+func relayReply(t *testing.T, inner *layers.DHCPv6) *layers.DHCPv6 {
+	t.Helper()
+	buf := gopacket.NewSerializeBuffer()
+	require.NoError(t, inner.SerializeTo(buf, gopacket.SerializeOptions{}))
+	return &layers.DHCPv6{
+		MsgType: layers.DHCPv6MsgTypeRelayReply, LinkAddr: net.ParseIP("2001:db8::1"), PeerAddr: net.ParseIP("fe80::2"),
+		Options: layers.DHCPv6Options{dhcp6Opt(layers.DHCPv6OptRelayMessage, buf.Bytes())},
+	}
+}
+
+func TestDHCPv6DelegatedPrefixes_UnwrapsRelayReply(t *testing.T) {
+	inner := &layers.DHCPv6{MsgType: layers.DHCPv6MsgTypeReply, TransactionID: []byte{1, 2, 3},
+		Options: layers.DHCPv6Options{iaPD(iaPrefix(56, "2001:db8:aa00::"))}}
+	want := []netip.Prefix{netip.MustParsePrefix("2001:db8:aa00::/56")}
+
+	t.Run("single relay", func(t *testing.T) {
+		assert.Equal(t, want, dhcpv6DelegatedPrefixes(relayReply(t, inner)))
+	})
+	t.Run("nested relays", func(t *testing.T) {
+		assert.Equal(t, want, dhcpv6DelegatedPrefixes(relayReply(t, relayReply(t, inner))))
+	})
+	t.Run("relay-forward carries client messages, not evidence", func(t *testing.T) {
+		fwd := relayReply(t, inner)
+		fwd.MsgType = layers.DHCPv6MsgTypeRelayForward
+		assert.Empty(t, dhcpv6DelegatedPrefixes(fwd))
+	})
+	t.Run("relayed solicit is not evidence", func(t *testing.T) {
+		solicit := *inner
+		solicit.MsgType = layers.DHCPv6MsgTypeSolicit
+		assert.Empty(t, dhcpv6DelegatedPrefixes(relayReply(t, &solicit)))
+	})
+	t.Run("garbage relay message", func(t *testing.T) {
+		bad := &layers.DHCPv6{MsgType: layers.DHCPv6MsgTypeRelayReply,
+			Options: layers.DHCPv6Options{dhcp6Opt(layers.DHCPv6OptRelayMessage, []byte{7, 1})}}
+		assert.Empty(t, dhcpv6DelegatedPrefixes(bad))
+	})
+	t.Run("nesting beyond the hop limit is dropped", func(t *testing.T) {
+		wrapped := inner
+		for i := 0; i < maxDHCPv6RelayDepth+2; i++ {
+			wrapped = relayReply(t, wrapped)
+		}
+		assert.Empty(t, dhcpv6DelegatedPrefixes(wrapped))
 	})
 }
