@@ -43,3 +43,8 @@ Started: 2026-10-20
 - **Alternatives considered:** columns on devices; match by MAC; last-value-wins key; kind on-link.
 - **Trade-offs accepted:** visualizer joins by address lists and picks the latest row; flapping values create extra rows (capped at 100k).
 - **Impacts:** repository interface and mocks, visualizer (new table, `advertised` kind, `cdp` label).
+
+### 2026-10-20 — 10x-team: User decision log written
+- **Decision:** All user decisions of cycles 2 and 3, with rejected alternatives and assumed reasons, are recorded in `user-decisions.md`.
+- **Why:** User asked for every decision, its alternatives and why they were declined to be documented. Reasons are inferred, not stated by the user, and are labelled as such.
+- **Impacts:** Reference for ADR-002/003/004 and future cycles.

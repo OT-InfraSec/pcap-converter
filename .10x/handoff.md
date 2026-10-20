@@ -33,3 +33,5 @@ Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRe
 > Phase 5 complete (cycle 2 subnet-data): QA and security reviews written, no open findings. Gaps from phase 4 fixed (relay unwrapping, schema diagram, `kind` column per ADR-003, 100k cap). Visualizer contract: `subnets(cidr, vlan_id NULL=untagged, source dhcp|ra, kind on-link|delegated, first_seen, last_seen)`; one prefix can be two rows; `user_version` still 1. Open: 5 iec62443 test failures (unrelated). Next: cycle 3 (CDP) is optional.
 
 > Phase 3 complete (cycle 3 cdp-data): spec specs/2026-10-20-cdp-data-design.md, ADR-004, tasks in decisions/engineering-manager/cdp-data.md. Next: user reviews spec, then SDE implements tasks 1-6 (tdd, synthesized CDP frames, fuzz the extractor).
+
+> Added `user-decisions.md`: all user decisions of cycles 2-3 with declined alternatives and assumed reasons (to be corrected by the user where wrong).
