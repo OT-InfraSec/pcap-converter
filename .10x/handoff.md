@@ -19,3 +19,5 @@ Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRe
 
 ## Handoff History
 (none yet)
+
+> Update 2026-10-20: cycle 1 design drafted in `specs/2026-10-20-vlan-data-design.md`; user review pending before Phase 1-3 state files, ADR and implementation.
