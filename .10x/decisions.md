@@ -36,3 +36,10 @@ Started: 2026-10-20
 - **Alternatives considered:** source `dhcp-pd`; documentation only.
 - **Trade-offs accepted:** One prefix can appear as two rows; `Observe` signature changed.
 - **Impacts:** Visualizer (label `ra`, handle `delegated`), repository interface and mocks.
+
+### 2026-10-20 — User + 10x-team: CDP data (cycle 3, ADR-004)
+- **Decision:** Extract native/management VLAN, identity, addresses and IP prefixes from CDP. Store in a separate `cdp_neighbors` table keyed by (src MAC, port ID, VLAN, fingerprint of advertised values). Prefixes go to `subnets` as `source=cdp`, `kind=advertised`.
+- **Why:** devices are keyed by IP but CDP frames have no IP header; CDP prefixes do not prove on-link in the capture VLAN.
+- **Alternatives considered:** columns on devices; match by MAC; last-value-wins key; kind on-link.
+- **Trade-offs accepted:** visualizer joins by address lists and picks the latest row; flapping values create extra rows (capped at 100k).
+- **Impacts:** repository interface and mocks, visualizer (new table, `advertised` kind, `cdp` label).

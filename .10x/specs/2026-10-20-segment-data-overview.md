@@ -6,9 +6,9 @@ The visualizer draws VLANs and Subnets as nested boxes and shows VLAN/Subnet col
 
 | Cycle | Spec | Requirements | Status |
 |---|---|---|---|
-| 1 | [vlan-data](2026-10-20-vlan-data-requirements.md) | R1, R2, R3, R5 | Requirements captured, design pending |
-| 2 | [subnet-data](2026-10-20-subnet-data-requirements.md) | R4 (+ R5 version bump) | Blocked on cycle 1 (subnets are keyed by VLAN) |
-| 3 | CDP (nice to have) | Register CDP parser, store NativeVLAN / ManagementVLAN per device | Not started; can feed cycle 2 evidence |
+| 1 | [vlan-data](2026-10-20-vlan-data-requirements.md) | R1, R2, R3, R5 | Done (ADR-001) |
+| 2 | [subnet-data](2026-10-20-subnet-data-requirements.md) | R4 (+ R5 version bump) | Done (ADR-002, ADR-003) |
+| 3 | CDP (nice to have) | Register CDP parser, store NativeVLAN / ManagementVLAN per device | Design approved, see [cdp-data design](2026-10-20-cdp-data-design.md) (ADR-004); implementation pending |
 
 ## Current state (importer `v0.0.0-20250727123807-b96eb01bcdb4`, per source doc)
 

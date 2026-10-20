@@ -1,0 +1,2 @@
+# PM: cdp-data
+Goal: analyst/visualizer knows each neighbor's native and management VLAN, identity and advertised prefixes. Stories: (1) store CDP identity and VLANs per advertising interface; (2) reconfiguration visible as a second row; (3) CDP prefixes appear in subnets as cdp/advertised; (4) untagged frames give NULL VLAN. Success: synthesized CDP pcaps produce exact rows; malformed TLVs produce none. Out: untagged-to-VLAN mapping, LLDP, devices changes.
