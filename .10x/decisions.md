@@ -29,3 +29,10 @@ Started: 2026-10-20
 - **Alternatives considered:** DHCP only; inference of /24 and /64; extra `dhcpv6`/`dhcp-pd` source values.
 - **Trade-offs accepted:** Networks without DHCP router option or RA give no row; IA_PD rows may not be on-link and are indistinguishable by `source`.
 - **Impacts:** Visualizer needs a label for `ra` and a note on delegated prefixes; repository interface and mocks change.
+
+### 2026-10-20 — User + 10x-team: `kind` column for subnets (ADR-003)
+- **Decision:** `subnets.kind` = `on-link` (DHCPv4, RA) or `delegated` (DHCPv6 IA_PD), part of the row key. DHCPv6 relay-wrapped Replies are unwrapped. Subnet count is capped at 100,000.
+- **Why:** `source` could not tell a delegated prefix from an on-link subnet; hostile captures could grow the map without bound.
+- **Alternatives considered:** source `dhcp-pd`; documentation only.
+- **Trade-offs accepted:** One prefix can appear as two rows; `Observe` signature changed.
+- **Impacts:** Visualizer (label `ra`, handle `delegated`), repository interface and mocks.

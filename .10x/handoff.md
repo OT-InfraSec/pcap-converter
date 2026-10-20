@@ -29,3 +29,5 @@ Pending input: segment-data requirements (VLAN/Subnet) from /Users/patrick/gitRe
 > Phase 3 complete (cycle 2 subnet-data): spec specs/2026-10-20-subnet-data-design.md, ADR-002, tasks in decisions/engineering-manager/subnet-data.md. Next: user reviews spec, then SDE implements tasks 1-7 (use tdd, synthesized pcaps).
 
 > Phase 4 complete (cycle 2 subnet-data): see decisions/sde/subnet-data.md and decisions/dba/subnet-data.md. Test: extractors with malformed bytes (security: parser handles untrusted packets), IA_PD semantics, VLAN/NULL handling, re-import widening. Known gaps: DHCPv6 relay messages not unwrapped; db_schema.md class diagram lacks subnets. Next: QA + Security verification.
+
+> Phase 5 complete (cycle 2 subnet-data): QA and security reviews written, no open findings. Gaps from phase 4 fixed (relay unwrapping, schema diagram, `kind` column per ADR-003, 100k cap). Visualizer contract: `subnets(cidr, vlan_id NULL=untagged, source dhcp|ra, kind on-link|delegated, first_seen, last_seen)`; one prefix can be two rows; `user_version` still 1. Open: 5 iec62443 test failures (unrelated). Next: cycle 3 (CDP) is optional.

@@ -8,7 +8,11 @@ Tasks 1-7 of decisions/engineering-manager/subnet-data.md, test first.
 - No `SubnetManager` mock in testutil (nothing mocks it; YAGNI).
 - DHCPv4 option parsing is a second pass over the options in the extractor, not folded into the existing `dhcpv4_server_info` loop (keeps the extractor pure and testable).
 - DHCPv6 Advertise is not evidence; only Reply is.
+## Follow-up after review (phase 5), all done
+- DHCPv6 Relay-Reply messages are unwrapped (depth <= 8).
+- `docs/db_schema.md` class diagram now lists `subnets`.
+- `subnets.kind` (`on-link` | `delegated`) added per ADR-003; `Observe` takes a kind; kind is part of the key.
+- `SubnetManager` capped at 100,000 distinct subnets (warning logged once).
 ## Tech debt
-- `docs/db_schema.md` diagram (mermaid-like class list) was not extended with `subnets`; the prose section was.
-- The 5 failing `internal/iec62443` tests predate this work (unchanged).
-- DHCPv6 relay-wrapped messages (Relay-Reply) are not unwrapped, so prefixes only seen inside relay messages are missed.
+- The 5 failing `internal/iec62443` tests predate this work (unchanged, needs a product decision).
+- Only the outermost relay message's inner Reply is considered; relay-forward messages are intentionally not evidence.

@@ -43,3 +43,7 @@ Synthesized frames following `internal/parser/gopacket_parser_vlan_test.go`.
 
 ## Out of scope
 CDP/EIGRP/OSPF evidence, inference, cycle 3 (CDP native/management VLAN), device membership storage, migrations.
+
+## Amendment 2026-10-20 (see ADR-003)
+- `subnets.kind` (`on-link` | `delegated`) was added and is part of the key and row identity: DHCPv4 and RA rows are `on-link`, DHCPv6 IA_PD rows are `delegated`. This replaces the "source cannot tell" caveat above.
+- DHCPv6 Replies wrapped in Relay-Reply messages are unwrapped (max nesting 8, per RFC 8415); Relay-Forward and non-Reply inner messages are not evidence.
