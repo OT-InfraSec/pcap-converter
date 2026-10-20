@@ -199,3 +199,14 @@ communication_patterns  -->  tenants : tenant_id:id
 - The VLAN pair is part of the flow key: the same 5-tuple in two VLANs is two `flows` rows.
 - `devices.vlans`: sorted, comma-joined set of the VLANs the device was seen in, with the tokens `untagged`, `<outer>` (e.g. `100`) and `<outer>.<inner>` for QinQ (e.g. `100.200`). Example: `untagged,10,10.200`. A device seen in several VLANs stays one row.
 - `PRAGMA user_version = 1` marks databases that contain this data. An older database (user_version 0 with existing tables) is rejected on open with a "delete the database and re-import" error; there are no migrations.
+
+## Subnets
+
+`subnets` holds one row per prefix observed per VLAN and evidence source: `tenant_id`, `cidr` (canonical masked prefix, e.g. `10.0.1.0/24`, `2001:db8:1::/64`), `vlan_id`, `source`, `first_seen`, `last_seen`.
+
+- `vlan_id` is the outer 802.1Q tag; **NULL means untagged** (same convention as above). The same prefix in two VLANs is two rows; the QinQ inner tag is not part of the identity.
+- `source` is part of the key, so a prefix seen via two mechanisms is two rows. Written values: `dhcp` (DHCPv4 and DHCPv6) and `ra` (ICMPv6 Router Advertisement). Reserved, not written yet: `cdp`, `eigrp`, `ospf`, `inferred`.
+- DHCPv4: client's offered address masked with option 1, only when a router (option 3) lies inside the prefix. RA: on-link (L flag) Prefix Information options, link-local excluded. DHCPv6: IA_PD prefixes from Replies. **An IA_PD prefix is delegated to a router for downstream use and need not be on-link in the VLAN where it was seen**; `source` alone does not distinguish it.
+- Uniqueness is `(tenant_id, cidr, COALESCE(vlan_id, -1), source)`; re-imports widen `first_seen`/`last_seen`.
+- Device membership is not stored: assign device IPs by longest-prefix match within the device's VLAN.
+- No `user_version` bump (stays 1).

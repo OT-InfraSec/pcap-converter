@@ -50,6 +50,7 @@ type GopacketParser struct {
 	flowManager    FlowManager
 	deviceManager  DeviceManager
 	serviceManager ServiceManager
+	subnetManager  SubnetManager
 
 	// SSDP queries
 	ssdpQueries map[string]*SSDPQuery
@@ -88,6 +89,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		flowManager:        flowManager,
 		deviceManager:      deviceManager,
 		serviceManager:     serviceManager,
+		subnetManager:      NewDefaultSubnetManager(tenantID),
 		dnsQueries:         make(map[string]*DNSQuery),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
@@ -630,7 +632,12 @@ func (p *GopacketParser) ParseFile() error {
 			}
 			protocols = append(protocols, "icmpv6")
 
-			// TODO: if type_code is Router Advertisement <- src is router
+			if raLayer := packet.Layer(layers.LayerTypeICMPv6RouterAdvertisement); raLayer != nil {
+				ra := raLayer.(*layers.ICMPv6RouterAdvertisement)
+				for _, prefix := range routerAdvertisementPrefixes(ra.Options) {
+					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceRA, packet.Metadata().Timestamp)
+				}
+			}
 		}
 
 		// TCP
@@ -1043,6 +1050,9 @@ func (p *GopacketParser) ParseFile() error {
 
 			// If request is a Reply, we can extract more information about the network and its servers
 			if dhcpv4.Operation == layers.DHCPOpReply {
+				if prefix, ok := dhcpv4SubnetEvidence(dhcpv4); ok {
+					p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, packet.Metadata().Timestamp)
+				}
 				serverInfo := make(map[string]interface{})
 				for _, option := range dhcpv4.Options {
 					dataLen := len(option.Data)
@@ -1095,6 +1105,10 @@ func (p *GopacketParser) ParseFile() error {
 				"options":        dhcpv6.Options,
 			}
 			protocols = append(protocols, "dhcpv6")
+
+			for _, prefix := range dhcpv6DelegatedPrefixes(dhcpv6) {
+				p.subnetManager.Observe(prefix, vlan, model2.SubnetSourceDHCP, packet.Metadata().Timestamp)
+			}
 		}
 
 		// LLD
@@ -1558,6 +1572,13 @@ func (p *GopacketParser) ParseFile() error {
 	if serviceCount > 0 {
 		if err = p.repo.UpsertServices(serviceBatch); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
+		}
+	}
+
+	// Subnets are collected in memory like the other entities; one batched write at the end.
+	if subnets := p.subnetManager.GetAllSubnets(); len(subnets) > 0 {
+		if err = p.repo.UpsertSubnets(subnets); err != nil {
+			return fmt.Errorf("failed to save subnets: %w", err)
 		}
 	}
 

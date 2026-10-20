@@ -232,6 +232,16 @@ func (m *mockRepo) UpsertFlows(flows []*model.Flow) error {
 	panic("unimplemented")
 }
 
+// UpsertSubnets implements repository.Repository.
+func (m *mockRepo) UpsertSubnets(subnets []*model.Subnet) error {
+	panic("unimplemented")
+}
+
+// GetSubnets implements repository.Repository.
+func (m *mockRepo) GetSubnets(tenantID string, filters map[string]interface{}) ([]*model.Subnet, error) {
+	panic("unimplemented")
+}
+
 // UpsertPacket implements repository.Repository.
 func (m *mockRepo) UpsertPacket(packet *model.Packet) error {
 	panic("unimplemented")

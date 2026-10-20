@@ -15,6 +15,7 @@ type MockRepository struct {
 	Packets               []*model.Packet
 	Devices               []*model.Device
 	Flows                 []*model.Flow
+	Subnets               []*model.Subnet
 	DNSQueries            []*model.DNSQuery
 	DeviceRelations       []*model.DeviceRelation
 	ProtocolStats         []*model.ProtocolUsageStats
@@ -539,4 +540,14 @@ func (m *MockRepository) LinkPacketsToFlows(tenantID string) (int64, error) {
 		}
 	}
 	return linkedCount, nil
+}
+
+// UpsertSubnets records subnets without merging, for assertions on what the parser emitted.
+func (m *MockRepository) UpsertSubnets(subnets []*model.Subnet) error {
+	m.Subnets = append(m.Subnets, subnets...)
+	return nil
+}
+
+func (m *MockRepository) GetSubnets(tenantID string, filters map[string]interface{}) ([]*model.Subnet, error) {
+	return m.Subnets, nil
 }

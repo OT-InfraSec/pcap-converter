@@ -178,6 +178,15 @@ func (r *SQLiteRepository) createTables() error {
 			FOREIGN KEY (source_device_id) REFERENCES devices (id),
 			FOREIGN KEY (destination_device_id) REFERENCES devices (id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS subnets (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			tenant_id TEXT,
+			cidr TEXT NOT NULL,
+			vlan_id INTEGER,
+			source TEXT NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL
+		);`,
 		`CREATE TABLE IF NOT EXISTS packet_protocols (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			packet_id INTEGER NOT NULL,
@@ -288,6 +297,8 @@ func (r *SQLiteRepository) createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_dest ON communication_patterns(destination_device_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_communication_patterns_protocol ON communication_patterns(protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_vlan ON flows(vlan_id, vlan_inner_id);`,
+		// COALESCE makes untagged (NULL) subnets unique too; plain NULLs never collide in a UNIQUE index.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_subnets_key ON subnets(tenant_id, cidr, COALESCE(vlan_id, -1), source);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_canonical ON flows(src_ip, dst_ip, protocol);`,
 		`CREATE INDEX IF NOT EXISTS idx_flows_reverse_lookup ON flows(dst_ip, src_ip, protocol);`,
 	}

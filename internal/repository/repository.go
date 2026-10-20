@@ -54,6 +54,13 @@ type Repository interface {
 	// by matching on tenant_id, src_ip, dst_ip, protocol, and src_port (accounting for flow canonicalization)
 	LinkPacketsToFlows(tenantID string) (int64, error)
 
+	// Subnet operations
+	// UpsertSubnets inserts subnets or widens the first_seen/last_seen range of existing
+	// rows with the same (tenant, cidr, vlan, source) key.
+	UpsertSubnets(subnets []*model.Subnet) error
+	// GetSubnets returns a tenant's subnets; a nil filter value matches NULL (untagged VLAN).
+	GetSubnets(tenantID string, filters map[string]interface{}) ([]*model.Subnet, error)
+
 	// DNS operations
 	AddDNSQuery(query *model.DNSQuery) error
 	GetDNSQueries(tenantID string, eqFilters map[string]interface{}, likeFilters map[string]interface{}) ([]*model.DNSQuery, error)
