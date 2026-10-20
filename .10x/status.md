@@ -11,7 +11,7 @@
 (none yet)
 
 ### In Progress
-- Brainstorming cycle 1: VLAN data (R1, R2, R3, R5) - `specs/2026-10-20-vlan-data-requirements.md`
+- Cycle 1 design drafted: `specs/2026-10-20-vlan-data-design.md` (awaiting user review)
 - Queued: cycle 2 subnet data (R4), cycle 3 CDP (nice to have)
 
 ### Pending
