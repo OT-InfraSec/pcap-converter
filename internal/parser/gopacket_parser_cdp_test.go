@@ -161,9 +161,7 @@ func TestIntegration_CDPTaggedChangedValueAndPorts(t *testing.T) {
 func TestIntegration_CDPSkipsAnonymousAndMalformed(t *testing.T) {
 	truncated := fullCDPFrame(cdpSrcMAC, -1, 10)
 	truncated = truncated[:len(truncated)-6] // last TLV cut short
-	// A prefix length above 32 makes gopacket's CDP decoder panic. Tagged frames are decoded by
-	// cdpInfoFromPacket with recovery on, so this one is skipped. The untagged variant would
-	// crash ParseFile (SkipDecodeRecovery) and is therefore not tested here.
+	// A prefix length above 32 makes gopacket's CDP decoder panic; the frame must be skipped.
 	badPrefix := cdpFrame(cdpSrcMAC, 40,
 		tlv(0x0001, []byte("sw")),
 		tlv(0x0007, []byte{10, 0, 0, 0, 200}),
@@ -195,4 +193,17 @@ func TestIntegration_CDPInQinQUsesOuterVLAN(t *testing.T) {
 	require.Len(t, got, 1)
 	require.NotNil(t, got[0].VlanID)
 	assert.Equal(t, 100, *got[0].VlanID)
+}
+
+// gopacket's CDP decoder panics on these untagged frames (nil IPNet, slice out of range).
+// ParseFile must survive them and keep importing the frames around them.
+func TestIntegration_HostileUntaggedCDPDoesNotAbortImport(t *testing.T) {
+	badAddress := append(u32(1), 1, 1, 0xcc, 0, 200, 10, 0, 0, 1) // claims a 200-byte address
+	repo := importFrames(t, [][]byte{
+		fullCDPFrame(cdpSrcMAC, -1, 10),
+		cdpFrame(cdpSrcMAC, -1, tlv(0x0001, []byte("sw")), tlv(0x0007, []byte{10, 0, 0, 0, 200})),
+		cdpFrame(cdpSrcMAC, -1, tlv(0x0002, badAddress)),
+		fullCDPFrame(net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x09}, -1, 10),
+	})
+	assert.Len(t, cdpNeighbors(t, repo), 2, "the two valid frames survive, the hostile ones are skipped")
 }

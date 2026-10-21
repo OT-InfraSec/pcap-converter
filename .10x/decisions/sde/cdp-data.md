@@ -11,6 +11,6 @@ Tasks 1-6 of decisions/engineering-manager/cdp-data.md, tests alongside.
 - Prefix length bounds are 1..32 for IPv4 (a /32 is kept; RA allows /128 the same way). DHCPv4 still rejects /32 as before.
 - Frames with a decode error (`packet.ErrorLayer() != nil`) are skipped.
 ## Tech debt / findings
-- **Crash on hostile untagged CDP (pre-existing, not fixed).** `ParseFile` sets `DecodeOptions.SkipDecodeRecovery = true` with lazy decoding. gopacket's CDP prefix decoder dereferences a nil `*IPNet` when a prefix length is above 32, so one such untagged frame panics the whole import (via `extractVLANTag` -> `packet.Layers()`). The same applies to other gopacket decoders with unchecked slicing (for example `decodeAddresses`). Tagged CDP is protected by the fallback above. Needs a decision: re-enable recovery, or wrap per-packet decoding in a `recover`. Security should look at this in phase 5.
+- Crash on hostile untagged CDP: found in phase 4, fixed in phase 5 by re-enabling decode recovery (see reviews/2026-10-21-cdp-security-review.md).
 - The 5 failing `internal/iec62443` tests predate this work.
 - CDP over IPv6 addresses depends on gopacket's `decodeAddresses`; only IPv4 and IPv6 address entries are read.

@@ -481,7 +481,10 @@ func (p *GopacketParser) ParseFile() error {
 	// Set DecodeOptions for better performance
 	packetSource.DecodeOptions.Lazy = true
 	packetSource.DecodeOptions.NoCopy = true
-	packetSource.DecodeOptions.SkipDecodeRecovery = true
+	// Decode recovery stays on: gopacket decoders panic on hostile input (for example a CDP
+	// prefix length above 32) and, without recovery, one frame would abort the whole import.
+	// Measured cost on 50,000 frames: none (database time dominates).
+	packetSource.DecodeOptions.SkipDecodeRecovery = false
 
 	// Start at 1 to match SQLite's AUTOINCREMENT ids. Starting at 0 made packet 1 look
 	// like an existing row in UpsertPackets, overwriting the first packet of every capture.
