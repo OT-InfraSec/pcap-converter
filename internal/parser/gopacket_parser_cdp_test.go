@@ -3,9 +3,11 @@ package parser
 import (
 	"encoding/binary"
 	"net"
+	"path/filepath"
 	"testing"
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/helper"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -206,4 +208,14 @@ func TestIntegration_HostileUntaggedCDPDoesNotAbortImport(t *testing.T) {
 		fullCDPFrame(net.HardwareAddr{0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x09}, -1, 10),
 	})
 	assert.Len(t, cdpNeighbors(t, repo), 2, "the two valid frames survive, the hostile ones are skipped")
+}
+
+func TestParseFile_CountsDecodeFailures(t *testing.T) {
+	hostile := cdpFrame(cdpSrcMAC, -1, tlv(0x0002, append(u32(1), 1, 1, 0xcc, 0, 200, 10, 0, 0, 1)))
+	repo, err := repository.NewSQLiteRepositoryWithCanonicalizer(filepath.Join(t.TempDir(), "out.sqlite"), helper.NewFlowCanonicalizer())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = repo.Close() })
+	parser := NewGopacketParser(writeVLANPCAP(t, [][]byte{fullCDPFrame(cdpSrcMAC, -1, 10), hostile, hostile}), repo, "t")
+	require.NoError(t, parser.ParseFile())
+	assert.Equal(t, 2, parser.DecodeFailures())
 }

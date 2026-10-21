@@ -63,9 +63,17 @@ type GopacketParser struct {
 	// Collect protocol usage stats during parsing to defer DB writes
 	protocolUsageStats []*model2.ProtocolUsageStats
 
+	// Frames in which a decoder failed (including recovered panics): their packet row is
+	// kept, but the data of the failing layer and everything above it is lost.
+	decodeFailures int
+	firstDecodeErr error
+
 	repo             repository.Repository
 	industrialParser IndustrialProtocolParser
 }
+
+// DecodeFailures returns how many frames of the last ParseFile had a decode failure.
+func (p *GopacketParser) DecodeFailures() int { return p.decodeFailures }
 
 func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID string) *GopacketParser {
 	// Initialize device counter from existing devices
@@ -528,7 +536,14 @@ func (p *GopacketParser) ParseFile() error {
 		}
 	}()
 
+	p.decodeFailures, p.firstDecodeErr = 0, nil
 	for packet := range packetSource.Packets() {
+		if errLayer := packet.ErrorLayer(); errLayer != nil {
+			p.decodeFailures++
+			if p.firstDecodeErr == nil {
+				p.firstDecodeErr = fmt.Errorf("packet %d: %w", packetID, errLayer.Error())
+			}
+		}
 		var flags []string
 		// Pre-allocate maps with capacity hints
 		layersMap := make(map[string]interface{}, 10) // Assume average 10 layers
@@ -1500,6 +1515,11 @@ func (p *GopacketParser) ParseFile() error {
 		}
 
 		packetID++
+	}
+
+	if p.decodeFailures > 0 {
+		log.Warn().Int("frames", p.decodeFailures).Err(p.firstDecodeErr).
+			Msg("Some frames failed to decode; their data above the failing layer was not imported")
 	}
 
 	// Close the channel to signal no more packets

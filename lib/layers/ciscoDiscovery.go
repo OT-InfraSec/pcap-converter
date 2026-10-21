@@ -235,6 +235,10 @@ func (c *CiscoDiscovery) LayerType() gopacket.LayerType {
 }
 
 func decodeCiscoDiscovery(data []byte, p gopacket.PacketBuilder) error {
+	if len(data) < 4 {
+		p.SetTruncated()
+		return errors.New("CiscoDiscovery header < 4 bytes")
+	}
 	c := &CiscoDiscovery{
 		Version:  data[0],
 		TTL:      data[1],
@@ -260,9 +264,8 @@ func (c *CiscoDiscoveryInfo) LayerType() gopacket.LayerType {
 }
 
 func decodeCiscoDiscoveryTLVs(data []byte, p gopacket.PacketBuilder) (values []CiscoDiscoveryValue, err error) {
-	dataLen := len(data)
-	for dataLen > 0 {
-		if dataLen < 4 {
+	for len(data) > 0 {
+		if len(data) < 4 {
 			p.SetTruncated()
 			return nil, errors.New("CDP TLV < 4 bytes")
 		}
