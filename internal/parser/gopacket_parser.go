@@ -557,6 +557,7 @@ func (p *GopacketParser) ParseFile() error {
 			protocols = append(protocols, "ethernet")
 
 			// CDP: frames carry no IP header, the interface is identified by the Ethernet source.
+			// It stays inside the Ethernet block because CDP only exists on Ethernet (SNAP).
 			if info := cdpInfoFromPacket(packet); info != nil {
 				ts := packet.Metadata().Timestamp
 				if neighbor, ok := cdpNeighborFromInfo(info); ok {

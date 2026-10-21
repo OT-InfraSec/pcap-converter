@@ -14,3 +14,11 @@ Tasks 1-6 of decisions/engineering-manager/cdp-data.md, tests alongside.
 - Crash on hostile untagged CDP: found in phase 4, fixed in phase 5 by re-enabling decode recovery (see reviews/2026-10-21-cdp-security-review.md).
 - The 5 failing `internal/iec62443` tests predate this work.
 - CDP over IPv6 addresses depends on gopacket's `decodeAddresses`; only IPv4 and IPv6 address entries are read.
+## Code review follow-up (2026-10-21)
+- Bug: a frame tagged VLAN 4095 made `Validate` fail the whole CDP batch and aborted the import. The frame VLAN now accepts 1..4095 (a fact about the capture); advertised native/management VLANs stay 1..4094. Regression tests in model and end to end.
+- `UpsertCDPNeighbors` prepares its three statements once per transaction: 100,000 rows 1.5 s -> 0.8 s (`BenchmarkUpsertCDPNeighbors`).
+- `sanitizeCDPString` turns line breaks and tabs into spaces (Cisco versions are multi-line) instead of gluing lines together.
+- Comments: tagged fallback options, CDP block placement, header check is a pre-filter only (a mutation test showed it changes no result).
+- Protocol tests (`cdp_protocol_test.go`): `cdpInfoFromPacket` table (untagged, tagged, priority tag, 4095, QinQ, DTP, IPv4, STP, hostile, truncated, garbage), every capability bit, address encodings, CDP versions, unknown and duplicate TLVs, a switch-style frame with all common TLVs, frame VLANs, prefix TLV shapes, hostile strings, management VLAN variants.
+- Known limitation, pinned by a test: gopacket decodes IPv6 CDP addresses only for SNAP type 0x0800, devices send 0x86dd, so real IPv6 addresses are dropped. Fix would need our own address TLV parser.
+- Still open: no real device capture (frames are synthesized to the wire layout).

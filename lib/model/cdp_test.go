@@ -52,6 +52,10 @@ func TestCDPNeighborValidate(t *testing.T) {
 	assert.Error(t, sealed(&CDPNeighbor{SrcMAC: "m", NativeVLAN: intPtr(0)}).Validate())
 	assert.Error(t, sealed(&CDPNeighbor{SrcMAC: "m", ManagementVLAN: intPtr(4095)}).Validate())
 	assert.Error(t, sealed(&CDPNeighbor{SrcMAC: "m", VlanID: intPtr(5000)}).Validate())
+	assert.Error(t, sealed(&CDPNeighbor{SrcMAC: "m", VlanID: intPtr(0)}).Validate())
+	assert.NoError(t, sealed(&CDPNeighbor{SrcMAC: "m", VlanID: intPtr(4095)}).Validate(), "frame tagged with the reserved ID is stored")
+	assert.NoError(t, sealed(&CDPNeighbor{SrcMAC: "m", VlanID: intPtr(4094), NativeVLAN: intPtr(4094)}).Validate())
+	assert.Error(t, sealed(&CDPNeighbor{SrcMAC: "m", NativeVLAN: intPtr(4095)}).Validate(), "advertised 4095 is not usable")
 	assert.Error(t, (&CDPNeighbor{SrcMAC: "m", DeviceID: "x", Fingerprint: "bogus"}).Validate())
 }
 

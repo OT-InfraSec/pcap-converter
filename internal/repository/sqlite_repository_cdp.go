@@ -27,26 +27,41 @@ func (r *SQLiteRepository) UpsertCDPNeighbors(neighbors []*model2.CDPNeighbor) e
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Prepared once: a full import writes up to 100,000 rows through these statements.
+	// "IS" compares NULL vlan_id correctly, unlike "="
+	find, err := tx.Prepare(`SELECT id, first_seen, last_seen FROM cdp_neighbors
+		WHERE tenant_id = ? AND src_mac = ? AND port_id = ? AND vlan_id IS ? AND fingerprint = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare cdp neighbor lookup: %w", err)
+	}
+	defer find.Close()
+	insert, err := tx.Prepare(`INSERT INTO cdp_neighbors (tenant_id, src_mac, port_id, vlan_id, device_id, platform,
+		software_version, sys_name, capabilities, addresses, mgmt_addresses, native_vlan, management_vlan,
+		fingerprint, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare cdp neighbor insert: %w", err)
+	}
+	defer insert.Close()
+	update, err := tx.Prepare(`UPDATE cdp_neighbors SET first_seen = ?, last_seen = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare cdp neighbor update: %w", err)
+	}
+	defer update.Close()
+
 	for _, n := range neighbors {
-		if err = upsertCDPNeighbor(tx, n); err != nil {
+		if err = upsertCDPNeighbor(find, insert, update, n); err != nil {
 			return fmt.Errorf("failed to upsert cdp neighbor %s %s: %w", n.SrcMAC, n.PortID, err)
 		}
 	}
 	return tx.Commit()
 }
 
-func upsertCDPNeighbor(tx *sql.Tx, n *model2.CDPNeighbor) error {
+func upsertCDPNeighbor(find, insert, update *sql.Stmt, n *model2.CDPNeighbor) error {
 	var id int64
 	var firstStr, lastStr string
-	// "IS" compares NULL vlan_id correctly, unlike "="
-	err := tx.QueryRow(`SELECT id, first_seen, last_seen FROM cdp_neighbors
-		WHERE tenant_id = ? AND src_mac = ? AND port_id = ? AND vlan_id IS ? AND fingerprint = ?`,
-		n.TenantID, n.SrcMAC, n.PortID, intPtrToArg(n.VlanID), n.Fingerprint).Scan(&id, &firstStr, &lastStr)
+	err := find.QueryRow(n.TenantID, n.SrcMAC, n.PortID, intPtrToArg(n.VlanID), n.Fingerprint).Scan(&id, &firstStr, &lastStr)
 	if err == sql.ErrNoRows {
-		_, err = tx.Exec(`INSERT INTO cdp_neighbors (tenant_id, src_mac, port_id, vlan_id, device_id, platform,
-			software_version, sys_name, capabilities, addresses, mgmt_addresses, native_vlan, management_vlan,
-			fingerprint, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			n.TenantID, n.SrcMAC, n.PortID, intPtrToArg(n.VlanID), n.DeviceID, n.Platform,
+		_, err = insert.Exec(n.TenantID, n.SrcMAC, n.PortID, intPtrToArg(n.VlanID), n.DeviceID, n.Platform,
 			n.SoftwareVersion, n.SysName, n.Capabilities, n.Addresses, n.MgmtAddresses,
 			intPtrToArg(n.NativeVLAN), intPtrToArg(n.ManagementVLAN), n.Fingerprint,
 			n.FirstSeen.Format(time.RFC3339Nano), n.LastSeen.Format(time.RFC3339Nano))
@@ -65,8 +80,7 @@ func upsertCDPNeighbor(tx *sql.Tx, n *model2.CDPNeighbor) error {
 	if n.LastSeen.After(last) {
 		last = n.LastSeen
 	}
-	_, err = tx.Exec(`UPDATE cdp_neighbors SET first_seen = ?, last_seen = ? WHERE id = ?`,
-		first.Format(time.RFC3339Nano), last.Format(time.RFC3339Nano), id)
+	_, err = update.Exec(first.Format(time.RFC3339Nano), last.Format(time.RFC3339Nano), id)
 	return err
 }
 

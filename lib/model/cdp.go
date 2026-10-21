@@ -8,8 +8,12 @@ import (
 	"time"
 )
 
-// MaxVLANID is the highest usable 802.1Q VLAN ID; 4095 is reserved.
+// MaxVLANID is the highest usable 802.1Q VLAN ID. 4095 is reserved but a legal tag
+// value, so it can appear on the wire.
 const MaxVLANID = 4094
+
+// maxTagVLANID is the largest value of the 12-bit VLAN ID field.
+const maxTagVLANID = 4095
 
 // CDPNeighbor is one Cisco Discovery Protocol advertisement of an interface
 // (SrcMAC + PortID), as seen in a VLAN. VlanID is the outer tag of the frame (nil =
@@ -70,13 +74,18 @@ func (n *CDPNeighbor) ComputeFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Validate checks the identity fields, the VLAN ranges and that the fingerprint
+// Validate checks the identity fields, the VLAN ranges (frame VLAN 1..4095, advertised 1..4094) and that the fingerprint
 // matches the values, so rows with the same key cannot silently disagree.
 func (n *CDPNeighbor) Validate() error {
 	if n.SrcMAC == "" {
 		return fmt.Errorf("cdp neighbor has no source MAC")
 	}
-	for name, v := range map[string]*int{"vlan": n.VlanID, "native VLAN": n.NativeVLAN, "management VLAN": n.ManagementVLAN} {
+	// The frame's VLAN is a fact about the capture: any tag a frame can carry is stored, so a
+	// hostile frame tagged 4095 cannot fail the batch. Advertised VLANs must be usable ones.
+	if n.VlanID != nil && (*n.VlanID < 1 || *n.VlanID > maxTagVLANID) {
+		return fmt.Errorf("cdp neighbor vlan %d out of range 1..%d", *n.VlanID, maxTagVLANID)
+	}
+	for name, v := range map[string]*int{"native VLAN": n.NativeVLAN, "management VLAN": n.ManagementVLAN} {
 		if v != nil && (*v < 1 || *v > MaxVLANID) {
 			return fmt.Errorf("cdp neighbor %s %d out of range 1..%d", name, *v, MaxVLANID)
 		}

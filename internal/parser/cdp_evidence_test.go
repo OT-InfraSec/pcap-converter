@@ -90,6 +90,10 @@ func TestCDPAddressList(t *testing.T) {
 
 func TestSanitizeCDPString(t *testing.T) {
 	assert.Equal(t, "abc", sanitizeCDPString("a\x00b\x1bc\n"))
+	assert.Equal(t, "line one line two", sanitizeCDPString("line one\r\nline two"), "CRLF is one space")
+	assert.Equal(t, "a b c", sanitizeCDPString("a\tb\nc"))
+	assert.Equal(t, "x", sanitizeCDPString("  x \n"))
+	assert.Equal(t, "", sanitizeCDPString("\x00\r\n \x01"))
 	assert.Equal(t, "ab", sanitizeCDPString("a\xffb"), "invalid UTF-8 removed")
 	assert.Equal(t, "ä ö", sanitizeCDPString("ä ö"))
 

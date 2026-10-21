@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -69,7 +70,7 @@ func TestCDPManager_CapStopsNewButWidensKnown(t *testing.T) {
 	base := time.Now()
 	for i := 0; i < maxCDPNeighbors; i++ {
 		n := cdpN("m", "p", nil, nil)
-		n.DeviceID = "d" + time.Duration(i).String()
+		n.DeviceID = fmt.Sprint("d", i)
 		cm.Observe(n, base)
 	}
 	require.Len(t, cm.GetAllNeighbors(), maxCDPNeighbors)
@@ -80,7 +81,7 @@ func TestCDPManager_CapStopsNewButWidensKnown(t *testing.T) {
 	assert.Len(t, cm.GetAllNeighbors(), maxCDPNeighbors)
 
 	known := cdpN("m", "p", nil, nil)
-	known.DeviceID = "d" + time.Duration(0).String()
+	known.DeviceID = "d0"
 	cm.Observe(known, base.Add(time.Hour))
 	found := false
 	for _, n := range cm.GetAllNeighbors() {

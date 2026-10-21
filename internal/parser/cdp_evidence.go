@@ -20,15 +20,20 @@ import (
 const maxCDPStringBytes = 255
 
 // sanitizeCDPString removes control characters (including NUL) and invalid UTF-8,
-// then truncates to maxCDPStringBytes without splitting a character.
+// then truncates to maxCDPStringBytes without splitting a character. Line breaks
+// and tabs become spaces because Cisco software versions are multi-line text.
 func sanitizeCDPString(s string) string {
 	s = strings.ToValidUTF8(s, "")
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+		switch {
+		case r == '\n' || r == '\t':
+			return ' '
+		case r < 0x20 || (r >= 0x7f && r < 0xa0): // includes \r: "\r\n" is one space
 			return -1
 		}
 		return r
 	}, s)
+	s = strings.TrimSpace(s)
 	if len(s) <= maxCDPStringBytes {
 		return s
 	}
@@ -115,11 +120,8 @@ func cdpPrefixes(info *layers.CiscoDiscoveryInfo) []netip.Prefix {
 			continue
 		}
 		addr = addr.Unmap()
-		if bits == 32 && addr.Is6() {
-			continue
-		}
-		max := addr.BitLen()
-		if ones < 1 || ones > max || bits != max {
+		maxBits := addr.BitLen()
+		if ones < 1 || ones > maxBits || bits != maxBits {
 			continue
 		}
 		if addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() {
@@ -150,11 +152,14 @@ func cdpInfoFromPacket(packet gopacket.Packet) *layers.CiscoDiscoveryInfo {
 	if len(all) == 0 {
 		return nil
 	}
+	// The header check is only a pre-filter: it spares a full decode of every tagged non-IP frame.
+	// Without it other LLC protocols would still end up with no CDP info.
 	tag, ok := all[len(all)-1].(*layers.Dot1Q)
 	if !ok || tag.Type >= 0x0600 || !bytes.HasPrefix(tag.LayerPayload(), cdpSNAPHeader) {
 		return nil
 	}
-	// Default options keep decode-panic recovery on: the lazy path of ParseFile has none.
+	// Default options (recovery on, data copied) keep this decode independent of the
+	// lazy, NoCopy options ParseFile uses for the outer packet.
 	inner := gopacket.NewPacket(tag.LayerPayload(), layers.LayerTypeLLC, gopacket.Default)
 	if inner.ErrorLayer() != nil {
 		return nil
