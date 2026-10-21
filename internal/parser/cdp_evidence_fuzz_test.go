@@ -47,3 +47,25 @@ func FuzzCDPEvidence(f *testing.F) {
 		}
 	})
 }
+
+// FuzzParseCDPAddresses checks that the raw Address TLV parser never panics and only
+// returns 4- or 16-byte addresses that do not alias the input.
+func FuzzParseCDPAddresses(f *testing.F) {
+	f.Add(append(u32(1), cdpAddrEntry(1, protoIPv4NLPID, []byte{10, 0, 0, 1})...))
+	f.Add(append(u32(1), cdpAddrEntry(2, protoSNAPIPv6, net.ParseIP("2001:db8::1"))...))
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 2, 0xff})
+	f.Fuzz(func(t *testing.T, v []byte) {
+		orig := append([]byte(nil), v...)
+		for _, ip := range parseCDPAddresses(v) {
+			if len(ip) != 4 && len(ip) != 16 {
+				t.Fatalf("bad address length %d", len(ip))
+			}
+			if len(ip) > 0 {
+				ip[0] ^= 0xff // must not touch the input
+			}
+		}
+		if string(orig) != string(v) {
+			t.Fatal("input modified")
+		}
+	})
+}

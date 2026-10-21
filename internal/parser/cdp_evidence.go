@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net"
 	"net/netip"
 	"strings"
@@ -138,14 +139,14 @@ var cdpSNAPHeader = []byte{0xaa, 0xaa, 0x03, 0x00, 0x00, 0x0c, 0x20, 0x00}
 // cdpInfoFromPacket returns the CDP info of a frame. gopacket decodes CDP behind
 // an untagged 802.3 header only; behind an 802.1Q tag the tag holds a length
 // instead of an EtherType and decoding stops, so that case is decoded here from
-// the tag's payload. Frames with decode errors are skipped: gopacket fills the
+// the tag's payload. Addresses come from our own parse of the raw TLVs. Frames with decode errors are skipped: gopacket fills the
 // info layer while decoding, so a failure leaves it half-filled.
 func cdpInfoFromPacket(packet gopacket.Packet) *layers.CiscoDiscoveryInfo {
 	if l := packet.Layer(layers.LayerTypeCiscoDiscoveryInfo); l != nil {
 		if packet.ErrorLayer() != nil {
 			return nil
 		}
-		return l.(*layers.CiscoDiscoveryInfo)
+		return withRawAddresses(l.(*layers.CiscoDiscoveryInfo), packet)
 	}
 
 	all := packet.Layers()
@@ -165,7 +166,76 @@ func cdpInfoFromPacket(packet gopacket.Packet) *layers.CiscoDiscoveryInfo {
 		return nil
 	}
 	if l := inner.Layer(layers.LayerTypeCiscoDiscoveryInfo); l != nil {
-		return l.(*layers.CiscoDiscoveryInfo)
+		return withRawAddresses(l.(*layers.CiscoDiscoveryInfo), inner)
 	}
 	return nil
+}
+
+const (
+	cdpTLVAddress     = 0x0002
+	cdpTLVMgmtAddress = 0x0016
+)
+
+// withRawAddresses replaces the address lists gopacket decoded with our own parse of
+// the raw TLVs. gopacket recognises IPv6 only for SNAP type 0x0800, while devices
+// send 0x86dd, so their IPv6 addresses would be lost.
+func withRawAddresses(info *layers.CiscoDiscoveryInfo, packet gopacket.Packet) *layers.CiscoDiscoveryInfo {
+	l := packet.Layer(layers.LayerTypeCiscoDiscovery)
+	if l == nil {
+		return info
+	}
+	cd, ok := l.(*layers.CiscoDiscovery)
+	if !ok {
+		return info
+	}
+	// Like gopacket, the last TLV of a type wins.
+	for _, v := range cd.Values {
+		switch v.Type {
+		case cdpTLVAddress:
+			info.Addresses = parseCDPAddresses(v.Value)
+		case cdpTLVMgmtAddress:
+			info.MgmtAddresses = parseCDPAddresses(v.Value)
+		}
+	}
+	return info
+}
+
+// parseCDPAddresses reads an Address TLV value: a 4-byte count, then per entry a
+// protocol type (1 = NLPID, 2 = 802.2), a protocol length, the protocol bytes, a
+// 2-byte address length and the address. Only IPv4 (NLPID 0xcc) and IPv6 (SNAP
+// type 0x86dd, or the 0x0800 variant gopacket accepts) are returned, in advertised
+// order. Parsing stops at the first malformed entry and keeps what was read.
+func parseCDPAddresses(v []byte) []net.IP {
+	if len(v) < 4 {
+		return nil
+	}
+	count := binary.BigEndian.Uint32(v)
+	v = v[4:]
+	var out []net.IP
+	for i := uint32(0); i < count && len(v) >= 2; i++ {
+		ptype, plen := v[0], int(v[1])
+		if (ptype != 1 && ptype != 2) || len(v) < 2+plen+2 {
+			break
+		}
+		proto := v[2 : 2+plen]
+		v = v[2+plen:]
+		alen := int(binary.BigEndian.Uint16(v))
+		if len(v) < 2+alen {
+			break
+		}
+		addr := v[2 : 2+alen]
+		v = v[2+alen:]
+		switch {
+		case ptype == 1 && bytes.Equal(proto, []byte{0xcc}) && alen == 4:
+			out = append(out, net.IP(append([]byte(nil), addr...)))
+		case ptype == 2 && alen == 16 && isCDPIPv6Proto(proto):
+			out = append(out, net.IP(append([]byte(nil), addr...)))
+		}
+	}
+	return out
+}
+
+func isCDPIPv6Proto(p []byte) bool {
+	return bytes.Equal(p, []byte{0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00, 0x86, 0xdd}) ||
+		bytes.Equal(p, []byte{0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00})
 }

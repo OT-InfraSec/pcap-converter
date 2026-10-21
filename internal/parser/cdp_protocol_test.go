@@ -123,7 +123,7 @@ func TestCDPProtocol_AddressEncodings(t *testing.T) {
 		cdpAddrTLV(0x0002,
 			cdpAddrEntry(1, protoIPv4NLPID, net.ParseIP("10.0.0.1").To4()),
 			cdpAddrEntry(2, protoGopacketV6, v6),                        // decoded by gopacket
-			cdpAddrEntry(2, protoSNAPIPv6, net.ParseIP("2001:db8::99")), // real encoding: ignored
+			cdpAddrEntry(2, protoSNAPIPv6, net.ParseIP("2001:db8::99")), // real encoding
 			cdpAddrEntry(1, []byte{0x81}, []byte{1, 2, 3}),              // CLNP: ignored
 			cdpAddrEntry(1, protoIPv4NLPID, net.ParseIP("10.0.0.7").To4()),
 		),
@@ -131,9 +131,9 @@ func TestCDPProtocol_AddressEncodings(t *testing.T) {
 	)})
 	got := cdpNeighbors(t, repo)
 	require.Len(t, got, 1)
-	// Known limitation, pinned here: gopacket matches IPv6 on SNAP type 0x0800, so addresses sent
-	// with the real 0x86dd are dropped. Order of the remaining entries is the advertised order.
-	assert.Equal(t, "10.0.0.1,2001:db8::10,10.0.0.7", got[0].Addresses)
+	// gopacket alone drops the real 0x86dd encoding; we parse the TLV ourselves.
+	// Entries keep the advertised order.
+	assert.Equal(t, "10.0.0.1,2001:db8::10,2001:db8::99,10.0.0.7", got[0].Addresses)
 	assert.Equal(t, "192.0.2.9", got[0].MgmtAddresses)
 }
 
