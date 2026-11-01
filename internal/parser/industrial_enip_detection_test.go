@@ -93,7 +93,9 @@ func TestParseEtherNetIP_Detection(t *testing.T) {
 		garbage := make([]byte, 40)
 		garbage[0] = 0x01 // command 0x0001 is not an ENIP command
 		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 44818, ACK: true}, nil, garbage)
-		assert.Nil(t, p.parseEtherNetIP(pkt, ts))
+		// A fresh parser: on a connection already recognised as ENIP, anything is
+		// framed by its length field.
+		assert.Nil(t, newENIPTestParser(t).parseEtherNetIP(pkt, ts))
 	})
 
 	t.Run("F-02: Nop is accepted", func(t *testing.T) {
