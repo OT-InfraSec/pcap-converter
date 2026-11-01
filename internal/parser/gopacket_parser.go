@@ -76,6 +76,15 @@ type GopacketParser struct {
 // DecodeFailures returns how many frames of the last ParseFile had a decode failure.
 func (p *GopacketParser) DecodeFailures() int { return p.decodeFailures }
 
+// SetIndustrialConfig applies one industrial configuration to both the
+// industrial protocol parser and the connection labeler, so a protocol that is
+// switched off is neither parsed nor labelled. Without it the defaults apply
+// (everything on). Call it before parsing starts.
+func (p *GopacketParser) SetIndustrialConfig(cfg IndustrialParserConfig) {
+	p.industrialParser = NewIndustrialProtocolParserWithConfig(cfg)
+	p.connLabeler = newConnectionLabeler(labelerRegistry(cfg))
+}
+
 // SetConnectionLabeler replaces the labeler that gives the packets of a
 // connection one protocol label. It must be called before parsing starts.
 func (p *GopacketParser) SetConnectionLabeler(l ConnectionLabeler) { p.connLabeler = l }
@@ -863,7 +872,7 @@ func (p *GopacketParser) ParseFile() error {
 
 				// Analyze TLS layer
 				if tlsLayer := packet.Layer(liblayers.LayerTypeTLS); tlsLayer != nil {
-					fmt.Printf("TLS Layer found: %+v\n", tlsLayer)
+					log.Debug().Interface("tls", tlsLayer).Msg("TLS layer found")
 				} else if tlsLayer == nil && len(tcp.Payload) > 5 && httpLayer.Version == "" {
 					tls := &liblayers.TLS{}
 					if err = tls.DecodeFromBytes(tcp.Payload, nil); err == nil {
@@ -1828,7 +1837,7 @@ func (p *GopacketParser) ParseFile() error {
 	// Analyze and save communication patterns for industrial devices
 	if err = p.analyzeAndSaveCommunicationPatterns(); err != nil {
 		// Log error but don't fail the entire parsing process
-		fmt.Printf("Warning: Failed to analyze communication patterns: %v\n", err)
+		log.Warn().Err(err).Msg("failed to analyze communication patterns")
 	}
 
 	return nil

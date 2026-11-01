@@ -186,7 +186,9 @@ Details and the tshark or Suricata comparison are in
 | DNP3 | `dnp3` | 20000 (TCP and UDP) | link, transport reassembly, application function, IIN, object headers | tshark, hand-built captures only |
 
 `EnableModbus`, `EnableS7` (also S7CommPlus), `EnableDNP3` and the other enable
-flags switch both the parser and the connection labeler.
+flags switch both the parser and the connection labeler when they are applied
+with `GopacketParser.SetIndustrialConfig`. The importer CLI has no options for
+them yet, so it runs with the defaults (everything on).
 
 ## Error Handling
 

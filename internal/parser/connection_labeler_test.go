@@ -151,3 +151,18 @@ func TestGopacketParserTakesAnInjectedLabeler(t *testing.T) {
 	assert.Equal(t, "fake", p.connLabeler.Label(nil, "", "", model.VLANTag{}))
 	assert.Equal(t, 1, f.calls)
 }
+
+func TestSetIndustrialConfigReachesParserAndLabeler(t *testing.T) {
+	p := &GopacketParser{}
+	cfg := DefaultIndustrialParserConfig()
+	cfg.EnableDNP3 = false
+	p.SetIndustrialConfig(cfg)
+	read := dnp3TestFrame(0xc4, 3, 10, []byte{0xc1, 0x01, 60, 1, 0x06})
+	assert.Equal(t, "", p.connLabeler.Label(buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 20000, ACK: true}, nil, read), "10.0.0.1", "10.0.0.2", model.VLANTag{}))
+	got, ok := p.industrialParser.(*IndustrialProtocolParserImpl)
+	assert.True(t, ok)
+	assert.False(t, got.GetConfig().EnableDNP3)
+	// Defaults still label it.
+	q := &GopacketParser{connLabeler: newConnectionLabeler(labelerRegistry(DefaultIndustrialParserConfig()))}
+	assert.Equal(t, "dnp3", q.connLabeler.Label(buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 20000, ACK: true}, nil, read), "10.0.0.1", "10.0.0.2", model.VLANTag{}))
+}

@@ -16,7 +16,6 @@ func FuzzProbes(f *testing.F) {
 		decodeAllNoPanic(b)
 		ParseDNP3Frame(b) // must not panic on any input
 		DecodeDNP3Datagram(b)
-		NewDNP3Tracker().FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: b}, true)
 		for _, p := range []Probe{ProbeENIPEncapsulation, ProbeENIPImplicitIO, ProbeENIPUDP, ProbeDNP3, ProbeS7, ProbeS7Plus, ProbeModbusTCP} {
 			if r := p(b); r > Recognized {
 				t.Fatalf("result out of range: %d", r)
@@ -63,6 +62,32 @@ func decodeAllNoPanic(b []byte) {
 	decodeDNP3App(b, false)
 	ParseDNP3Frame(b)
 	DecodeDNP3Datagram(b)
+	// The trackers: the bytes whole, and split in two segments.
+	cut := len(b) / 2
+	for _, feed := range []func(first, second []byte){
+		func(a, c []byte) {
+			tr := NewModbusTracker()
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: a}, true)
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1 + uint32(len(a)), ACK: true, Payload: c}, true)
+		},
+		func(a, c []byte) {
+			tr := NewENIPTracker()
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: a}, true)
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1 + uint32(len(a)), ACK: true, Payload: c}, true)
+		},
+		func(a, c []byte) {
+			tr := NewS7Tracker()
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: a}, true)
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1 + uint32(len(a)), ACK: true, Payload: c}, true)
+		},
+		func(a, c []byte) {
+			tr := NewDNP3Tracker()
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: a}, true)
+			tr.FeedTCP("c", true, TCPSegment{Seq: 1 + uint32(len(a)), ACK: true, Payload: c}, true)
+		},
+	} {
+		feed(b[:cut], b[cut:])
+	}
 }
 
 // TestDecodersNeverPanicOnRandomInput feeds random and mutated bytes to every
