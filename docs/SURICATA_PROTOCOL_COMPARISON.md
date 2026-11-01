@@ -447,3 +447,40 @@ reasons in the last rows below.
 Manifest notes: the D rows' `expect_our_events` are stale (generated before
 the validation rules existed); D11 in the capture is the old "qty 124,
 MBAP length 255" case, which is a framing case, not `invalid_value`.
+
+## EtherNet/IP message-level differential (`scripts/compare_enip.py`)
+
+Runs Suricata with the `enip` eve logger and `scripts/enip_dump` (our
+`ENIPTracker` and `DecodeENIP`). Suricata's names for CIP services, statuses,
+vendors and device types are mapped back to codes with the tables in its own
+source, so the comparison is on numbers.
+
+| Capture | Requests S / ours | Responses S / ours | `invalid_pdu` |
+|---|---|---|---|
+| m13e880-br-seg1 | 117 / 117, all keys equal | 78 / 78, all equal | none / none |
+| m13e880-br-seg2 | 60 / 60 | 40 / 40 | none / none |
+| m13e880-br-seg3 | 3 / 3 | 2 / 2 | none / none |
+
+Keys cover command, status, CIP service, class, instance, attribute, CIP
+status and register-session fields, with exact counts. The captures hold
+RegisterSession and SendRRData (Get Attribute Single, Get Attribute List, Set
+Attribute Single, Forward Open and Close, the 0x4E service). Not covered by
+real traffic, hence the specification in `ENIP_SYNTHETIC_CAPTURES.md`:
+ListIdentity and ListServices, UDP, SendUnitData, Multiple Service Packet,
+extended status, malformed messages, split and lost segments.
+
+Intended differences, from reading Suricata's source:
+
+- **Service names are class specific.** Service `0x4E` is Forward Close in the
+  Connection Manager (class 6); Suricata always calls it "Read Write Modify
+  Data" (a Logix tag service). The decoder names by class; the comparison is on
+  codes. Suricata also names `0x17` "No Forward Open"; the specification says
+  No Operation.
+- **Extended status counts words** in CIP; Suricata reads the size as bytes.
+- **Paths.** Suricata fails the whole message (`invalid_pdu`, no CIP) when a path
+  has a segment that is not logical: symbolic (Logix tag names), port, key,
+  data. We decode ANSI symbols, and stop at other types without raising an
+  event, with `PathTruncated` set.
+- **ListIdentity.** We also expose the device address from the item's socket
+  address, which Suricata skips, and decode all identity items; Suricata logs
+  the first.
