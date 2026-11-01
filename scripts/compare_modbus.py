@@ -5,9 +5,16 @@
 
 Needs a Suricata config whose eve-log types include `modbus`; without
 --suricata-yaml one is derived from the installed suricata.yaml.
-Requests are compared per (client, server, transaction id, unit, function,
-address, quantity); responses per (server, client, transaction id, function,
-exception). Retransmitted segments make us see an ADU twice where Suricata
+Anomaly events are compared per connection (client ip, client port) and name.
+Only names with the same meaning in both tools are compared strictly
+(SHARED_EVENTS); the others are listed so that a divergence is visible, never
+silently dropped. Event counts per connection are compared exactly, so run it
+on captures without duplicate frames; --events-as-sets compares only which
+names occur per connection, for captures with retransmits or duplicates.
+Transaction keys include the client port, so connections do not merge.
+Requests are compared per (client, client port, server, transaction id, unit,
+function, address); responses per (server, client, client port, transaction
+id, function, exception). Retransmitted segments make us see an ADU twice where Suricata
 sees one, so keys are compared as sets and the repeat counts are shown apart.
 """
 import argparse, collections, json, os, re, subprocess, sys, tempfile
@@ -26,6 +33,21 @@ def suricata_yaml(path, tmp):
     open(out, "w").write(s)
     return out
 
+# Event names that mean the same in both tools. Ours (lib/detect) on the left.
+# Everything else is reported but does not fail the run:
+#   ours:     unknown_function   (any unassigned public code, e.g. 0x09)
+#   suricata: invalid_function_code (only code 0 and >= 0x80), invalid_value,
+#             invalid_length, invalid_protocol_id, unsolicited_response,
+#             value_mismatch (false positive on register reads, see the
+#             comparison doc), flooded
+SHARED_EVENTS = {"invalid_exception_code"}
+
+def client_of(e):
+    """(client ip, client port) of an eve record; the server is on port 502."""
+    if e.get("dest_port") == 502:
+        return e["src_ip"], e["src_port"]
+    return e["dest_ip"], e["dest_port"]
+
 def addr_qty(side):
     for k in ("read", "write"):
         d = side.get(k)
@@ -35,32 +57,37 @@ def addr_qty(side):
 
 def read_suricata(eve):
     req, resp = collections.Counter(), collections.Counter()
+    events = collections.Counter()
     for line in open(eve):
         e = json.loads(line)
+        if e["event_type"] == "anomaly" and e.get("anomaly", {}).get("app_proto") == "modbus":
+            events[client_of(e) + (e["anomaly"]["event"],)] += 1
         if e["event_type"] != "modbus":
             continue
         m = e["modbus"]
-        c, s = e["src_ip"], e["dest_ip"]
+        (c, cp), s = client_of(e), (e["dest_ip"] if e["dest_port"] == 502 else e["src_ip"])
         if "request" in m:
             q = m["request"]
             a, n = addr_qty(q)
-            req[(c, s, q["transaction_id"], q["unit_id"], q["function_raw"], a)] += 1
+            req[(c, cp, s, q["transaction_id"], q["unit_id"], q["function_raw"], a)] += 1
         if "response" in m:
             q = m["response"]
             exc = q.get("exception", {}).get("raw", 0)
-            resp[(s, c, q["transaction_id"], q["function_raw"] & 0x7f, exc)] += 1
-    return req, resp
+            resp[(s, c, cp, q["transaction_id"], q["function_raw"] & 0x7f, exc)] += 1
+    return req, resp, events
 
 def read_ours(jsonl):
     req, resp, events = collections.Counter(), collections.Counter(), collections.Counter()
     for line in open(jsonl):
         e = json.loads(line)
+        cport = e["sport"] if e["request"] else e["dport"]
+        cip = e["src"] if e["request"] else e["dst"]
         for ev in e.get("events") or []:
-            events[ev] += 1
+            events[(cip, cport, ev)] += 1
         if e["request"]:
-            req[(e["src"], e["dst"], e["txn"], e["unit"], e["fc"], e["addr"])] += 1
+            req[(e["src"], e["sport"], e["dst"], e["txn"], e["unit"], e["fc"], e["addr"])] += 1
         else:
-            resp[(e["src"], e["dst"], e["txn"], e["fc"], e["exc_code"] if e["exception"] else 0)] += 1
+            resp[(e["src"], e["dst"], e["dport"], e["txn"], e["fc"], e["exc_code"] if e["exception"] else 0)] += 1
     return req, resp, events
 
 def diff(name, theirs, ours):
@@ -74,10 +101,40 @@ def diff(name, theirs, ours):
     print(f"  keys we see more than once (retransmits/duplicates): {rep}")
     return ts == os_
 
+def diff_events(theirs, ours, as_sets):
+    """Compare anomaly events per connection. Returns True when the shared
+    names agree. Names only one tool can raise are listed, not judged."""
+    def per_conn(c):
+        d = collections.defaultdict(collections.Counter)
+        for (ip, port, ev), n in c.items():
+            if ev in SHARED_EVENTS:
+                d[(ip, port)][ev] += 1 if as_sets else n
+        return d
+    ts, os_ = per_conn(theirs), per_conn(ours)
+    bad = 0
+    for conn in sorted(set(ts) | set(os_), key=str):
+        if ts.get(conn, {}) != os_.get(conn, {}):
+            bad += 1
+            if bad <= 10:
+                print(f"  event mismatch {conn[0]}:{conn[1]} suricata={dict(ts.get(conn, {}))} "
+                      f"ours={dict(os_.get(conn, {}))}")
+    print(f"events (shared names {sorted(SHARED_EVENTS)}): connections with a difference: {bad}")
+    for label, c in (("suricata", theirs), ("ours", ours)):
+        tot = collections.Counter()
+        conns = collections.defaultdict(set)
+        for (ip, port, ev), n in c.items():
+            tot[ev] += n
+            conns[ev].add((ip, port))
+        shown = {ev: f"{tot[ev]} events on {len(conns[ev])} connections" for ev in sorted(tot)}
+        print(f"  {label} events: {shown or 'none'}")
+    return bad == 0
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pcap")
     ap.add_argument("--suricata-yaml")
+    ap.add_argument("--events-as-sets", action="store_true",
+                    help="compare which event names occur per connection, not how often")
     a = ap.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         yaml = suricata_yaml(a.suricata_yaml, tmp)
@@ -87,11 +144,11 @@ def main():
         ours = os.path.join(tmp, "ours.jsonl")
         with open(ours, "w") as f:
             subprocess.run(["go", "run", "./scripts/modbus_dump", a.pcap], check=True, stdout=f)
-        sreq, sresp = read_suricata(os.path.join(tmp, "eve.json"))
+        sreq, sresp, sevents = read_suricata(os.path.join(tmp, "eve.json"))
         oreq, oresp, events = read_ours(ours)
     ok = diff("requests", sreq, oreq)
     ok &= diff("responses", sresp, oresp)
-    print("our anomaly events:", dict(events) or "none")
+    ok &= diff_events(sevents, events, a.events_as_sets)
     sys.exit(0 if ok else 1)
 
 main()

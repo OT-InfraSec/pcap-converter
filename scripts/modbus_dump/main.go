@@ -61,6 +61,7 @@ func main() {
 			}
 			enc.Encode(map[string]any{
 				"pkt": n, "src": nl.NetworkFlow().Src().String(), "dst": nl.NetworkFlow().Dst().String(),
+				"sport": uint16(tcp.SrcPort), "dport": uint16(tcp.DstPort),
 				"request": request, "txn": m.TransactionID, "unit": m.UnitID, "fc": m.FunctionCode,
 				"exception": m.IsException, "exc_code": m.ExceptionCode, "addr": m.Address, "qty": m.Quantity,
 				"access": m.Access, "events": m.Events,
