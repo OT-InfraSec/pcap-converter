@@ -93,7 +93,7 @@ func DefaultIndustrialParserConfig() IndustrialParserConfig {
 		EnableEtherNetIP: true,
 		EnableOPCUA:      true,
 		EnableModbus:     true,
-		EnableDNP3:       false,
+		EnableDNP3:       true,
 		EnableS7:         true,
 
 		// Conservative confidence thresholds
@@ -170,6 +170,10 @@ type IndustrialProtocolParserImpl struct {
 	enip   *detect.ENIPTracker
 
 	// S7comm connections and unfinished frames, see detect.S7Tracker.
+	// DNP3 connections and unfinished frames and fragments, see detect.DNP3Tracker.
+	dnp3Mu sync.Mutex
+	dnp3   *detect.DNP3Tracker
+
 	s7Mu sync.Mutex
 	s7   *detect.S7Tracker
 
@@ -356,6 +360,13 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 	if p.config.EnableS7 {
 		if s7Info := p.parseS7(packet, timestamp); s7Info != nil && s7Info.Confidence >= p.config.ConfidenceThreshold {
 			protocols = append(protocols, *s7Info)
+		}
+	}
+
+	// Check for DNP3
+	if p.config.EnableDNP3 {
+		if dnpInfo := p.parseDNP3(packet, timestamp); dnpInfo != nil && dnpInfo.Confidence >= p.config.ConfidenceThreshold {
+			protocols = append(protocols, *dnpInfo)
 		}
 	}
 
@@ -834,19 +845,19 @@ func (p *IndustrialProtocolParserImpl) extractPortInfo(packet gopacket.Packet, i
 func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet) string {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
-		if tcp.SrcPort == 44818 || tcp.SrcPort == 4840 || tcp.SrcPort == 502 || uint16(tcp.SrcPort) == detect.S7Port {
+		if tcp.SrcPort == 44818 || tcp.SrcPort == 4840 || tcp.SrcPort == 502 || uint16(tcp.SrcPort) == detect.DNP3Port || uint16(tcp.SrcPort) == detect.S7Port {
 			return "inbound"
 		}
-		if tcp.DstPort == 44818 || tcp.DstPort == 4840 || tcp.DstPort == 502 || uint16(tcp.DstPort) == detect.S7Port {
+		if tcp.DstPort == 44818 || tcp.DstPort == 4840 || tcp.DstPort == 502 || uint16(tcp.DstPort) == detect.DNP3Port || uint16(tcp.DstPort) == detect.S7Port {
 			return "outbound"
 		}
 	}
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		if udp.SrcPort == 2222 || udp.SrcPort == 44818 {
+		if udp.SrcPort == 2222 || udp.SrcPort == 44818 || uint16(udp.SrcPort) == detect.DNP3Port {
 			return "inbound"
 		}
-		if udp.DstPort == 2222 || udp.DstPort == 44818 || udp.DstPort == 138 {
+		if udp.DstPort == 2222 || udp.DstPort == 44818 || udp.DstPort == 138 || uint16(udp.DstPort) == detect.DNP3Port {
 			return "outbound"
 		}
 	}
@@ -1413,6 +1424,137 @@ func decodeModbusInto(msgs []detect.ModbusMessage, info *model.IndustrialProtoco
 		info.AdditionalData["events"] = events
 	}
 	info.IsConfiguration = access == detect.ModbusWrite || access == detect.ModbusReadWrite
+}
+
+// parseDNP3 parses DNP3 (IEEE 1815) over TCP and UDP. A connection is DNP3
+// when a payload starts with a link frame (start bytes 0x05 0x64 and a valid
+// length), as in Suricata; the port only raises the confidence.
+func (p *IndustrialProtocolParserImpl) parseDNP3(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
+	transport, srcPort, dstPort, payload, ok := transportPayload(packet)
+	if !ok {
+		return nil
+	}
+	var msgs []detect.DNP3Message
+	known := false
+	switch transport {
+	case detect.UDP:
+		msgs = detect.DecodeDNP3Datagram(payload)
+	case detect.TCP:
+		tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
+		nl := packet.NetworkLayer()
+		if tcp == nil || nl == nil {
+			return nil
+		}
+		key := connKey(transport, nl.NetworkFlow().Src().String(), srcPort, nl.NetworkFlow().Dst().String(), dstPort, model.VLANTag{})
+		hint := srcPort == detect.DNP3Port || dstPort == detect.DNP3Port
+		p.dnp3Mu.Lock()
+		if p.dnp3 == nil {
+			p.dnp3 = detect.NewDNP3Tracker()
+		}
+		msgs = p.dnp3.FeedTCP(key, dstPort == detect.DNP3Port, detect.TCPSegment{
+			Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: payload,
+		}, hint)
+		known = p.dnp3.Known(key)
+		p.dnp3Mu.Unlock()
+	}
+	if len(msgs) == 0 && !known {
+		return nil
+	}
+	info := &model.IndustrialProtocolInfo{
+		Protocol:       "dnp3",
+		Timestamp:      timestamp,
+		DeviceIdentity: make(map[string]interface{}),
+		SecurityInfo:   make(map[string]interface{}),
+		AdditionalData: make(map[string]interface{}),
+	}
+	portErr := p.extractPortInfo(packet, info, []uint16{detect.DNP3Port})
+	switch {
+	case len(msgs) > 0 && portErr == nil:
+		info.Confidence = 0.9
+	case len(msgs) > 0:
+		info.Confidence = 0.8
+	case portErr == nil:
+		info.Confidence = 0.8 // continuation segment of a recognised connection
+	default:
+		info.Confidence = 0.5
+	}
+	decodeDNP3Into(msgs, info)
+	return info
+}
+
+// decodeDNP3Into adds the decoded view of the packet's frames: link addresses
+// and function, and the application function, IIN and object headers of the
+// first completed fragment. Events cover all frames.
+func decodeDNP3Into(msgs []detect.DNP3Message, info *model.IndustrialProtocolInfo) {
+	if len(msgs) == 0 {
+		return
+	}
+	var events []string
+	var app *detect.DNP3Message
+	for i, m := range msgs {
+		events = append(events, m.Events...)
+		if app == nil && m.App != nil {
+			app = &msgs[i]
+		}
+	}
+	if len(events) > 0 {
+		info.AdditionalData["events"] = events
+	}
+	info.AdditionalData["message_count"] = len(msgs)
+	m := msgs[0]
+	if app != nil {
+		m = *app
+	}
+	f := m.Frame
+	info.AdditionalData["source_address"] = f.Src
+	info.AdditionalData["destination_address"] = f.Dest
+	info.AdditionalData["from_master"] = f.FromMaster()
+	if info.Direction == "" {
+		// Not on the DNP3 port: the link layer's DIR bit says which side sent it,
+		// the master being the client.
+		info.Direction = "inbound"
+		if f.FromMaster() {
+			info.Direction = "outbound"
+		}
+	}
+	info.AdditionalData["link_function"] = f.LinkFunction()
+	info.AdditionalData["link_function_name"] = m.LinkName
+	info.MessageType = m.LinkName
+	if m.HasTransport {
+		info.AdditionalData["transport_seq"] = m.TransportSeq
+	}
+	a := m.App
+	if a == nil {
+		return
+	}
+	info.MessageType = a.FunctionName
+	info.AdditionalData["function"] = a.Function
+	info.AdditionalData["function_name"] = a.FunctionName
+	info.AdditionalData["app_sequence"] = a.Sequence()
+	info.AdditionalData["unsolicited"] = a.Unsolicited()
+	info.AdditionalData["confirm_requested"] = a.Confirm()
+	if a.IsResponse {
+		info.AdditionalData["iin"] = a.IIN
+	}
+	info.AdditionalData["object_count"] = len(a.Objects)
+	if len(a.Objects) > 0 {
+		o := a.Objects[0]
+		info.AdditionalData["group"] = o.Group
+		info.AdditionalData["variation"] = o.Variation
+		info.AdditionalData["qualifier"] = o.Qualifier
+		info.AdditionalData["points"] = o.Count
+	}
+	switch a.Function {
+	case 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25, 26, 27, 31:
+		// Writes, controls, restarts, application and unsolicited control,
+		// class assignment, file changes and configuration activation.
+		info.IsConfiguration = true
+	}
+	if f.FromMaster() {
+		info.DeviceIdentity["dnp3_master_address"] = f.Src
+	} else {
+		info.DeviceIdentity["dnp3_outstation_address"] = f.Src
+	}
 }
 
 // parseS7 parses S7comm (Siemens, ISO-on-TCP). A connection is S7 when its data

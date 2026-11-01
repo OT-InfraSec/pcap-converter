@@ -115,9 +115,23 @@ func TestRegistryDetectENIP(t *testing.T) {
 
 func TestRegistryPortOnlyProtocols(t *testing.T) {
 	r := Default()
-	// DNP3 has no content probe yet (plan phase 3).
-	ms := r.Detect(TCP, 50000, 20000, []byte{1, 2, 3})
-	if len(ms) != 1 || ms[0].Protocol != "DNP3" || !ms[0].PortOnly {
+	// OPC UA has no content probe yet.
+	ms := r.Detect(TCP, 50000, 4840, []byte{1, 2, 3})
+	if len(ms) != 1 || ms[0].Protocol != "OPC UA" || !ms[0].PortOnly {
+		t.Fatalf("got %+v", ms)
+	}
+	// DNP3 has one: other content on its port is not DNP3.
+	if ms := r.Detect(TCP, 50000, 20000, []byte{1, 2, 3}); len(ms) != 0 {
+		t.Fatalf("got %+v", ms)
+	}
+	frame := dnp3Segment(dnp3ToOutstation, true, true, 0, dnp3ReadClass0)
+	for _, tr := range []Transport{TCP, UDP} {
+		if ms := r.Detect(tr, 50000, 20000, frame); len(ms) != 1 || ms[0].Protocol != "DNP3" || ms[0].PortOnly {
+			t.Fatalf("transport %v: got %+v", tr, ms)
+		}
+	}
+	// And off the port.
+	if ms := r.Detect(TCP, 50000, 50001, frame); len(ms) != 1 || ms[0].Protocol != "DNP3" {
 		t.Fatalf("got %+v", ms)
 	}
 	if ms := r.Detect(TCP, 50000, 50001, []byte{1, 2, 3}); len(ms) != 0 {

@@ -11,8 +11,12 @@ func FuzzProbes(f *testing.F) {
 	f.Add(enipHeader(ENIPListIdentity, 0, 0, 0, nil))
 	f.Add(enipHeader(ENIPListInterfaces, 2, 0, 0, []byte{3, 0}))
 	f.Add(cpf(2, cpfItem(0x8002, make([]byte, 8)), cpfItem(0x00B1, []byte{1, 0})))
+	f.Add(dnp3Segment(dnp3ToOutstation, true, true, 0, dnp3ReadClass0))
 	f.Fuzz(func(t *testing.T, b []byte) {
-		for _, p := range []Probe{ProbeENIPEncapsulation, ProbeENIPImplicitIO, ProbeENIPUDP} {
+		ParseDNP3Frame(b) // must not panic on any input
+		DecodeDNP3Datagram(b)
+		NewDNP3Tracker().FeedTCP("c", true, TCPSegment{Seq: 1, ACK: true, Payload: b}, true)
+		for _, p := range []Probe{ProbeENIPEncapsulation, ProbeENIPImplicitIO, ProbeENIPUDP, ProbeDNP3} {
 			if r := p(b); r > Recognized {
 				t.Fatalf("result out of range: %d", r)
 			}

@@ -3,8 +3,7 @@ package detect
 // Default returns the registry used by the importer.
 //
 // Protocols without a probe are reported as port-only evidence until their
-// content probe exists (DNP3 in plan phase 3, OPC UA when its decoder gains a
-// probe). S7 is registered with port 102 as a hint only: the port is shared
+// content probe exists (OPC UA, when its decoder gains a probe). S7 is registered with port 102 as a hint only: the port is shared
 // with ISO-TSAP and IEC 61850 MMS, so a connection is S7 when its data TPDUs
 // start with the S7 protocol id (ProbeS7); MMS vetoes the hint.
 func Default() *Registry {
@@ -45,7 +44,8 @@ func Default() *Registry {
 	r.Register(Protocol{
 		Name:       "DNP3",
 		Transports: TCP | UDP,
-		HintPorts:  []HintPort{{TCP | UDP, 20000}},
+		HintPorts:  []HintPort{{TCP | UDP, DNP3Port}},
+		Probe:      ProbeDNP3,
 	})
 	return r
 }

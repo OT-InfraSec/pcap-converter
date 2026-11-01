@@ -27,7 +27,7 @@ Suricata runs with `stream.midstream=true`, see "Midstream sessions".
 | F-02 | **fixed, spec review open** | Strict probe in `lib/detect/enip.go`, same rules as Suricata. Still to confirm against the ODVA spec. |
 | F-03 | **fixed** | Payload comes from `tcp.Payload` / `udp.Payload`. The new tests fail on the original code for F-01, F-02 and F-03. |
 | F-04 | **partly fixed** | Detection is by content now (`lib/detect/modbus.go`: MBAP header, protocol ID 0, length 2..254, valid function code), port 502 only raises confidence. Agrees with Suricata on all 13 Modbus flows in the capture. Still open: decoder rewrite (pipelined ADUs, exceptions, events), the exact `sawp-modbus` limits, and a comparison on pipelined or split traffic: the capture has exactly one ADU per segment, so it cannot show whether reassembly matters. |
-| F-05 | partly addressed | S7 no longer claimed from port 102. DNP3 still port-only. No DNP3 traffic in the captures. |
+| F-05 | addressed in code | S7 no longer claimed from port 102. DNP3 is recognised by its start bytes and decoded (see the DNP3 section). No real DNP3 traffic yet. |
 | F-06 | partly addressed | Industrial port knowledge lives in the `lib/detect` registry. HTTP, TLS and DNS labelling is still port-based. |
 | F-07 to F-10 | open | Phase 4 and 5. |
 
@@ -539,3 +539,51 @@ if available, the Wireshark plugin.
 A known wrinkle: the connection request and confirmation on port 102 are
 labelled `s7` (first registered, hint only) and the data TPDUs `s7commplus`, so
 an S7CommPlus connection may split into two flow labels.
+
+## DNP3 differential against tshark
+
+Suricata's DNP3 parser decodes and logs, but its eve output does not carry
+what we need to diff, so tshark's `dnp3` dissector is the reference, as for S7.
+`scripts/dnp3_demo_pcap.py` builds 14 sessions (88 link frames, TCP and UDP)
+with correct CRCs; `scripts/compare_dnp3.py` keys each frame by control byte,
+addresses and length, and each completed fragment by application control,
+function, IIN and the object headers (group, variation, prefix, range, start,
+stop, quantity).
+
+Result: **88 of 88 frames agree**, counts included. The capture covers every
+function code from Confirm to Authentication Response that the decoder names,
+class polls, control relay blocks with index prefix, analog outputs, writes,
+restarts, unsolicited responses, link layer functions (reset, ack, status,
+test), fragments over three transport segments (one TCP segment each, all in
+one, interleaved with the other direction), frames pipelined and split in the
+header and in a data block, a retransmission and out-of-order segments,
+broadcast and reserved addresses, 23 object variations, 2 and 4 byte ranges and
+counts, and malformed input (wrong header CRC, wrong data CRC, length below 5,
+a truncated object list, a transport segment without its start, noise).
+
+Differences kept on purpose:
+- tshark lists no objects for Assign Class (function 22) and reports groups 110
+  to 113 with variation 0 (the variation is the string length). The comparison
+  normalises both.
+- tshark misreads a 1-byte object size prefix on group 110, so that case is only
+  in unit tests.
+- Suricata flags `len_too_small` when a user data frame is shorter than a
+  transport plus an application header, which also hits a legitimate one-byte
+  final segment. We flag only a frame with no room for a transport header.
+
+Behaviour that follows Suricata: a wrong header CRC raises `bad_link_crc`, the
+frame is not used and parsing resumes at the next `0x0564`; a wrong data block
+CRC raises `bad_transport_crc` and the frame's data is dropped; a frame start
+with length below 5 raises `len_too_small` and resyncs; other bytes where a
+frame should start drop the pending fragment and the direction must show a
+frame start again.
+
+The DNP3 flow label follows the content (finding F-05): `dnp3` when a payload
+starts with the link start bytes and a valid length, on any port and on TCP and
+UDP; other data on port 20000 is not labelled DNP3. A fragment spanning two UDP
+datagrams is not joined.
+
+Open: real DNP3 traffic (specification in `DNP3_SYNTHETIC_CAPTURES.md`), object
+sizes for groups outside the table, variable-format objects (qualifier 0x0b)
+and secure authentication objects (groups 120 and 121), whose headers are kept
+and whose bodies are not walked.
