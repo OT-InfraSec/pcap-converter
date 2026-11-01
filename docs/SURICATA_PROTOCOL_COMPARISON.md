@@ -423,8 +423,12 @@ Captures: `minicps-testbed/build/modbus_synthetic` (generated from
 `MODBUS_SYNTHETIC_CAPTURES.md`, 9 pcaps, 41 connections), compared with
 `scripts/compare_modbus.py` (Suricata 8.0.8, midstream on).
 
-**Current state: transactions and the shared events agree on 7 of 9 captures
-(A, B, C, D, E, G, I) and on the real capture.** F and H differ for the two
+**Current state: transactions (compared by count) and the shared events agree
+on 7 of 9 captures (A, B, C, D, E, G, I).** On the real capture the key set
+and events agree, but 7 keys of one connection (txn ids 2-9 of client
+192.168.24.111:3873, reused thousands of times) have different counts: ours
+are right (checked against the raw capture), Suricata stops creating
+transactions after its `flooded` event. Use `--sets` there. F and H differ for the two
 reasons in the last rows below.
 
 | Class | Scenarios | Result |
@@ -433,9 +437,9 @@ reasons in the last rows below.
 | Exception codes | B | `invalid_exception_code` agrees, incl. 08 on FC3 and 02 on FC7. |
 | Framing: protocol id, length outside 2..254 | D11, E1-E5, E8 | **Fixed.** Once a connection is recognised, frames are decoded leniently: `invalid_protocol_id`, `invalid_length`. A length outside 2..254 consumes `6+length` bytes or the rest of the segment, as in Suricata. |
 | Function codes in requests | C | **Fixed.** A request with code 0 or the exception bit set is `invalid_function_code` (not an exception) and its body is still read as the underlying function, as in `sawp-modbus`. |
-| Split ADUs, pipelining with a split tail, 1-byte segments, bare header first | E8, E9, G2-G5, G9, H5 | **Fixed for segments in order** (`detect.ModbusTracker`: partial ADU kept per connection and direction). Reordered segments (G5 was in order in the capture) and retransmissions are not handled; that needs real TCP reassembly. |
+| Split ADUs, pipelining with a split tail, 1-byte segments, bare header first | E8, E9, G2-G5, G9, H5 | **Fixed** (`detect.ModbusTracker`: partial ADU kept per connection and direction, segments ordered by `lib/tcpseq`). G5 (segments out of order) is decoded as well. |
 | Unassigned codes (`0x09`...) | C | Intended divergence: we raise `unknown_function`, Suricata nothing. |
-| Retransmission, duplicates | I1, I2, I4 | The comparison compares sets, so a retransmitted ADU counted twice on our side is **not shown** (the "keys we see more than once" line is). Still open. |
+| Retransmission, duplicates | I1, I2, I4 | **Fixed** with TCP sequence tracking (`lib/tcpseq`): each payload byte is delivered once, overlaps are trimmed, early segments are held (at most 32 segments / 64 KiB), a gap that does not close is given up and the half message dropped. RST, FIN in both directions and a new SYN end a connection's state. `compare_modbus.py` now compares counts, not only sets, so a double count shows. On the real capture (every frame duplicated) we report 11,178 requests on the busiest connection, equal to the unique segments by sequence number (raw: 22,356). |
 | Transaction pairing | F1-F4, F8, H3, I5, E-group | `unsolicited_response` and `value_mismatch` (a false positive on register reads) only on Suricata's side; we do not pair requests with responses. Not compared (not in the shared set). |
 | Request flood | F9 | Suricata stops at 501 of 600 requests (`flooded`); we decode all 600. Suricata limit. |
 | HTTP first, Modbus after, on 502 | H4 | Suricata recognises no Modbus on the connection; we decode both exchanges. We are more tolerant. |

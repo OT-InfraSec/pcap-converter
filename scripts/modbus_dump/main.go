@@ -48,7 +48,7 @@ func main() {
 		pkt := gopacket.NewPacket(data, r.LinkType(), gopacket.NoCopy)
 		tcp, _ := pkt.Layer(layers.LayerTypeTCP).(*layers.TCP)
 		nl := pkt.NetworkLayer()
-		if tcp == nil || nl == nil || len(tcp.Payload) == 0 {
+		if tcp == nil || nl == nil {
 			continue
 		}
 		request := uint16(tcp.DstPort) == detect.ModbusPort
@@ -59,7 +59,9 @@ func main() {
 		if !request {
 			key = fmt.Sprintf("%s:%d|%s:%d", nl.NetworkFlow().Dst(), tcp.DstPort, nl.NetworkFlow().Src(), tcp.SrcPort)
 		}
-		for _, m := range tracker.Feed(key, request, tcp.Payload, true) {
+		for _, m := range tracker.FeedTCP(key, request, detect.TCPSegment{
+			Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: tcp.Payload,
+		}, true) {
 			enc.Encode(map[string]any{
 				"pkt": n, "src": nl.NetworkFlow().Src().String(), "dst": nl.NetworkFlow().Dst().String(),
 				"sport": uint16(tcp.SrcPort), "dport": uint16(tcp.DstPort),

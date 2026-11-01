@@ -1,5 +1,7 @@
 package detect
 
+import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
+
 // ModbusTracker turns the TCP payloads of connections into Modbus messages.
 //
 // A connection becomes known as Modbus when a payload starts with a valid ADU
@@ -25,6 +27,9 @@ type modbusConn struct {
 	// partial holds the unfinished bytes per direction: [0] server to client,
 	// [1] client to server.
 	partial [2][]byte
+	// streams order the segments of each direction, see FeedTCP.
+	streams [2]tcpseq.Stream
+	fin     [2]bool
 }
 
 const defaultModbusTrackerLimit = 200_000
@@ -45,6 +50,57 @@ func (t *ModbusTracker) Len() int { return len(t.conns) }
 func (t *ModbusTracker) Known(key string) bool {
 	c := t.conns[key]
 	return c != nil && c.recognized
+}
+
+// TCPSegment is what the tracker needs of a TCP segment.
+type TCPSegment struct {
+	Seq                uint32
+	SYN, FIN, RST, ACK bool
+	Payload            []byte
+}
+
+// FeedTCP is Feed for a TCP segment with its sequence number and flags. Bytes
+// seen before (retransmissions, overlaps) are dropped, segments that arrive
+// early are held until the gap closes (see package tcpseq), and RST, a closing
+// FIN exchange or a new SYN on the same ports end the connection's state. A
+// connection first seen mid-stream is taken as it comes.
+func (t *ModbusTracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []ModbusMessage {
+	dir := 0
+	if toServer {
+		dir = 1
+	}
+	if seg.RST || (seg.SYN && !seg.ACK) {
+		delete(t.conns, key)
+		if seg.RST {
+			return nil
+		}
+	}
+	payload := seg.Payload
+	c := t.conns[key]
+	if c != nil {
+		data, gap := c.streams[dir].Push(seg.Seq, seg.SYN, payload)
+		if gap {
+			c.partial[dir] = nil // the rest of a half message is lost
+		}
+		payload = data
+	}
+	var out []ModbusMessage
+	if len(payload) > 0 {
+		out = t.Feed(key, toServer, payload, hint)
+	}
+	if c == nil {
+		// Feed may have just recognised the connection: fix the position.
+		if c = t.conns[key]; c != nil {
+			c.streams[dir].Push(seg.Seq, seg.SYN, seg.Payload)
+		}
+	}
+	if seg.FIN && c != nil {
+		c.fin[dir] = true
+		if c.fin[0] && c.fin[1] {
+			delete(t.conns, key)
+		}
+	}
+	return out
 }
 
 // Feed adds the payload of one TCP segment and returns the messages it

@@ -871,7 +871,10 @@ func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, ti
 		if p.modbus == nil {
 			p.modbus = detect.NewModbusTracker()
 		}
-		msgs = p.modbus.Feed(key, dstPort == detect.ModbusPort, payload, hint)
+		tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
+		msgs = p.modbus.FeedTCP(key, dstPort == detect.ModbusPort, detect.TCPSegment{
+			Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: payload,
+		}, hint)
 		known = p.modbus.Known(key)
 		p.modbusMu.Unlock()
 	}

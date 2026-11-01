@@ -136,8 +136,14 @@ func TestNonModbusOnPort502IsNotLabelled(t *testing.T) {
 func TestParseModbusTCP_DecodesFunction(t *testing.T) {
 	p := newENIPTestParser(t)
 	ts := time.Unix(1700000000, 0)
+	// Sequence numbers advance per direction, as on a real connection: a
+	// repeated number would be a retransmission and be dropped.
+	seqs := map[[2]uint16]uint32{}
 	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
-		return buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true}, nil, payload)
+		k := [2]uint16{src, dst}
+		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true, Seq: 1000 + seqs[k]}, nil, payload)
+		seqs[k] += uint32(len(payload))
+		return pkt
 	}
 	writeReq := []byte{0, 7, 0, 0, 0, 6, 1, 6, 0, 9, 0x12, 0x34} // FC6 write single register 9
 	exception := []byte{0, 7, 0, 0, 0, 3, 1, 0x86, 2}
@@ -186,8 +192,14 @@ func TestParseModbusTCP_DecodesFunction(t *testing.T) {
 
 func TestParseModbusTCP_RecognisedConnection(t *testing.T) {
 	ts := time.Unix(1700000000, 0)
+	// Sequence numbers advance per direction, as on a real connection: a
+	// repeated number would be a retransmission and be dropped.
+	seqs := map[[2]uint16]uint32{}
 	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
-		return buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true}, nil, payload)
+		k := [2]uint16{src, dst}
+		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true, Seq: 1000 + seqs[k]}, nil, payload)
+		seqs[k] += uint32(len(payload))
+		return pkt
 	}
 	badProto := append([]byte(nil), modbusReadRequest...)
 	badProto[3] = 1
@@ -235,4 +247,24 @@ func TestParseModbusTCP_RecognisedConnection(t *testing.T) {
 		assert.Equal(t, uint8(3), last.AdditionalData["function_code"])
 		assert.NotContains(t, last.AdditionalData, "events")
 	})
+}
+
+func TestParseModbusTCP_Retransmission(t *testing.T) {
+	ts := time.Unix(1700000000, 0)
+	p := newENIPTestParser(t)
+	at := func(seq uint32, payload []byte) gopacket.Packet {
+		return buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 502, ACK: true, Seq: seq}, nil, payload)
+	}
+	first := p.parseModbusTCP(at(1000, modbusReadRequest), ts)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.AdditionalData["message_count"])
+
+	again := p.parseModbusTCP(at(1000, modbusReadRequest), ts)
+	require.NotNil(t, again, "a retransmitted segment still belongs to a Modbus connection")
+	assert.NotContains(t, again.AdditionalData, "function_code", "the message was already counted")
+	assert.NotContains(t, again.AdditionalData, "message_count")
+
+	next := p.parseModbusTCP(at(1000+uint32(len(modbusReadRequest)), modbusReadRequest), ts)
+	require.NotNil(t, next)
+	assert.Equal(t, 1, next.AdditionalData["message_count"])
 }

@@ -8,14 +8,13 @@ Needs a Suricata config whose eve-log types include `modbus`; without
 Anomaly events are compared per connection (client ip, client port) and name.
 Only names with the same meaning in both tools are compared strictly
 (SHARED_EVENTS); the others are listed so that a divergence is visible, never
-silently dropped. Event counts per connection are compared exactly, so run it
-on captures without duplicate frames; --events-as-sets compares only which
-names occur per connection, for captures with retransmits or duplicates.
+silently dropped. Transaction and event counts are compared exactly: a retransmitted segment
+must not be counted twice (the importer tracks TCP sequence numbers). --sets
+compares only which keys occur.
 Transaction keys include the client port, so connections do not merge.
 Requests are compared per (client, client port, server, transaction id, unit,
 function, address); responses per (server, client, client port, transaction
-id, function, exception). Retransmitted segments make us see an ADU twice where Suricata
-sees one, so keys are compared as sets and the repeat counts are shown apart.
+id, function, exception).
 """
 import argparse, collections, ipaddress, json, os, re, subprocess, sys, tempfile
 
@@ -100,16 +99,21 @@ def read_ours(jsonl):
             resp[(e["src"], e["dst"], e["dport"], e["txn"], e["fc"], e["exc_code"] if e["exception"] else 0)] += 1
     return req, resp, events
 
-def diff(name, theirs, ours):
+def diff(name, theirs, ours, as_sets):
     ts, os_ = set(theirs), set(ours)
     print(f"{name}: suricata={len(ts)} ours={len(os_)} both={len(ts & os_)} "
           f"suricata-only={len(ts - os_)} ours-only={len(os_ - ts)}")
     for label, keys in (("suricata-only", ts - os_), ("ours-only", os_ - ts)):
         for k in sorted(keys, key=str)[:LIMIT]:
             print(f"  {label}: {k}")
-    rep = sum(1 for k, n in ours.items() if n > 1)
-    print(f"  keys we see more than once (retransmits/duplicates): {rep}")
-    return ts == os_
+    # Same key, different number of times: a retransmission counted twice, or
+    # a repeated request that one tool treats as a new transaction.
+    counts = [] if as_sets else sorted(((k, theirs[k], ours[k]) for k in ts & os_ if theirs[k] != ours[k]), key=str)
+    if not as_sets:
+        print(f"  keys with a different count: {len(counts)}")
+        for k, a, b in counts[:LIMIT]:
+            print(f"  count differs: {k} suricata={a} ours={b}")
+    return ts == os_ and not counts
 
 def diff_events(theirs, ours, as_sets):
     """Compare anomaly events per connection. Returns True when the shared
@@ -144,8 +148,9 @@ def main():
     ap.add_argument("pcap")
     ap.add_argument("--suricata-yaml")
     ap.add_argument("--all", action="store_true", help="list every difference, not the first few")
-    ap.add_argument("--events-as-sets", action="store_true",
-                    help="compare which event names occur per connection, not how often")
+    ap.add_argument("--sets", "--events-as-sets", dest="sets", action="store_true",
+                    help="compare which transactions and events occur, not how often; for captures "
+                         "that repeat frames without TCP sequence numbers moving")
     a = ap.parse_args()
     global LIMIT
     if a.all:
@@ -160,9 +165,9 @@ def main():
             subprocess.run(["go", "run", "./scripts/modbus_dump", a.pcap], check=True, stdout=f)
         sreq, sresp, sevents = read_suricata(os.path.join(tmp, "eve.json"))
         oreq, oresp, events = read_ours(ours)
-    ok = diff("requests", sreq, oreq)
-    ok &= diff("responses", sresp, oresp)
-    ok &= diff_events(sevents, events, a.events_as_sets)
+    ok = diff("requests", sreq, oreq, a.sets)
+    ok &= diff("responses", sresp, oresp, a.sets)
+    ok &= diff_events(sevents, events, a.sets)
     sys.exit(0 if ok else 1)
 
 if __name__ == "__main__":
