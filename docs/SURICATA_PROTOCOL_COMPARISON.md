@@ -403,10 +403,15 @@ we still decode it. **Suricata limitation, not a bug here.**
 Anomaly events: our decoder raised none (`unknown_function`,
 `invalid_exception_code`). Suricata raised `value_mismatch` 25,885 times, on
 every FC3 response, although the raw bytes are well formed (MBAP length 11,
-byte count 8, 4 registers). The `sawp-modbus` source (main branch, not the
-0.13.1 Suricata pins) sets `DATA_VALUE` only for a byte count outside 1..250 or
-different from the data length, so the cause is **unexplained**. Do not copy
-this event until it is understood.
+byte count 8, 4 registers). Cause found in `sawp-modbus` (`Message::matches`,
+main branch, not verified against the 0.13.1 Suricata pins): for a plain read
+the response size is checked as a bit-packed size, `ceil(quantity / 8)` bytes,
+whichever function it is. A register read of 4 registers has 8 data bytes
+and 1 expected, so every valid FC3/FC4 response is flagged. Only the
+read/write variant (FC23) uses `2 * quantity`, which is why FC23 is clean.
+This is a Suricata false positive. Do not copy it. The consequence for
+analysis: alerts or rules on `modbus.value_mismatch` fire on every register
+read.
 
 Not covered by real traffic: exception responses, FC1/2/4/5/6/15, diagnostics,
 `invalid_length`, `invalid_value`, `unsolicited_response`, `invalid_protocol_id`.
