@@ -128,3 +128,45 @@ func TestNonModbusOnPort502IsNotLabelled(t *testing.T) {
 		assert.NotEqual(t, "modbus", f.Protocol, "flow %+v", f)
 	}
 }
+
+func TestParseModbusTCP_DecodesFunction(t *testing.T) {
+	p := newENIPTestParser(t)
+	ts := time.Unix(1700000000, 0)
+	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
+		return buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true}, nil, payload)
+	}
+	writeReq := []byte{0, 7, 0, 0, 0, 6, 1, 6, 0, 9, 0x12, 0x34} // FC6 write single register 9
+	exception := []byte{0, 7, 0, 0, 0, 3, 1, 0x86, 2}
+
+	t.Run("request", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "Read Holding Registers", info.MessageType)
+		assert.Equal(t, "read", info.AdditionalData["access"])
+		assert.Equal(t, uint8(3), info.AdditionalData["function_code"])
+		assert.Equal(t, 0x37d0, info.AdditionalData["address"])
+		assert.Equal(t, 4, info.AdditionalData["quantity"])
+		assert.Equal(t, uint8(3), info.AdditionalData["unit_id"])
+		assert.Equal(t, false, info.AdditionalData["is_exception"])
+	})
+	t.Run("write is flagged as configuration", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, writeReq), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "write", info.AdditionalData["access"])
+		assert.True(t, info.IsConfiguration)
+	})
+	t.Run("exception response", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(502, 50000, exception), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, true, info.AdditionalData["is_exception"])
+		assert.Equal(t, "Illegal Data Address", info.AdditionalData["exception"])
+		assert.NotContains(t, info.AdditionalData, "address", "response bodies are not read as requests")
+	})
+	t.Run("pipelined ADUs are all counted", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, append(append([]byte(nil), modbusReadRequest...), writeReq...)), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, 2, info.AdditionalData["message_count"])
+		assert.Equal(t, []uint8{3, 6}, info.AdditionalData["function_codes"])
+		assert.Equal(t, "write", info.AdditionalData["access"], "a write anywhere in the segment wins")
+	})
+}

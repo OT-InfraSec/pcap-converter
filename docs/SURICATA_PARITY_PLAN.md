@@ -17,7 +17,7 @@ decision is recorded in the comparison doc.
 | 1 Detection framework | **Done for EtherNet/IP and Modbus.** `lib/detect` (registry, three-state probe, ENIP encapsulation and implicit I/O probes, Modbus probe and ADU splitter) and `internal/parser/connection_labeler.go`. F-01 to F-03 fixed and F-04 detection fixed, all checked against Suricata. DNP3 and OPC UA are registered with hint ports and no probe, so they stay port-only. |
 | Data fix | **Done.** The importer dropped 90,468 of 276,653 packets (ARP requests, DNS queries and error responses, ICMP unreachable). All packets are stored now and a warning fires if read and stored differ. See "Dropped packets" in the comparison doc. |
 | 2 Reassembly | Not started. Open question from the data: the Modbus and ENIP captures contain no split or pipelined messages (136,836 Modbus and 4,884 ENIP TCP payloads, all one message per segment), so there is no real traffic yet that shows reassembly changes results. Worth a capture with long responses (FC 3 with 125 registers across MSS limits, FC 23) before spending the effort. |
-| 3 OT protocols | Started: ENIP implicit I/O, Modbus content detection. Next: Modbus decoder (function codes, exceptions, events), ENIP `ListIdentity` decoding, DNP3. |
+| 3 OT protocols | Started: ENIP implicit I/O, Modbus content detection, Modbus decoder (`lib/detect/modbus_decode.go`: function name and access class, exception codes, address/quantity of requests, unknown-function and invalid-exception events; wired into `parseModbusTCP` via `AdditionalData`; not yet compared against Suricata events). Next: ENIP `ListIdentity` decoding, DNP3. |
 | 4 to 6 | Not started. |
 
 ## Guiding decisions (confirm before Phase 1)

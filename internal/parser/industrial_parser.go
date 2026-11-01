@@ -870,6 +870,7 @@ func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, ti
 	default:
 		info.Confidence = 0.5
 	}
+	p.decodeModbusInto(packet, info)
 	return info
 }
 
@@ -1200,4 +1201,65 @@ func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) 
 		return ""
 	}
 	return patterns[0].PatternType
+}
+
+// decodeModbusInto adds the function-level view of the segment's ADUs: what
+// was asked (function, address range) or answered (exception). Address and
+// quantity are read only from client-to-server messages, because a response
+// body has a different layout. Direction is known only on the Modbus port.
+func (p *IndustrialProtocolParserImpl) decodeModbusInto(packet gopacket.Packet, info *model.IndustrialProtocolInfo) {
+	_, _, _, payload, ok := transportPayload(packet)
+	if !ok {
+		return
+	}
+	adus, _ := detect.SplitModbusADUs(payload)
+	if len(adus) == 0 {
+		return
+	}
+	request := info.Direction == "outbound"
+
+	var codes []uint8
+	var events []string
+	access := detect.ModbusUnknown
+	rank := map[detect.ModbusAccess]int{detect.ModbusUnknown: 0, detect.ModbusOther: 1, detect.ModbusRead: 2,
+		detect.ModbusDiagnostic: 3, detect.ModbusReadWrite: 4, detect.ModbusWrite: 5}
+	for i, adu := range adus {
+		m, ok := detect.DecodeModbusADU(adu, request)
+		if !ok {
+			continue
+		}
+		codes = append(codes, m.FunctionCode)
+		events = append(events, m.Events...)
+		if rank[m.Access] > rank[access] {
+			access = m.Access
+		}
+		if i > 0 {
+			continue
+		}
+		info.MessageType = m.FunctionName
+		info.AdditionalData["function_code"] = m.FunctionCode
+		info.AdditionalData["transaction_id"] = m.TransactionID
+		info.AdditionalData["unit_id"] = m.UnitID
+		info.AdditionalData["is_exception"] = m.IsException
+		if m.IsException {
+			info.AdditionalData["exception_code"] = m.ExceptionCode
+			if m.ExceptionName != "" {
+				info.AdditionalData["exception"] = m.ExceptionName
+			}
+		}
+		if m.Address >= 0 {
+			info.AdditionalData["address"] = m.Address
+			info.AdditionalData["quantity"] = m.Quantity
+		}
+	}
+	if len(codes) == 0 {
+		return
+	}
+	info.AdditionalData["access"] = string(access)
+	info.AdditionalData["message_count"] = len(codes)
+	info.AdditionalData["function_codes"] = codes
+	if len(events) > 0 {
+		info.AdditionalData["events"] = events
+	}
+	info.IsConfiguration = access == detect.ModbusWrite || access == detect.ModbusReadWrite
 }
