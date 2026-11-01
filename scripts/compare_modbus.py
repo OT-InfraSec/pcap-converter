@@ -36,11 +36,11 @@ def suricata_yaml(path, tmp):
 # Event names that mean the same in both tools. Ours (lib/detect) on the left.
 # Everything else is reported but does not fail the run:
 #   ours:     unknown_function   (any unassigned public code, e.g. 0x09)
-#   suricata: invalid_function_code (only code 0 and >= 0x80), invalid_value,
-#             invalid_length, invalid_protocol_id, unsolicited_response,
+#   suricata: invalid_function_code (only code 0 and >= 0x80),
+#             invalid_protocol_id, unsolicited_response,
 #             value_mismatch (false positive on register reads, see the
 #             comparison doc), flooded
-SHARED_EVENTS = {"invalid_exception_code"}
+SHARED_EVENTS = {"invalid_exception_code", "invalid_length", "invalid_value"}
 
 def client_of(e):
     """(client ip, client port) of an eve record; the server is on port 502."""

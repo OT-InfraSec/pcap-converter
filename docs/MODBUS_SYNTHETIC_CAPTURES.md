@@ -146,27 +146,30 @@ normally reject, so the stream continues.
 
 | # | Bad request | Expected on the wire | Suri event | Ours |
 |---|---|---|---|---|
-| D1 | FC3 addr 0 qty **0** | `0300 0000 0000` data | `invalid_value` | none yet (**gap: add quantity range checks**) |
-| D2 | FC3 addr 0 qty **126** | | `invalid_value` | gap |
-| D3 | FC1 addr 0 qty **2001** | | `invalid_value` | gap |
+| D1 | FC3 addr 0 qty **0** | `0300 0000 0000` data | `invalid_value` | `invalid_value` |
+| D2 | FC3 addr 0 qty **126** | | `invalid_value` | same as Suri |
+| D3 | FC1 addr 0 qty **2001** | | `invalid_value` | same as Suri |
 | D4 | FC1 addr 0 qty **2000** | valid maximum | none | none |
-| D5 | FC3 with **6** data bytes (qty plus 2 extra) | `0000 0004 FFFF` | `invalid_length` | gap |
-| D6 | FC3 with **2** data bytes | | `invalid_length` or Incomplete handling; record | no address/quantity |
-| D7 | FC5 value `1234` (neither 0000 nor FF00) | | `invalid_value` | gap |
-| D8 | FC16 qty 2, count **6** (should be 4), data 6 bytes | | `invalid_value` | gap |
-| D9 | FC16 qty 2, count 4, **2** data bytes after the count | | `invalid_length` | gap |
-| D10 | FC16 qty **0** | | `invalid_length` | gap |
-| D11 | FC16 qty **124** | | `invalid_value` | gap |
-| D12 | FC15 qty 10, count **1** | | `invalid_value` | gap |
-| D13 | FC7 with **1** data byte | | `invalid_length` | gap |
-| D14 | FC8 with 6 data bytes | | `invalid_length` | gap |
-| D15 | FC8 sub 0001 data `1234` (should be 0000/FF00) | | `invalid_value` | gap |
-| D16 | FC24 with 4 data bytes | | `invalid_length` | gap |
-| D17 | FC23 read qty **126** | | `invalid_value` | gap |
+| D5 | FC3 with **6** data bytes (qty plus 2 extra) | `0000 0004 FFFF` | `invalid_length` | same as Suri |
+| D6 | FC3 with **2** data bytes | | `invalid_length` | `invalid_length`, no address/quantity |
+| D7 | FC5 value `1234` (neither 0000 nor FF00) | | `invalid_value` | same as Suri |
+| D8 | FC16 qty 2, count **6** (should be 4), data 6 bytes | | `invalid_value` | same as Suri |
+| D9 | FC16 qty 2, count 4, **2** data bytes after the count | | `invalid_length` | same as Suri |
+| D10 | FC16 qty **0** | | `invalid_length` | same as Suri |
+| D11 | FC16 qty **126** with count 4 and 4 data bytes (a matching count would not fit the 253-byte PDU) | | `invalid_value` | same as Suri |
+| D11b | FC16 qty **124**, count 248, 248 data bytes (ADU length 255: rejected as framing, same as E5) | | `invalid_length` (MBAP) | not decoded |
+| D12 | FC15 qty 10, count **1** | | `invalid_value` | same as Suri |
+| D13 | FC7 with **1** data byte | | `invalid_length` | same as Suri |
+| D14 | FC8 with 6 data bytes | | `invalid_length` | same as Suri |
+| D15 | FC8 sub 0001 data `1234` (should be 0000/FF00) | | `invalid_value` | same as Suri |
+| D16 | FC24 with 4 data bytes | | `invalid_length` | same as Suri |
+| D17 | FC23 read qty **126** | | `invalid_value` | same as Suri |
 
-"gap" = our decoder does not raise this yet. These are the cases that decide
-what we add. Record what Suricata reports; do not edit the traffic to make
-tools agree.
+Our decoder raises `invalid_length` and `invalid_value` with the rules of
+sawp-modbus (Suricata's parser), so the two should agree on every D row. Any
+disagreement is a bug on one side. Record what Suricata reports; do not edit
+the traffic to make tools agree. Note that Suricata's limit for write
+quantities is 125 registers although the specification says 123 for FC16.
 
 ### Group E: malformed framing (own connection each, warm-up first)
 
@@ -270,7 +273,8 @@ tool you used to produce it.
 
 ## 6. What we do with the result (not for the agent)
 
-`scripts/compare_modbus.py <pcap>` compares transactions today. It does not
-yet compare Suricata anomaly events with ours; that, and the gaps marked
-"gap" and "Divergence" above, is the follow-up. Cases E9, G3 to G5 and G9 are
-the evidence for or against building TCP reassembly (Phase 2).
+`scripts/compare_modbus.py <pcap>` compares transactions and anomaly events.
+`invalid_exception_code`, `invalid_length` and `invalid_value` must agree;
+other event names are listed, not judged. The rows marked "Divergence" above
+are known, intended differences. Cases E9, G3 to G5 and G9 are the evidence
+for or against building TCP reassembly (Phase 2).

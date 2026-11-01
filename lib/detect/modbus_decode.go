@@ -19,6 +19,12 @@ const (
 const (
 	ModbusEventUnknownFunction  = "unknown_function"
 	ModbusEventInvalidException = "invalid_exception_code"
+	// ModbusEventInvalidLength: the body is shorter or longer than the
+	// function allows, or the byte count disagrees with the quantity.
+	ModbusEventInvalidLength = "invalid_length"
+	// ModbusEventInvalidValue: a quantity, count or value is outside the range
+	// the specification allows.
+	ModbusEventInvalidValue = "invalid_value"
 )
 
 // ModbusMessage is one decoded ADU.
@@ -140,6 +146,10 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 		return m, true
 	}
 
+	if known {
+		m.Events = append(m.Events, validateModbusBody(fc, int(binary.BigEndian.Uint16(b[4:6])), body, request)...)
+	}
+
 	if request && known {
 		switch {
 		case f.addrQty && len(body) >= 4:
@@ -156,4 +166,161 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 		}
 	}
 	return m, true
+}
+
+// maxQuantityBits and maxQuantityWords are the limits sawp-modbus (Suricata's
+// parser) applies, so our events match Suricata's. The specification lowers
+// the limits for some functions (FC16 allows 123 registers); the larger limit
+// is the same for both because the 253-byte PDU already caps a write.
+const (
+	maxQuantityBits  = 2000
+	maxQuantityWords = 125
+	minReadCount     = 1
+	maxReadCount     = 250
+)
+
+// validateModbusBody checks a function body against the lengths and ranges the
+// specification gives. It returns invalid_length and invalid_value, in that
+// order, each at most once. mbapLen is the MBAP length field, which counts the
+// unit id and function code besides body.
+func validateModbusBody(fc byte, mbapLen int, body []byte, request bool) []string {
+	var length, value bool
+	if request {
+		length, value = validateModbusRequest(fc, mbapLen, body)
+	} else {
+		length, value = validateModbusResponse(fc, body)
+	}
+	var ev []string
+	if length {
+		ev = append(ev, ModbusEventInvalidLength)
+	}
+	if value {
+		ev = append(ev, ModbusEventInvalidValue)
+	}
+	return ev
+}
+
+func isBitAccess(fc byte) bool { return fc == 1 || fc == 2 || fc == 5 || fc == 15 }
+
+func validateModbusRequest(fc byte, mbapLen int, body []byte) (length, value bool) {
+	be := binary.BigEndian
+	switch fc {
+	case 8:
+		if len(body) != 4 {
+			length = true
+		}
+		if len(body) == 4 {
+			sub, d := be.Uint16(body[0:2]), body[2:4]
+			switch {
+			case sub == 0 || sub == 4 || (sub > 0x15):
+			case sub == 1:
+				value = d[1] != 0 || (d[0] != 0 && d[0] != 0xff)
+			case sub == 3:
+				value = d[1] != 0
+			case sub >= 5 && sub <= 9:
+			default:
+				value = d[0] != 0 || d[1] != 0
+			}
+		}
+		return
+	case 43:
+		return len(body) < 1, false
+	case 20, 21:
+		return len(body) == 0, false
+	case 7, 11, 12, 17:
+		return len(body) > 0, false
+	case 24:
+		return len(body) != 2, false
+	case 1, 2, 3, 4, 23:
+		if len(body) < 4 {
+			return true, false
+		}
+		qty := int(be.Uint16(body[2:4]))
+		if qty == 0 {
+			value = true
+		}
+		if fc != 23 && len(body) > 4 {
+			length = true
+		}
+		if isBitAccess(fc) {
+			value = value || qty > maxQuantityBits
+		} else {
+			value = value || qty > maxQuantityWords
+		}
+		if fc == 23 {
+			l, v := validateModbusMultipleWrite(fc, mbapLen, body[4:])
+			return length || l, value || v
+		}
+		return
+	case 5, 6:
+		if len(body) < 4 {
+			return true, false
+		}
+		if len(body) > 4 {
+			length = true
+		}
+		if fc == 5 {
+			if v := be.Uint16(body[2:4]); v != 0 && v != 0xff00 {
+				value = true
+			}
+		}
+		return
+	case 22:
+		return len(body) != 6, false
+	case 15, 16:
+		return validateModbusMultipleWrite(fc, mbapLen, body)
+	}
+	return false, false
+}
+
+// validateModbusMultipleWrite checks address, quantity, byte count, data.
+// For FC23 body starts at the write part, after the 4-byte read range.
+func validateModbusMultipleWrite(fc byte, mbapLen int, body []byte) (length, value bool) {
+	if len(body) < 5 {
+		return true, false
+	}
+	qty, count := int(binary.BigEndian.Uint16(body[2:4])), int(body[4])
+	offset := 7
+	if fc == 23 {
+		offset += 4
+	}
+	if qty == 0 || mbapLen-offset != count {
+		length = true
+	}
+	if isBitAccess(fc) {
+		value = qty > maxQuantityBits || count != (qty+7)/8
+	} else {
+		value = qty > maxQuantityWords || count != 2*qty
+	}
+	return
+}
+
+func validateModbusResponse(fc byte, body []byte) (length, value bool) {
+	be := binary.BigEndian
+	switch fc {
+	case 7:
+		return len(body) != 1, false
+	case 11:
+		return len(body) != 4, false
+	case 8:
+		return len(body) < 2, false
+	case 43:
+		return len(body) < 1, false
+	case 1, 2, 3, 4, 23:
+		if len(body) < 1 {
+			return true, false
+		}
+		count := int(body[0])
+		return false, count < minReadCount || count > maxReadCount || len(body)-1 != count
+	case 5, 6:
+		return len(body) != 4, false
+	case 15, 16:
+		if len(body) != 4 {
+			return true, false
+		}
+		return false, be.Uint16(body[2:4]) == 0
+	case 22:
+		return len(body) != 6, false
+	}
+	return false, false
 }
