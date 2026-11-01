@@ -46,11 +46,11 @@ def suricata_yaml(path, tmp):
 # Event names that mean the same in both tools. Ours (lib/detect) on the left.
 # Everything else is reported but does not fail the run:
 #   ours:     unknown_function   (any unassigned public code, e.g. 0x09)
-#   suricata: invalid_function_code (only code 0 and >= 0x80),
-#             invalid_protocol_id, unsolicited_response,
+#   suricata: unsolicited_response (we do not pair requests with responses),
 #             value_mismatch (false positive on register reads, see the
 #             comparison doc), flooded
-SHARED_EVENTS = {"invalid_exception_code", "invalid_length", "invalid_value"}
+SHARED_EVENTS = {"invalid_exception_code", "invalid_length", "invalid_value",
+                 "invalid_protocol_id", "invalid_function_code"}
 
 def client_of(e):
     """(client ip, client port) of an eve record; the server is on port 502."""
@@ -95,7 +95,7 @@ def read_ours(jsonl):
         for ev in e.get("events") or []:
             events[(cip, cport, ev)] += 1
         if e["request"]:
-            req[(e["src"], e["sport"], e["dst"], e["txn"], e["unit"], e["fc"], e["addr"])] += 1
+            req[(e["src"], e["sport"], e["dst"], e["txn"], e["unit"], e["raw_fc"], e["addr"])] += 1
         else:
             resp[(e["src"], e["dst"], e["dport"], e["txn"], e["fc"], e["exc_code"] if e["exception"] else 0)] += 1
     return req, resp, events

@@ -421,22 +421,24 @@ Those need synthetic captures.
 
 Captures: `minicps-testbed/build/modbus_synthetic` (generated from
 `MODBUS_SYNTHETIC_CAPTURES.md`, 9 pcaps, 41 connections), compared with
-`scripts/compare_modbus.py` (Suricata 8.0.8, midstream on). Transactions and
-events agree on groups A and B and on every well-formed row of the others.
+`scripts/compare_modbus.py` (Suricata 8.0.8, midstream on).
 
-| Class | Scenarios | What differs | Status |
-|---|---|---|---|
-| Validation events | D1-D3, D5-D10, D12-D17 | none: `invalid_length` / `invalid_value` agree on all 15 | **Done, matches Suricata** |
-| Exception codes | B | `invalid_exception_code` 2 = 2 (incl. 08 on FC3, 02 on FC7) | Matches |
-| Framing: protocol id, length outside 2..254 | D11, E1-E5, E8 | Suricata keeps decoding inside a connection it already recognised and raises `invalid_protocol_id` / `invalid_length`. We drop the ADU, so those transactions and events are missing | **Gap**, needs a lenient framing mode for connections already labelled Modbus |
-| Function codes in requests | C | Requests with fc `0x80`-`0xFF` (and 0): we read the high bit as an exception and report `invalid_exception_code`; Suricata calls them `invalid_function_code` and keeps the raw code | **Bug**: no exceptions exist in the request direction |
-| Unassigned codes (`0x09`...) | C | we raise `unknown_function`, Suricata nothing | Intended divergence |
-| TCP reassembly | E9, G2-G5, G9, H5 | ADUs split across segments are not decoded by us (11 transactions on these connections) | **Evidence for Phase 2** |
-| Retransmission | I1, I2, I4 | we count a retransmitted ADU twice, Suricata once | Needs TCP sequence tracking (Phase 2) |
-| Transaction pairing | F1-F4, F8, H3, I5, E-group | `unsolicited_response` raised only by Suricata, as is `value_mismatch` (F5-F7; also fires on every register read, see above) | We do not pair requests with responses |
-| Request flood | F9 | Suricata stops at 501 of 600 requests (`flooded`); we decode all 600 | Suricata limit |
-| HTTP then Modbus on 502 | H4 | Suricata recognises no Modbus on that connection; we decode both exchanges (content probe per packet) | We are better here |
-| First packet | H1-H3, H6-H9 | agree (IPv6 and VLAN included) | Matches |
+**Current state: transactions and the shared events agree on 7 of 9 captures
+(A, B, C, D, E, G, I) and on the real capture.** F and H differ for the two
+reasons in the last rows below.
+
+| Class | Scenarios | Result |
+|---|---|---|
+| Validation events | D1-D17 | `invalid_length` / `invalid_value` agree on all (`sawp-modbus` rules). |
+| Exception codes | B | `invalid_exception_code` agrees, incl. 08 on FC3 and 02 on FC7. |
+| Framing: protocol id, length outside 2..254 | D11, E1-E5, E8 | **Fixed.** Once a connection is recognised, frames are decoded leniently: `invalid_protocol_id`, `invalid_length`. A length outside 2..254 consumes `6+length` bytes or the rest of the segment, as in Suricata. |
+| Function codes in requests | C | **Fixed.** A request with code 0 or the exception bit set is `invalid_function_code` (not an exception) and its body is still read as the underlying function, as in `sawp-modbus`. |
+| Split ADUs, pipelining with a split tail, 1-byte segments, bare header first | E8, E9, G2-G5, G9, H5 | **Fixed for segments in order** (`detect.ModbusTracker`: partial ADU kept per connection and direction). Reordered segments (G5 was in order in the capture) and retransmissions are not handled; that needs real TCP reassembly. |
+| Unassigned codes (`0x09`...) | C | Intended divergence: we raise `unknown_function`, Suricata nothing. |
+| Retransmission, duplicates | I1, I2, I4 | The comparison compares sets, so a retransmitted ADU counted twice on our side is **not shown** (the "keys we see more than once" line is). Still open. |
+| Transaction pairing | F1-F4, F8, H3, I5, E-group | `unsolicited_response` and `value_mismatch` (a false positive on register reads) only on Suricata's side; we do not pair requests with responses. Not compared (not in the shared set). |
+| Request flood | F9 | Suricata stops at 501 of 600 requests (`flooded`); we decode all 600. Suricata limit. |
+| HTTP first, Modbus after, on 502 | H4 | Suricata recognises no Modbus on the connection; we decode both exchanges. We are more tolerant. |
 
 Manifest notes: the D rows' `expect_our_events` are stale (generated before
 the validation rules existed); D11 in the capture is the old "qty 124,

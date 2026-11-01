@@ -43,12 +43,14 @@ func TestDecodeModbusADU(t *testing.T) {
 			events: []string{ModbusEventUnknownFunction}},
 		{name: "user defined function code is not an anomaly", in: adu(1, 0, 1, 0x41, []byte{1}),
 			fc: 0x41, fcName: "User Defined", access: ModbusUnknown, addr: -1, qty: -1, unit: 1, txn: 1, wantOK: true},
-		{name: "non-zero protocol id", in: adu(1, 1, 1, 3, []byte{0, 0, 0, 1}), wantOK: false},
+		{name: "non-zero protocol id is decoded with an event", in: adu(1, 1, 1, 3, []byte{0, 0, 0, 1}),
+			fc: 3, fcName: "Read Holding Registers", access: ModbusRead, addr: 0, qty: 1, unit: 1, txn: 1, wantOK: true,
+			events: []string{ModbusEventInvalidProtocolID}},
 		{name: "short", in: []byte{0, 1, 0, 0, 0, 2, 1}, wantOK: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, ok := DecodeModbusADU(tc.in, true)
+			m, ok := DecodeModbusADU(tc.in, !tc.exception)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}

@@ -46,13 +46,17 @@ func TestParseModbusTCP_Detection(t *testing.T) {
 	})
 
 	t.Run("garbage on 502 is not Modbus", func(t *testing.T) {
-		assert.Nil(t, p.parseModbusTCP(tcp(50000, 502, false, []byte("GET / HTTP/1.1\r\nHost: plc\r\n")), ts))
+		// A fresh parser: a connection already recognised as Modbus decodes
+		// anything as a (malformed) frame.
+		fresh := newENIPTestParser(t)
+		assert.Nil(t, fresh.parseModbusTCP(tcp(50000, 502, false, []byte("GET / HTTP/1.1\r\nHost: plc\r\n")), ts))
 	})
 
 	t.Run("non-zero protocol id is not Modbus", func(t *testing.T) {
 		bad := append([]byte(nil), modbusReadRequest...)
 		bad[3] = 1
-		assert.Nil(t, p.parseModbusTCP(tcp(50000, 502, false, bad), ts))
+		fresh := newENIPTestParser(t)
+		assert.Nil(t, fresh.parseModbusTCP(tcp(50000, 502, false, bad), ts))
 	})
 
 	t.Run("handshake segment is below the default threshold", func(t *testing.T) {
@@ -177,5 +181,58 @@ func TestParseModbusTCP_DecodesFunction(t *testing.T) {
 		assert.Equal(t, 2, info.AdditionalData["message_count"])
 		assert.Equal(t, []uint8{3, 6}, info.AdditionalData["function_codes"])
 		assert.Equal(t, "write", info.AdditionalData["access"], "a write anywhere in the segment wins")
+	})
+}
+
+func TestParseModbusTCP_RecognisedConnection(t *testing.T) {
+	ts := time.Unix(1700000000, 0)
+	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
+		return buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true}, nil, payload)
+	}
+	badProto := append([]byte(nil), modbusReadRequest...)
+	badProto[3] = 1
+
+	t.Run("a malformed ADU is Modbus once the connection is recognised", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		info := p.parseModbusTCP(tcp(50000, 502, badProto), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, []string{detect.ModbusEventInvalidProtocolID}, info.AdditionalData["events"])
+		assert.Equal(t, uint8(3), info.AdditionalData["function_code"])
+	})
+	t.Run("the same ADU first on a connection is not Modbus", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		assert.Nil(t, p.parseModbusTCP(tcp(50000, 502, badProto), ts))
+	})
+	t.Run("another connection is not affected", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		assert.Nil(t, p.parseModbusTCP(tcp(50001, 502, badProto), ts))
+	})
+	t.Run("a message split across segments is decoded when complete", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		first := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest[:7]), ts)
+		require.NotNil(t, first, "the segment still belongs to a Modbus connection")
+		assert.NotContains(t, first.AdditionalData, "function_code")
+		second := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest[7:]), ts)
+		require.NotNil(t, second)
+		assert.Equal(t, uint8(3), second.AdditionalData["function_code"])
+		assert.Equal(t, 0x37d0, second.AdditionalData["address"])
+	})
+	t.Run("the continuation of a long response raises no events", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		resp := append([]byte{0, 9, 0, 0, 0, 3 + 250, 3, 3, 250}, make([]byte, 250)...)
+		for _, seg := range [][]byte{resp[:100], resp[100:200]} {
+			info := p.parseModbusTCP(tcp(502, 50000, seg), ts)
+			require.NotNil(t, info)
+			assert.NotContains(t, info.AdditionalData, "events")
+			assert.NotContains(t, info.AdditionalData, "function_code")
+		}
+		last := p.parseModbusTCP(tcp(502, 50000, resp[200:]), ts)
+		require.NotNil(t, last)
+		assert.Equal(t, uint8(3), last.AdditionalData["function_code"])
+		assert.NotContains(t, last.AdditionalData, "events")
 	})
 }

@@ -34,6 +34,8 @@ func main() {
 		os.Exit(1)
 	}
 	enc := json.NewEncoder(os.Stdout)
+	// The same tracker the importer uses, so the dump shows what it would see.
+	tracker := detect.NewModbusTracker()
 	for n := 1; ; n++ {
 		data, _, err := r.ReadPacketData()
 		if err == io.EOF {
@@ -53,16 +55,15 @@ func main() {
 		if !request && uint16(tcp.SrcPort) != detect.ModbusPort {
 			continue
 		}
-		adus, _ := detect.SplitModbusADUs(tcp.Payload)
-		for _, adu := range adus {
-			m, ok := detect.DecodeModbusADU(adu, request)
-			if !ok {
-				continue
-			}
+		key := fmt.Sprintf("%s:%d|%s:%d", nl.NetworkFlow().Src(), tcp.SrcPort, nl.NetworkFlow().Dst(), tcp.DstPort)
+		if !request {
+			key = fmt.Sprintf("%s:%d|%s:%d", nl.NetworkFlow().Dst(), tcp.DstPort, nl.NetworkFlow().Src(), tcp.SrcPort)
+		}
+		for _, m := range tracker.Feed(key, request, tcp.Payload, true) {
 			enc.Encode(map[string]any{
 				"pkt": n, "src": nl.NetworkFlow().Src().String(), "dst": nl.NetworkFlow().Dst().String(),
 				"sport": uint16(tcp.SrcPort), "dport": uint16(tcp.DstPort),
-				"request": request, "txn": m.TransactionID, "unit": m.UnitID, "fc": m.FunctionCode,
+				"request": request, "txn": m.TransactionID, "unit": m.UnitID, "fc": m.FunctionCode, "raw_fc": m.RawFunction,
 				"exception": m.IsException, "exc_code": m.ExceptionCode, "addr": m.Address, "qty": m.Quantity,
 				"access": m.Access, "events": m.Events,
 			})

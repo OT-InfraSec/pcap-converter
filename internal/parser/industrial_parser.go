@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
@@ -159,6 +160,10 @@ type IndustrialProtocolParserImpl struct {
 	enableEtherNetIP    bool
 	enableOPCUA         bool
 	errorHandler        ErrorHandler
+
+	// Modbus connections and unfinished messages, see detect.ModbusTracker.
+	modbusMu sync.Mutex
+	modbus   *detect.ModbusTracker
 
 	// Performance optimization
 	packetCache map[string]model.IndustrialProtocolInfo
@@ -843,13 +848,34 @@ func (p *IndustrialProtocolParserImpl) parseOPCUA(packet gopacket.Packet, timest
 
 // parseModbusTCP parses Modbus TCP protocol.
 //
-// Detection is by content (an MBAP header with protocol ID 0, a consistent
-// length and a valid function code); port 502 only raises confidence. A
-// packet on port 502 without payload, such as a handshake segment, is
-// reported below the default confidence threshold.
+// A connection is recognised as Modbus by content (an MBAP header with
+// protocol ID 0, a consistent length and a valid function code); port 502 only
+// raises confidence. From then on every segment of it is Modbus: malformed
+// frames are decoded and reported as events (as Suricata does), and a message
+// split across segments is decoded when its last segment arrives. See
+// detect.ModbusTracker. A packet on port 502 without payload, such as a
+// handshake segment, is reported below the default confidence threshold.
 func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
+	transport, srcPort, dstPort, payload, ok := transportPayload(packet)
+	if !ok || transport != detect.TCP {
+		return nil
+	}
 	m := p.detectProtocol(packet, "Modbus")
-	if m == nil {
+
+	var msgs []detect.ModbusMessage
+	known := false
+	if nl := packet.NetworkLayer(); nl != nil {
+		key := connKey(transport, nl.NetworkFlow().Src().String(), srcPort, nl.NetworkFlow().Dst().String(), dstPort, model.VLANTag{})
+		hint := srcPort == detect.ModbusPort || dstPort == detect.ModbusPort
+		p.modbusMu.Lock()
+		if p.modbus == nil {
+			p.modbus = detect.NewModbusTracker()
+		}
+		msgs = p.modbus.Feed(key, dstPort == detect.ModbusPort, payload, hint)
+		known = p.modbus.Known(key)
+		p.modbusMu.Unlock()
+	}
+	if m == nil && !known {
 		return nil
 	}
 
@@ -863,14 +889,20 @@ func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, ti
 	portErr := p.extractPortInfo(packet, info, []uint16{detect.ModbusPort})
 
 	switch {
-	case m.Result == detect.Recognized && m.PortHint && portErr == nil:
+	case m != nil && m.Result == detect.Recognized && m.PortHint && portErr == nil:
 		info.Confidence = 0.9
-	case m.Result == detect.Recognized:
+	case m != nil && m.Result == detect.Recognized:
+		info.Confidence = 0.8
+	case known && len(payload) > 0 && portErr == nil:
+		// Inside a recognised connection: a continuation segment, a bare
+		// header or a malformed frame.
+		info.Confidence = 0.9
+	case known && len(payload) > 0:
 		info.Confidence = 0.8
 	default:
 		info.Confidence = 0.5
 	}
-	p.decodeModbusInto(packet, info)
+	decodeModbusInto(msgs, info)
 	return info
 }
 
@@ -1203,31 +1235,20 @@ func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) 
 	return patterns[0].PatternType
 }
 
-// decodeModbusInto adds the function-level view of the segment's ADUs: what
-// was asked (function, address range) or answered (exception). Address and
-// quantity are read only from client-to-server messages, because a response
-// body has a different layout. Direction is known only on the Modbus port.
-func (p *IndustrialProtocolParserImpl) decodeModbusInto(packet gopacket.Packet, info *model.IndustrialProtocolInfo) {
-	_, _, _, payload, ok := transportPayload(packet)
-	if !ok {
+// decodeModbusInto adds the function-level view of the segment's messages:
+// what was asked (function, address range) or answered (exception). The
+// details come from the first message; the access class, function codes and
+// events cover all of them.
+func decodeModbusInto(msgs []detect.ModbusMessage, info *model.IndustrialProtocolInfo) {
+	if len(msgs) == 0 {
 		return
 	}
-	adus, _ := detect.SplitModbusADUs(payload)
-	if len(adus) == 0 {
-		return
-	}
-	request := info.Direction == "outbound"
-
 	var codes []uint8
 	var events []string
 	access := detect.ModbusUnknown
 	rank := map[detect.ModbusAccess]int{detect.ModbusUnknown: 0, detect.ModbusOther: 1, detect.ModbusRead: 2,
 		detect.ModbusDiagnostic: 3, detect.ModbusReadWrite: 4, detect.ModbusWrite: 5}
-	for i, adu := range adus {
-		m, ok := detect.DecodeModbusADU(adu, request)
-		if !ok {
-			continue
-		}
+	for i, m := range msgs {
 		codes = append(codes, m.FunctionCode)
 		events = append(events, m.Events...)
 		if rank[m.Access] > rank[access] {
@@ -1255,9 +1276,6 @@ func (p *IndustrialProtocolParserImpl) decodeModbusInto(packet gopacket.Packet, 
 			info.AdditionalData["write_address"] = m.WriteAddress
 			info.AdditionalData["write_quantity"] = m.WriteQuantity
 		}
-	}
-	if len(codes) == 0 {
-		return
 	}
 	info.AdditionalData["access"] = string(access)
 	info.AdditionalData["message_count"] = len(codes)

@@ -19,6 +19,11 @@ const (
 const (
 	ModbusEventUnknownFunction  = "unknown_function"
 	ModbusEventInvalidException = "invalid_exception_code"
+	// ModbusEventInvalidProtocolID: the MBAP protocol id is not 0.
+	ModbusEventInvalidProtocolID = "invalid_protocol_id"
+	// ModbusEventInvalidFunction: a request carries function code 0 or has the
+	// exception bit set. Responses may carry the bit; requests may not.
+	ModbusEventInvalidFunction = "invalid_function_code"
 	// ModbusEventInvalidLength: the body is shorter or longer than the
 	// function allows, or the byte count disagrees with the quantity.
 	ModbusEventInvalidLength = "invalid_length"
@@ -32,6 +37,7 @@ type ModbusMessage struct {
 	TransactionID uint16
 	UnitID        byte
 	FunctionCode  byte // without the exception bit
+	RawFunction   byte // as on the wire, exception bit included
 	FunctionName  string
 	Access        ModbusAccess
 	IsException   bool
@@ -98,27 +104,70 @@ func isUserDefinedModbusFC(fc byte) bool {
 	return (fc >= 65 && fc <= 72) || (fc >= 100 && fc <= 110)
 }
 
-// DecodeModbusADU decodes the ADU at the start of b. request says whether b
-// travels client to server: only then is the body read as address and quantity.
-// It returns false when b does not start with a valid MBAP header.
+// modbusFrameSize returns the number of bytes the frame at the start of b
+// occupies, and whether b holds all of them. It follows sawp-modbus (Suricata):
+// a length field outside 2..254 is an error but the frame is still 6+length
+// bytes, or everything that is there if that is less, and parsing carries on
+// after it. Fewer than the 6 header bytes cannot be judged.
+func modbusFrameSize(b []byte) (size int, complete bool) {
+	if len(b) < 6 {
+		return 0, false
+	}
+	length := int(binary.BigEndian.Uint16(b[4:6]))
+	if length < 2 || length > 254 {
+		size = 6 + length
+		if size > len(b) {
+			size = len(b)
+		}
+		return size, true
+	}
+	return 6 + length, len(b) >= 6+length
+}
+
+// DecodeModbusADU decodes the frame at the start of b. request says whether b
+// travels client to server: only then is the body read as address and
+// quantity, and only then is a function code with the exception bit invalid
+// instead of an exception.
+//
+// Framing is lenient, unlike the probe (ModbusADUSize): a non-zero protocol id
+// or a length outside 2..254 is decoded and reported as an event, because the
+// caller knows the connection is Modbus. It returns false when b does not yet
+// hold the whole frame.
 func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
-	size, ok := ModbusADUSize(b)
-	if !ok || size > len(b) {
+	size, complete := modbusFrameSize(b)
+	if !complete {
 		return ModbusMessage{}, false
 	}
+	b = b[:size]
 	m := ModbusMessage{
 		TransactionID: binary.BigEndian.Uint16(b[0:2]),
-		UnitID:        b[6],
+		Access:        ModbusUnknown,
 		Address:       -1,
 		Quantity:      -1,
 		WriteAddress:  -1,
 		WriteQuantity: -1,
 	}
+	if binary.BigEndian.Uint16(b[2:4]) != 0 {
+		m.Events = append(m.Events, ModbusEventInvalidProtocolID)
+	}
+	length := int(binary.BigEndian.Uint16(b[4:6]))
+	if length < 2 || length > 254 {
+		m.Events = append(m.Events, ModbusEventInvalidLength)
+		return m, true
+	}
+	m.UnitID = b[6]
+	m.RawFunction = b[7]
 	fc := b[7]
 	body := b[8:size]
 	if fc&0x80 != 0 {
-		m.IsException = true
 		fc &= 0x7f
+		if request {
+			m.Events = append(m.Events, ModbusEventInvalidFunction)
+		} else {
+			m.IsException = true
+		}
+	} else if fc == 0 && request {
+		m.Events = append(m.Events, ModbusEventInvalidFunction)
 	}
 	m.FunctionCode = fc
 
@@ -127,9 +176,11 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 	case known:
 		m.FunctionName, m.Access = f.name, f.access
 	case isUserDefinedModbusFC(fc):
-		m.FunctionName, m.Access = "User Defined", ModbusUnknown
+		m.FunctionName = "User Defined"
+	case fc == 0:
+		m.FunctionName = "Unknown"
 	default:
-		m.FunctionName, m.Access = "Unknown", ModbusUnknown
+		m.FunctionName = "Unknown"
 		m.Events = append(m.Events, ModbusEventUnknownFunction)
 	}
 
@@ -147,7 +198,7 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 	}
 
 	if known {
-		m.Events = append(m.Events, validateModbusBody(fc, int(binary.BigEndian.Uint16(b[4:6])), body, request)...)
+		m.Events = append(m.Events, validateModbusBody(fc, length, body, request)...)
 	}
 
 	if request && known {
