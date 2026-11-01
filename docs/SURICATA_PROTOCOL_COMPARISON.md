@@ -510,6 +510,32 @@ data TPDU shows protocol id 0x32, nothing for MMS. A connection request alone
 is decoded (rack and slot are attached to the later S7 messages) but reported
 below the confidence threshold.
 
-Open: real S7 traffic (specification in `S7_SYNTHETIC_CAPTURES.md`), and
-S7CommPlus: S7-1200 firmware 4 and later and S7-1500 use protocol id 0x72, which
-the probe does not accept, so those connections are not labelled S7.
+Open: real S7 traffic (specification in `S7_SYNTHETIC_CAPTURES.md`).
+
+## S7CommPlus (not validated)
+
+S7-1200 firmware 4 and later and S7-1500 use protocol id 0x72 over the same
+TPKT and COTP framing. `ProbeS7Plus` accepts a data TPDU whose PDU starts with
+0x72 and a version byte of 1 to 3; the connection is labelled `s7commplus` and
+the parser reports protocol `s7commplus` with the header fields: version,
+opcode (request 0x31, response 0x32, notification 0x33), function number and
+name for a small set of known functions (Explore, CreateObject, ...), sequence
+number and session id. `ProbeS7` still rejects 0x72, and each probe vetoes the
+port-102 hint for the other. Object and value trees, and everything after a
+TLS upgrade, are not decoded.
+
+**There is no reference here.** tshark 4.6.9 ships no S7CommPlus dissector
+(`tshark -G protocols` lists only `s7comm`), the Wireshark plugin is separate,
+and no S7CommPlus capture exists on the machine. The layout (header 0x72,
+version, length, data, trailer 0x72, version, 0000; request and response data
+start opcode, 2 reserved, function, 2 reserved, sequence, session id, flags)
+and the function numbers come from memory of the Wireshark plugin and are
+unverified. Tests cover the code against hand-built PDUs only. The accepted
+versions (1 to 3) are the likeliest to be wrong: if real traffic uses another
+value the probe vetoes the connection. Next: group G of
+`S7_SYNTHETIC_CAPTURES.md`, then check the header against a real capture and,
+if available, the Wireshark plugin.
+
+A known wrinkle: the connection request and confirmation on port 102 are
+labelled `s7` (first registered, hint only) and the data TPDUs `s7commplus`, so
+an S7CommPlus connection may split into two flow labels.

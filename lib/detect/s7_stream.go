@@ -32,6 +32,7 @@ type s7Conn struct {
 	rack, slot int
 	haveRack   bool
 	sawS7      bool // an S7 PDU was seen: the connection is S7, not only ISO-TSAP
+	sawPlus    bool // an S7CommPlus PDU was seen
 }
 
 const (
@@ -61,6 +62,12 @@ func (t *S7Tracker) Known(key string) bool {
 func (t *S7Tracker) SawS7(key string) bool {
 	c := t.conns[key]
 	return c != nil && c.sawS7
+}
+
+// SawS7Plus reports whether an S7CommPlus PDU has been seen on the connection.
+func (t *S7Tracker) SawS7Plus(key string) bool {
+	c := t.conns[key]
+	return c != nil && c.sawPlus
 }
 
 // FeedTCP adds a TCP segment and returns the messages it completes. key must be
@@ -108,10 +115,11 @@ func (t *S7Tracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool
 // startsConnection reports whether buf may begin an ISO-on-TCP connection that
 // is worth following: an S7 PDU, or on port 102 a COTP connection frame.
 func startsS7(buf []byte, hint bool) Result {
-	switch ProbeS7(buf) {
-	case Recognized:
+	r7, rp := ProbeS7(buf), ProbeS7Plus(buf)
+	if r7 == Recognized || rp == Recognized {
 		return Recognized
-	case Unrecognized:
+	}
+	if r7 == Unrecognized && rp == Unrecognized {
 		return Unrecognized
 	}
 	if !hint {
@@ -206,10 +214,13 @@ func (t *S7Tracker) frame(c *s7Conn, dir int, f S7Frame) (S7Message, bool) {
 	if m.HasS7 {
 		c.sawS7 = true
 	}
+	if m.Plus != nil {
+		c.sawPlus = true
+	}
 	switch {
 	case m.Rack >= 0 && (f.COTPType == cotpCR || f.COTPType == cotpCC):
 		c.rack, c.slot, c.haveRack = m.Rack, m.Slot, true
-	case m.HasS7 && m.Rack < 0 && c.haveRack:
+	case (m.HasS7 || m.Plus != nil) && m.Rack < 0 && c.haveRack:
 		m.Rack, m.Slot = c.rack, c.slot
 	}
 	return m, true

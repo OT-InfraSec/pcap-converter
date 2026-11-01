@@ -37,6 +37,12 @@ func Default() *Registry {
 		Probe:      ProbeS7,
 	})
 	r.Register(Protocol{
+		Name:       "S7CommPlus",
+		Transports: TCP,
+		HintPorts:  []HintPort{{TCP, S7Port}},
+		Probe:      ProbeS7Plus,
+	})
+	r.Register(Protocol{
 		Name:       "DNP3",
 		Transports: TCP | UDP,
 		HintPorts:  []HintPort{{TCP | UDP, 20000}},

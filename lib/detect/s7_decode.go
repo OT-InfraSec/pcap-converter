@@ -91,6 +91,7 @@ type S7Message struct {
 	TPDUSize int // negotiated COTP TPDU size in bytes, 0 if not given
 
 	HasS7        bool
+	Plus         *S7PlusHeader // set when the PDU is S7CommPlus (protocol id 0x72); HasS7 stays false
 	ROSCTR       byte
 	ROSCTRName   string
 	PDURef       uint16
@@ -281,6 +282,12 @@ func MessageFromFrames(frames []S7Frame) S7Message {
 		for _, f := range frames {
 			pdu = append(pdu, f.Payload...)
 		}
+	}
+	if len(pdu) > 0 && pdu[0] == S7PlusProtocolID {
+		if !decodeS7PlusPDU(&m, pdu) {
+			m.Events = append(m.Events, S7PlusEventInvalid)
+		}
+		return m
 	}
 	if len(pdu) == 0 || pdu[0] != S7ProtocolID {
 		return m // data of another protocol over COTP

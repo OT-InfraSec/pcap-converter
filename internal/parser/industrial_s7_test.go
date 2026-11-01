@@ -79,6 +79,19 @@ func TestParseS7(t *testing.T) {
 		assert.Equal(t, 0, info.AdditionalData["rack"])
 		assert.Equal(t, 2, info.AdditionalData["slot"])
 	})
+	t.Run("S7CommPlus is its own protocol", func(t *testing.T) {
+		p, tcp := newParser()
+		d := []byte{0x31, 0, 0, 0x04, 0xbb, 0, 0, 0, 5, 0, 0, 0, 9, 0x34, 0}
+		pdu := s7Cat([]byte{0x72, 1, 0, byte(len(d))}, d, []byte{0x72, 1, 0, 0})
+		info := p.parseS7(tcp(50000, 102, s7DT(pdu)), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "s7commplus", info.Protocol)
+		assert.Equal(t, 0.9, info.Confidence)
+		assert.Equal(t, "Request", info.MessageType)
+		assert.Equal(t, "Explore", info.AdditionalData["s7plus_function_name"])
+		assert.Equal(t, uint16(5), info.AdditionalData["s7plus_sequence"])
+		assert.Equal(t, uint32(9), info.AdditionalData["s7plus_session_id"])
+	})
 	t.Run("read var and write var", func(t *testing.T) {
 		p, tcp := newParser()
 		item := []byte{0x12, 0x0a, 0x10, 0x02, 0, 2, 0, 1, 0x84, 0, 0, 0x20} // DB1, byte address 4

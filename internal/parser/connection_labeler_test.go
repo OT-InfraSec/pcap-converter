@@ -100,3 +100,18 @@ func TestConnectionLabeler_Cap(t *testing.T) {
 	assert.Equal(t, "EtherNet/IP(TCP)", l.Label(pkt, "10.0.0.1", "10.0.0.2", model.VLANTag{}), "still labelled per packet")
 	assert.Equal(t, before, len(l.conns), "no growth past the cap")
 }
+
+func TestConnectionLabeler_S7Plus(t *testing.T) {
+	d := []byte{0x31, 0, 0, 0x04, 0xbb, 0, 0, 0, 5, 0, 0, 0, 9, 0x34, 0}
+	pdu := append(append([]byte{0x72, 1, 0, byte(len(d))}, d...), 0x72, 1, 0, 0)
+	frame := append([]byte{3, 0, 0, byte(7 + len(pdu)), 2, 0xf0, 0x80}, pdu...)
+
+	l := newConnectionLabeler(detect.Default())
+	assert.Equal(t, "s7commplus", tcpPkt(t, 50000, 102, frame, false)(l))
+	assert.Equal(t, "s7commplus", tcpPkt(t, 50000, 102, nil, false)(l), "label sticks")
+
+	// Classic S7comm on the same port is still s7.
+	s7 := []byte{3, 0, 0, 25, 2, 0xf0, 0x80, 0x32, 1, 0, 0, 0, 1, 0, 8, 0, 0, 0xf0, 0, 0, 1, 0, 1, 1, 0xe0}
+	l2 := newConnectionLabeler(detect.Default())
+	assert.Equal(t, "s7", tcpPkt(t, 50001, 102, s7, false)(l2))
+}

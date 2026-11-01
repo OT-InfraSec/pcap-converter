@@ -1440,14 +1440,16 @@ func (p *IndustrialProtocolParserImpl) parseS7(packet gopacket.Packet, timestamp
 	msgs := p.s7.FeedTCP(key, dstPort == detect.S7Port, detect.TCPSegment{
 		Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: payload,
 	}, hint)
-	known := p.s7.SawS7(key)
+	plus := p.s7.SawS7Plus(key)
+	known := p.s7.SawS7(key) || plus
 	p.s7Mu.Unlock()
 	if len(msgs) == 0 && !known {
 		return nil
 	}
 	hasS7 := false
 	for _, m := range msgs {
-		hasS7 = hasS7 || m.HasS7
+		hasS7 = hasS7 || m.HasS7 || m.Plus != nil
+		plus = plus || m.Plus != nil
 	}
 
 	info := &model.IndustrialProtocolInfo{
@@ -1469,6 +1471,10 @@ func (p *IndustrialProtocolParserImpl) parseS7(packet gopacket.Packet, timestamp
 	default:
 		info.Confidence = 0.5
 	}
+	if plus {
+		// S7CommPlus (S7-1200 fw 4+, S7-1500): same port and framing, different PDU.
+		info.Protocol = "s7commplus"
+	}
 	decodeS7Into(msgs, info)
 	return info
 }
@@ -1485,7 +1491,7 @@ func decodeS7Into(msgs []detect.S7Message, info *model.IndustrialProtocolInfo) {
 	var first *detect.S7Message
 	for i, m := range msgs {
 		events = append(events, m.Events...)
-		if first == nil && m.HasS7 {
+		if first == nil && (m.HasS7 || m.Plus != nil) {
 			first = &msgs[i]
 		}
 	}
@@ -1504,6 +1510,19 @@ func decodeS7Into(msgs []detect.S7Message, info *model.IndustrialProtocolInfo) {
 	}
 	if m.TPDUSize > 0 {
 		info.AdditionalData["tpdu_size"] = m.TPDUSize
+	}
+	if h := m.Plus; h != nil {
+		info.AdditionalData["s7plus_version"] = h.Version
+		info.AdditionalData["s7plus_opcode"] = h.Opcode
+		info.AdditionalData["s7plus_opcode_name"] = h.OpcodeName
+		info.MessageType = h.OpcodeName
+		if h.HasFields {
+			info.AdditionalData["s7plus_function"] = h.Function
+			info.AdditionalData["s7plus_function_name"] = h.FunctionName
+			info.AdditionalData["s7plus_sequence"] = h.Sequence
+			info.AdditionalData["s7plus_session_id"] = h.SessionID
+		}
+		return
 	}
 	if !m.HasS7 {
 		return
