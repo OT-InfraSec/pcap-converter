@@ -1251,6 +1251,10 @@ func (p *IndustrialProtocolParserImpl) decodeModbusInto(packet gopacket.Packet, 
 			info.AdditionalData["address"] = m.Address
 			info.AdditionalData["quantity"] = m.Quantity
 		}
+		if m.WriteAddress >= 0 {
+			info.AdditionalData["write_address"] = m.WriteAddress
+			info.AdditionalData["write_quantity"] = m.WriteQuantity
+		}
 	}
 	if len(codes) == 0 {
 		return

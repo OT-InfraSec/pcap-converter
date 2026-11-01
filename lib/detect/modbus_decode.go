@@ -35,7 +35,11 @@ type ModbusMessage struct {
 	// the message is a response, whose body layout differs.
 	Address  int
 	Quantity int
-	Events   []string
+	// WriteAddress and WriteQuantity hold the write range of function 23, whose
+	// request carries a read range (Address, Quantity) and a write range.
+	WriteAddress  int
+	WriteQuantity int
+	Events        []string
 }
 
 type modbusFunc struct {
@@ -101,6 +105,8 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 		UnitID:        b[6],
 		Address:       -1,
 		Quantity:      -1,
+		WriteAddress:  -1,
+		WriteQuantity: -1,
 	}
 	fc := b[7]
 	body := b[8:size]
@@ -139,6 +145,11 @@ func DecodeModbusADU(b []byte, request bool) (ModbusMessage, bool) {
 		case f.addrQty && len(body) >= 4:
 			m.Address = int(binary.BigEndian.Uint16(body[0:2]))
 			m.Quantity = int(binary.BigEndian.Uint16(body[2:4]))
+		case fc == 23 && len(body) >= 8:
+			m.Address = int(binary.BigEndian.Uint16(body[0:2]))
+			m.Quantity = int(binary.BigEndian.Uint16(body[2:4]))
+			m.WriteAddress = int(binary.BigEndian.Uint16(body[4:6]))
+			m.WriteQuantity = int(binary.BigEndian.Uint16(body[6:8]))
 		case f.addrOnly && len(body) >= 2:
 			m.Address = int(binary.BigEndian.Uint16(body[0:2]))
 			m.Quantity = 1

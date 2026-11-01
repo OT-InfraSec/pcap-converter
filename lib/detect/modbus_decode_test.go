@@ -27,6 +27,8 @@ func TestDecodeModbusADU(t *testing.T) {
 			fc: 5, fcName: "Write Single Coil", access: ModbusWrite, addr: 10, qty: 1, unit: 1, txn: 1, wantOK: true},
 		{name: "write multiple registers", in: adu(1, 0, 1, 16, []byte{0, 1, 0, 2, 4, 0, 1, 0, 2}),
 			fc: 16, fcName: "Write Multiple Registers", access: ModbusWrite, addr: 1, qty: 2, unit: 1, txn: 1, wantOK: true},
+		{name: "read/write multiple registers reports the read range", in: adu(1, 0, 1, 23, []byte{0x39, 0xd8, 0, 10, 0x39, 0xe0, 0, 2, 4, 0, 1, 0, 2}),
+			fc: 23, fcName: "Read/Write Multiple Registers", access: ModbusReadWrite, addr: 0x39d8, qty: 10, unit: 1, txn: 1, wantOK: true},
 		{name: "diagnostics", in: adu(1, 0, 1, 8, []byte{0, 1, 0, 0}),
 			fc: 8, fcName: "Diagnostics", access: ModbusDiagnostic, addr: -1, qty: -1, unit: 1, txn: 1, wantOK: true},
 		{name: "exception response", in: adu(1, 0, 1, 0x83, []byte{0x02}),
@@ -89,4 +91,11 @@ func FuzzDecodeModbusADU(f *testing.F) {
 	f.Add([]byte{0x2d, 0xe9, 0, 0, 0, 6, 3, 3, 0x37, 0xd0, 0, 4})
 	f.Add(adu(1, 0, 1, 0x83, []byte{2}))
 	f.Fuzz(func(t *testing.T, b []byte) { DecodeModbusADU(b, true); DecodeModbusADU(b, false) })
+}
+
+func TestDecodeModbusADUReadWriteWriteRange(t *testing.T) {
+	m, _ := DecodeModbusADU(adu(1, 0, 1, 23, []byte{0x39, 0xd8, 0, 10, 0x39, 0xe0, 0, 2, 4, 0, 1, 0, 2}), true)
+	if m.WriteAddress != 0x39e0 || m.WriteQuantity != 2 {
+		t.Errorf("write range = %d/%d", m.WriteAddress, m.WriteQuantity)
+	}
 }

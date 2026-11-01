@@ -374,3 +374,40 @@ match the source. We should not rely on those lines until corrected.
 2. Read the Modbus spec for F-04, then fetch `sawp-modbus` for the exact limits.
 3. Add content probes for DNP3 (`0x0564`) and Modbus, to cut port-only guesses.
 4. After the RFC review, record each decision in this file with its outcome.
+
+## Modbus message-level differential (`scripts/compare_modbus.py`)
+
+Runs Suricata 8.0.8 with the `modbus` eve logger and `scripts/modbus_dump`
+(our `lib/detect` decoder) on one capture and compares requests by (client,
+server, transaction id, unit, function, address) and responses by (server,
+client, transaction id, function, exception). Capture:
+`capture_2026-06-02_11.pcap` (only capture with Modbus).
+
+| | Suricata | Ours | Both |
+|---|---|---|---|
+| Requests | 12,307 | 12,356 | 12,307 |
+| Responses | 12,303 | 12,356 | 12,303 |
+
+Everything Suricata logs, we decode identically (function, unit, address,
+exception). The first run showed 662 FC23 mismatches: our decoder did not read
+the address of Read/Write Multiple Registers. Fixed (read range in
+`Address/Quantity`, write range in `WriteAddress/WriteQuantity`).
+
+Remaining difference: 49 requests and 53 responses of FC16 (qty 62, host
+192.168.24.111) exist only on our side. Cause: Suricata logs a `modbus.flooded`
+anomaly (pcap packet 168139) and gives up on that flow after its transaction
+limit (`request-flood`) is reached. The capture contains every packet twice,
+so unanswered duplicates pile up. Suricata stops tracking Modbus on that flow;
+we still decode it. **Suricata limitation, not a bug here.**
+
+Anomaly events: our decoder raised none (`unknown_function`,
+`invalid_exception_code`). Suricata raised `value_mismatch` 25,885 times, on
+every FC3 response, although the raw bytes are well formed (MBAP length 11,
+byte count 8, 4 registers). The `sawp-modbus` source (main branch, not the
+0.13.1 Suricata pins) sets `DATA_VALUE` only for a byte count outside 1..250 or
+different from the data length, so the cause is **unexplained**. Do not copy
+this event until it is understood.
+
+Not covered by real traffic: exception responses, FC1/2/4/5/6/15, diagnostics,
+`invalid_length`, `invalid_value`, `unsolicited_response`, `invalid_protocol_id`.
+Those need synthetic captures.

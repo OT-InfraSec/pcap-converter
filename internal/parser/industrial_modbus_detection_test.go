@@ -162,6 +162,15 @@ func TestParseModbusTCP_DecodesFunction(t *testing.T) {
 		assert.Equal(t, "Illegal Data Address", info.AdditionalData["exception"])
 		assert.NotContains(t, info.AdditionalData, "address", "response bodies are not read as requests")
 	})
+	t.Run("read/write multiple registers reports both ranges", func(t *testing.T) {
+		rw := []byte{0, 8, 0, 0, 0, 15, 1, 23, 0x39, 0xd8, 0, 10, 0x39, 0xe0, 0, 2, 4, 0, 1, 0, 2}
+		info := p.parseModbusTCP(tcp(50000, 502, rw), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, 0x39d8, info.AdditionalData["address"])
+		assert.Equal(t, 0x39e0, info.AdditionalData["write_address"])
+		assert.Equal(t, 2, info.AdditionalData["write_quantity"])
+		assert.True(t, info.IsConfiguration)
+	})
 	t.Run("pipelined ADUs are all counted", func(t *testing.T) {
 		info := p.parseModbusTCP(tcp(50000, 502, append(append([]byte(nil), modbusReadRequest...), writeReq...)), ts)
 		require.NotNil(t, info)
