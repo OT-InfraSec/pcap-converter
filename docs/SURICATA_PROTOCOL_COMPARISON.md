@@ -484,3 +484,32 @@ Intended differences, from reading Suricata's source:
 - **ListIdentity.** We also expose the device address from the item's socket
   address, which Suricata skips, and decode all identity items; Suricata logs
   the first.
+
+## S7comm differential against tshark (`scripts/compare_s7.py`)
+
+Suricata has no S7comm parser (`docs/protocols.md`, section 3.2), so the
+reference is tshark 4.6 (`-T pdml`, one S7 element per PDU, with
+`tcp.reassemble_out_of_order`). `scripts/s7_dump` uses the importer's
+`S7Tracker`. `scripts/s7_demo_pcap.py` builds the capture; there is no real
+S7 traffic in any capture we have.
+
+On the demo capture (16 connections, 62 S7 PDUs, 20 COTP connection frames) all
+PDUs and frames agree with exact counts: Setup communication, Read Var and Write
+Var with 1 to 3 items in every area, reads that return an error, Ack with an
+error class, PLC stop and start, block, time and programmer userdata,
+Request download and Start upload, SZL `0x001C` (seven strings) and SZL `0x0011`
+(three records with order number, module type and version words), PDUs
+pipelined, split in the headers and in the PDU, a 480-byte reply in five
+segments, COTP segmentation without EOT, a retransmission and two segments
+swapped, and connection requests for rack 0 to 2 and slots 0 to 3. The two
+malformed PDUs raise `invalid_s7`; tshark still decodes the one item that was
+present in the second, as we do.
+
+The flow label for port 102 follows the content (finding F-05): `s7` once a
+data TPDU shows protocol id 0x32, nothing for MMS. A connection request alone
+is decoded (rack and slot are attached to the later S7 messages) but reported
+below the confidence threshold.
+
+Open: real S7 traffic (specification in `S7_SYNTHETIC_CAPTURES.md`), and
+S7CommPlus: S7-1200 firmware 4 and later and S7-1500 use protocol id 0x72, which
+the probe does not accept, so those connections are not labelled S7.
