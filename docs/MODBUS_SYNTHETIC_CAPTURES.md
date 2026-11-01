@@ -86,7 +86,7 @@ Connection A1, all requests answered normally:
 | A1.12 | FC22 Mask Write Register, addr 4, and `00F2`, or `0025` | echo |
 | A1.13 | FC7 Read Exception Status, no data | 1 byte `6D` |
 | A1.14 | FC11 Get Comm Event Counter, no data | status `FFFF`, count `0108` |
-| A1.15 | FC12 Get Comm Event Log, no data | count `08`, status/event bytes, 8 bytes in total as the spec's example |
+| A1.15 | FC12 Get Comm Event Log, no data | byte count `08`, status `0000`, event count `0108`, message count `0021`, events `20 00` |
 | A1.16 | FC17 Report Server ID, no data | count 3, 3 bytes |
 | A1.17 | FC24 Read FIFO Queue, addr `04DE` | byte count `0006`, fifo count `0002`, 2 values |
 | A1.18 | FC20 Read File Record: byte count 7, ref 6, file 4, rec 1, len 2 | resp length 6, then group length 5, ref 6, 2 regs |
@@ -123,7 +123,7 @@ For each row the response is `ADU(txn, unit, fc|0x80, code)`.
 | B12 | FC7 (no data) | 02 Illegal Data Address | none | `invalid_exception_code` (sawp: illegal address on FC 7-14, 17-19). **Divergence** |
 | B13 | FC17 | 03 Illegal Data Value | none | `invalid_exception_code`. **Divergence** |
 | B14 | FC20 Read File Record (valid body) | 08 Memory Parity Error | none | none (allowed on file functions) |
-| B15 | FC3 | exception response with **empty** data (length 3: unit, fc|0x80, no code byte is length 2) | no exception code | Suri: `invalid_length` or none; record what happens |
+| B15 | FC3 | exception response with **no code byte** (MBAP length 2: unit and `83` only) | no exception code | Suri: `invalid_length` or none; record what happens |
 
 ### Group C: function codes outside the public set (one connection, warm-up first)
 
@@ -205,7 +205,7 @@ tools agree.
 | G3 | Long response: FC3 qty 125 (response ADU 259 bytes) with the server's MSS clamped to **100**, so the response arrives in three segments | needs reassembly; Phase 2 evidence |
 | G4 | Long request: FC16 qty 123 (ADU 260 bytes) with the client's MSS clamped to 100 | same, request side |
 | G5 | Segments out of order inside G3 (swap segments 2 and 3, then send them) | |
-| G6 | One TCP segment with **two connections' worth** is impossible; instead: two connections open at once, interleaved packets, same host pair, different source ports, different txn spaces | flow keying |
+| G6 | Two connections open at once, packets interleaved, same host pair, different source ports, different txn spaces | flow keying |
 | G7 | Keepalive: connection idle 30 s with TCP keepalives, then more requests | |
 | G8 | RST from the server in the middle of a response (after 4 bytes of the response) | partial ADU then reset |
 | G9 | Zero-window or 1-byte segments: the response sent one byte per segment | extreme reassembly |
@@ -265,8 +265,8 @@ tool you used to produce it.
 2. `tshark -r x.pcap -Y mbtcp` shows the ADUs you listed in the manifest (it
    reads malformed ones too, with an expert warning).
 3. Each pcap opens as classic pcap: `file x.pcap` says "pcap capture file".
-4. Scenario count: group A 23 requests, B 15, C 6 (one connection per group
-   row for D to I).
+4. Counts: group A is one connection with 23 exchanges; B and C are one
+   connection each; every row of D to I is its own connection.
 
 ## 6. What we do with the result (not for the agent)
 
