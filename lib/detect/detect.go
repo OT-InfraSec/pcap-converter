@@ -111,6 +111,21 @@ func (r *Registry) Protocols() []Protocol {
 	return append([]Protocol(nil), r.protocols...)
 }
 
+// Without returns a copy of the registry without the named protocols.
+func (r *Registry) Without(names ...string) *Registry {
+	out := &Registry{}
+	for _, p := range r.protocols {
+		drop := false
+		for _, n := range names {
+			drop = drop || p.Name == n
+		}
+		if !drop {
+			out.protocols = append(out.protocols, p)
+		}
+	}
+	return out
+}
+
 // Detect returns all protocols that match. A protocol with a probe matches on
 // Recognized (any port) or, when a port hint applies, also on Incomplete.
 // Unrecognized never matches, even on a hint port: a Modbus port carrying

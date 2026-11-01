@@ -18,7 +18,6 @@ import (
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
-	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	liblayers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -71,11 +70,15 @@ type GopacketParser struct {
 
 	repo             repository.Repository
 	industrialParser IndustrialProtocolParser
-	connLabeler      *connectionLabeler
+	connLabeler      ConnectionLabeler
 }
 
 // DecodeFailures returns how many frames of the last ParseFile had a decode failure.
 func (p *GopacketParser) DecodeFailures() int { return p.decodeFailures }
+
+// SetConnectionLabeler replaces the labeler that gives the packets of a
+// connection one protocol label. It must be called before parsing starts.
+func (p *GopacketParser) SetConnectionLabeler(l ConnectionLabeler) { p.connLabeler = l }
 
 func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID string) *GopacketParser {
 	// Initialize device counter from existing devices
@@ -108,7 +111,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),       // Collect stats for deferred writing
 		repo:               repo,
 		industrialParser:   NewIndustrialProtocolParser(),
-		connLabeler:        newConnectionLabeler(detect.Default()),
+		connLabeler:        newConnectionLabeler(labelerRegistry(DefaultIndustrialParserConfig())),
 	}
 
 	// Import existing devices from repository into manager

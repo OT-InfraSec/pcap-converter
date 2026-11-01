@@ -137,7 +137,8 @@ pcap-importer-go/
 │   │   ├── sqlite_repository.go # SQLite implementation
 │   │   └── *_test.go            # Tests
 │   │
-│   │   └── connection_labeler.go # Per-connection protocol label from the detect registry
+│   │   ├── connection_labeler.go # Per-connection protocol label (ConnectionLabeler interface)
+│   │   └── industrial_{enip,modbus,dnp3,s7}.go # Map lib/detect messages to IndustrialProtocolInfo
 │   │
 │   ├── dns/                     # DNS post-processing
 │   │   ├── dns_processor.go

@@ -9,6 +9,34 @@ import (
 	"github.com/google/gopacket"
 )
 
+// ConnectionLabeler names the application protocol of a packet's connection,
+// or returns "" when it has no opinion. GopacketParser takes one by interface so
+// a different labeler (or a fake in tests) can replace the registry-based one.
+type ConnectionLabeler interface {
+	Label(packet gopacket.Packet, srcIP, dstIP string, vlan model.VLANTag) string
+}
+
+var _ ConnectionLabeler = (*connectionLabeler)(nil)
+
+// labelerRegistry is the detection registry without the protocols the
+// configuration disables, so a disabled protocol is neither parsed nor labelled.
+func labelerRegistry(cfg IndustrialParserConfig) *detect.Registry {
+	var off []string
+	for name, enabled := range map[string]bool{
+		"EtherNet/IP": cfg.EnableEtherNetIP,
+		"OPC UA":      cfg.EnableOPCUA,
+		"Modbus":      cfg.EnableModbus,
+		"DNP3":        cfg.EnableDNP3,
+		"S7":          cfg.EnableS7,
+		"S7CommPlus":  cfg.EnableS7,
+	} {
+		if !enabled {
+			off = append(off, name)
+		}
+	}
+	return detect.Default().Without(off...)
+}
+
 // maxTrackedConnections bounds the labeler's memory on very large captures.
 // Past the limit new connections are labelled per packet only.
 const maxTrackedConnections = 500_000

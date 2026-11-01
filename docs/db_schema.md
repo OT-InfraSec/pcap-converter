@@ -254,3 +254,14 @@ communication_patterns  -->  tenants : tenant_id:id
 - Strings are truncated to 255 bytes and stripped of control characters; line breaks and tabs become spaces (software versions are multi-line). At most 100,000 distinct rows are stored per import (a warning is logged).
 - CDP IP prefixes are also written to `subnets` with `source = cdp`, `kind = advertised`, VLAN of the frame.
 - No `user_version` bump (stays 1).
+
+## Flow protocol labels
+
+`flows.protocol` is the application protocol of a connection, chosen by content
+where the detection registry has a probe (see `lib/detect`): `modbus`,
+`EtherNet/IP(TCP)`, `EtherNet/IP(UDP)`, `s7`, `s7commplus`, `dnp3`, plus the
+transport-level names (`tcp`, `udp`) and the labels of the other analysers
+(`http`, `dns`, ...). A connection's handshake and acknowledgement packets
+carry no payload, so on a port with a hint they get the hint's label, and
+that can differ from the content label (for S7CommPlus on port 102 the
+handshake is `s7`). `s7commplus` is not validated against real traffic.

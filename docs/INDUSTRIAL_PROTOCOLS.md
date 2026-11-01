@@ -170,6 +170,24 @@ The OPC UA implementation provides:
 - Service call classification
 - Security mode detection (None, Sign, SignAndEncrypt)
 
+### Modbus, S7comm, S7CommPlus and DNP3
+
+These protocols are recognised by their content (`lib/detect`); the port is only
+a hint, and other data on the port is not labelled. Each has a strict probe, a
+decoder, and for TCP a tracker that orders segments and joins split frames.
+Details and the tshark or Suricata comparison are in
+`SURICATA_PROTOCOL_COMPARISON.md`.
+
+| Protocol | Flow label | Port hint | Decoded | Validated against |
+|---|---|---|---|---|
+| Modbus TCP | `modbus` | 502 | function, addresses, exceptions, validation events | Suricata, real and synthetic captures |
+| S7comm | `s7` | 102 | COTP TSAPs (rack, slot), setup, read and write items, PLC control, userdata, SZL identity | tshark, hand-built captures only |
+| S7CommPlus | `s7commplus` | 102 | PDU header: version, opcode, function, sequence, session id | **nothing** (no reference dissector or capture) |
+| DNP3 | `dnp3` | 20000 (TCP and UDP) | link, transport reassembly, application function, IIN, object headers | tshark, hand-built captures only |
+
+`EnableModbus`, `EnableS7` (also S7CommPlus), `EnableDNP3` and the other enable
+flags switch both the parser and the connection labeler.
+
 ## Error Handling
 
 ### Error Types

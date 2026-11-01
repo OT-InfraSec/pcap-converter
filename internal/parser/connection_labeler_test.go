@@ -6,6 +6,7 @@ import (
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 )
@@ -114,4 +115,39 @@ func TestConnectionLabeler_S7Plus(t *testing.T) {
 	s7 := []byte{3, 0, 0, 25, 2, 0xf0, 0x80, 0x32, 1, 0, 0, 0, 1, 0, 8, 0, 0, 0xf0, 0, 0, 1, 0, 1, 1, 0xe0}
 	l2 := newConnectionLabeler(detect.Default())
 	assert.Equal(t, "s7", tcpPkt(t, 50001, 102, s7, false)(l2))
+}
+
+func TestLabelerRegistryHonoursTheEnableFlags(t *testing.T) {
+	read := dnp3TestFrame(0xc4, 3, 10, []byte{0xc1, 0x01, 60, 1, 0x06})
+	s7 := []byte{3, 0, 0, 25, 2, 0xf0, 0x80, 0x32, 1, 0, 0, 0, 1, 0, 8, 0, 0, 0xf0, 0, 0, 1, 0, 1, 1, 0xe0}
+	plus := []byte{3, 0, 0, 7 + 4 + 15 + 4, 2, 0xf0, 0x80, 0x72, 1, 0, 15, 0x31, 0, 0, 0x04, 0xbb, 0, 0, 0, 1, 0, 0, 0, 0, 0x34, 0, 0x72, 1, 0, 0}
+
+	all := newConnectionLabeler(labelerRegistry(DefaultIndustrialParserConfig()))
+	assert.Equal(t, "dnp3", tcpPkt(t, 50000, 20000, read, false)(all))
+	assert.Equal(t, "s7", tcpPkt(t, 50001, 102, s7, false)(all))
+	assert.Equal(t, "s7commplus", tcpPkt(t, 50002, 102, plus, false)(all))
+
+	cfg := DefaultIndustrialParserConfig()
+	cfg.EnableDNP3, cfg.EnableS7 = false, false
+	off := newConnectionLabeler(labelerRegistry(cfg))
+	assert.Equal(t, "", tcpPkt(t, 50000, 20000, read, false)(off))
+	assert.Equal(t, "", tcpPkt(t, 50001, 102, s7, false)(off))
+	assert.Equal(t, "", tcpPkt(t, 50002, 102, plus, false)(off))
+	assert.Equal(t, "", tcpPkt(t, 50003, 102, nil, true)(off), "no port hint for a disabled protocol")
+}
+
+// fakeLabeler shows GopacketParser takes any ConnectionLabeler.
+type fakeLabeler struct{ calls int }
+
+func (f *fakeLabeler) Label(gopacket.Packet, string, string, model.VLANTag) string {
+	f.calls++
+	return "fake"
+}
+
+func TestGopacketParserTakesAnInjectedLabeler(t *testing.T) {
+	p := &GopacketParser{}
+	f := &fakeLabeler{}
+	p.SetConnectionLabeler(f)
+	assert.Equal(t, "fake", p.connLabeler.Label(nil, "", "", model.VLANTag{}))
+	assert.Equal(t, 1, f.calls)
 }

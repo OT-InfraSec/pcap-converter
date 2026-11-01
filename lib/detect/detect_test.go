@@ -255,3 +255,18 @@ func TestProbeENIPUDP(t *testing.T) {
 		t.Fatal("implicit I/O must not be recognised on TCP")
 	}
 }
+
+func TestRegistryWithout(t *testing.T) {
+	r := Default()
+	n := len(r.Protocols())
+	w := r.Without("S7", "S7CommPlus", "nope")
+	if len(w.Protocols()) != n-2 || len(r.Protocols()) != n {
+		t.Fatalf("without: %d of %d, original %d", len(w.Protocols()), n, len(r.Protocols()))
+	}
+	if _, ok := w.Lookup("S7"); ok {
+		t.Error("S7 must be gone")
+	}
+	if got := w.HintPorts()[102]; got != "" {
+		t.Errorf("port 102 hint remains: %q", got)
+	}
+}
