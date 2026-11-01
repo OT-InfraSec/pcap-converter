@@ -56,6 +56,8 @@ func flowLabel(name string, t detect.Transport) string {
 		return "EtherNet/IP(UDP)"
 	case "Modbus":
 		return "modbus"
+	case "S7":
+		return "s7"
 	}
 	return name
 }

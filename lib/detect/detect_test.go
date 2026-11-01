@@ -127,7 +127,7 @@ func TestRegistryPortOnlyProtocols(t *testing.T) {
 
 func TestRegistryHintPorts(t *testing.T) {
 	got := Default().HintPorts()
-	want := map[uint16]string{44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3"}
+	want := map[uint16]string{44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3", 102: "S7"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
 	}
@@ -136,8 +136,31 @@ func TestRegistryHintPorts(t *testing.T) {
 			t.Fatalf("port %d: got %q want %q", p, got[p], n)
 		}
 	}
-	if _, ok := got[102]; ok {
-		t.Fatal("port 102 must not be claimed as S7 (finding F-05)")
+}
+
+// Port 102 is shared with other ISO-TSAP users (finding F-05): it is a hint for
+// S7 only. Content decides, and another protocol's data vetoes the hint.
+func TestPort102IsOnlyAHintForS7(t *testing.T) {
+	r := Default()
+	s7 := dtFrame(s7PDU(1, 1, []byte{0xf0, 0, 0, 1, 0, 1, 1, 0xe0}, nil))
+	mms := dtFrame([]byte{0x01, 0x01, 0x01, 0x00, 0x61, 0x02, 0x02, 0x01})
+	find := func(payload []byte, port uint16) *Match {
+		for _, m := range r.Detect(TCP, 50000, port, payload) {
+			if m.Protocol == "S7" {
+				m := m
+				return &m
+			}
+		}
+		return nil
+	}
+	if m := find(s7, 102); m == nil || m.Result != Recognized || !m.PortHint {
+		t.Errorf("S7 on 102: %+v", m)
+	}
+	if m := find(s7, 4000); m == nil || m.Result != Recognized || m.PortHint {
+		t.Errorf("S7 on another port is recognised by content: %+v", m)
+	}
+	if m := find(mms, 102); m != nil && m.Result == Recognized {
+		t.Errorf("MMS must not be S7: %+v", m)
 	}
 }
 
