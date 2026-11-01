@@ -584,14 +584,12 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 
 	srcDevice, err := r.GetDeviceForAddress(srcAddress)
 	if err != nil {
-		log.Fatalf("Error getting source device for address %s: %v", srcAddress, err)
-		return err
+		return fmt.Errorf("flow source device %s: %w", srcAddress, err)
 	}
 
 	destDevice, err := r.GetDeviceForAddress(destAddress)
 	if err != nil {
-		log.Fatalf("Error getting destination device for address %s: %v", destAddress, err)
-		return err
+		return fmt.Errorf("flow destination device %s: %w", destAddress, err)
 	}
 
 	if flow.Duration <= 0 {
@@ -626,14 +624,13 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		intPtrToArg(flow.VlanInnerID),
 	)
 	if err != nil {
-		log.Fatalf("Error inserting flow: %v", err)
-		return err
+		return fmt.Errorf("insert flow: %w", err)
 	}
 	flow.ID, err = result.LastInsertId()
 	if err != nil {
-		log.Fatalf("Error getting last insert ID for flow: %v", err)
+		return fmt.Errorf("last insert id for flow: %w", err)
 	}
-	return err
+	return nil
 }
 
 func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model2.Flow, error) {

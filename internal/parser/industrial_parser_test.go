@@ -485,7 +485,7 @@ func createEtherNetIPTCPPacket() gopacket.Packet {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 
-	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, tcpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, tcpLayer, gopacket.Payload(enipEncap(0x63, 0, nil)))
 
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
@@ -514,7 +514,7 @@ func createEtherNetIPUDPPacket() gopacket.Packet {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 
-	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, udpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, udpLayer, gopacket.Payload(enipEncap(0x63, 0, nil)))
 
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }

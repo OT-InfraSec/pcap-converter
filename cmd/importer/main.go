@@ -14,6 +14,7 @@ import (
 	"github.com/InfraSecConsult/pcap-importer-go/internal/parser"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 	"github.com/InfraSecConsult/pcap-importer-go/internal/version"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 
 	"github.com/spf13/cobra"
@@ -506,19 +507,31 @@ func formatProtocolStats(stats []*model.ProtocolUsageStats, format string) error
 
 // Helper functions for industrial analysis
 
+// industrialPortLabels maps port strings to the protocol labels stored in the
+// database, derived from the detection registry's hint ports.
+func industrialPortLabels() map[string]string {
+	labels := map[string]string{
+		"EtherNet/IP": "ethernetip",
+		"OPC UA":      "opcua",
+		"Modbus":      "modbus",
+		"DNP3":        "dnp3",
+	}
+	out := make(map[string]string)
+	for port, name := range detect.Default().HintPorts() {
+		if label, ok := labels[name]; ok {
+			out[strconv.Itoa(int(port))] = label
+		}
+	}
+	return out
+}
+
 // analyzeFlowForIndustrialProtocols analyzes a flow for industrial protocol usage
 func analyzeFlowForIndustrialProtocols(flow *model.Flow) []model.IndustrialProtocolInfo {
 	var protocols []model.IndustrialProtocolInfo
 
-	// Check for common industrial protocol ports
-	industrialPorts := map[string]string{
-		"44818": "ethernetip", // EtherNet/IP
-		"2222":  "ethernetip", // EtherNet/IP UDP
-		"4840":  "opcua",      // OPC UA
-		"502":   "modbus",     // Modbus TCP
-		"102":   "s7",         // Siemens S7
-		"20000": "dnp3",       // DNP3
-	}
+	// Ports are hints from the detection registry; confidence stays moderate
+	// because no payload is inspected here.
+	industrialPorts := industrialPortLabels()
 
 	// Check destination ports for protocol detection
 	if flow.DestinationPorts != nil {

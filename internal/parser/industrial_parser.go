@@ -1,13 +1,13 @@
 package parser
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	lib_layers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
@@ -738,54 +738,47 @@ func (p *IndustrialProtocolParserImpl) safeIsRealTimeData(layer interface{}) boo
 }
 
 // Port detection methods
-func (p *IndustrialProtocolParserImpl) isEtherNetIPPort(packet gopacket.Packet) bool {
-	if p.isLikelyEtherNetIPPayload(packet) {
-		return true
-	}
+
+// transportPayload returns the transport protocol, ports and application
+// payload (not the TCP/UDP header) of a packet.
+func transportPayload(packet gopacket.Packet) (detect.Transport, uint16, uint16, []byte, bool) {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
-		return tcp.SrcPort == 44818 || tcp.DstPort == 44818
+		return detect.TCP, uint16(tcp.SrcPort), uint16(tcp.DstPort), tcp.Payload, true
 	}
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		return udp.SrcPort == 2222 || udp.DstPort == 2222
+		return detect.UDP, uint16(udp.SrcPort), uint16(udp.DstPort), udp.Payload, true
 	}
-	return false
+	return 0, 0, 0, nil, false
 }
 
-// isLikelyEtherNetIPPayload returns true if application payload looks like an ENIP encapsulation header.
-func (p *IndustrialProtocolParserImpl) isLikelyEtherNetIPPayload(packet gopacket.Packet) bool {
-	if app := packet.TransportLayer(); app != nil {
-		b := app.LayerContents()
-		if len(b) < 24 { // ENIP encapsulation header is 24 bytes
-			return false
-		}
-		cmd := binary.LittleEndian.Uint16(b[0:2])
-		length := int(binary.LittleEndian.Uint16(b[2:4]))
-		// basic sanity checks: non\-zero command and length consistent with total payload
-		if cmd == 0 || length < 0 {
-			return false
-		}
-		// ensure claimed length fits in the remaining payload
-		if length <= len(b)-24 {
-			return true
+// detectEtherNetIP runs the registry's EtherNet/IP probe on the packet payload.
+// The returned match is nil if the packet is not EtherNet/IP.
+func (p *IndustrialProtocolParserImpl) detectEtherNetIP(packet gopacket.Packet) *detect.Match {
+	return p.detectProtocol(packet, "EtherNet/IP")
+}
+
+// detectProtocol runs the registry on the packet payload and returns the match
+// for the named protocol, or nil.
+func (p *IndustrialProtocolParserImpl) detectProtocol(packet gopacket.Packet, name string) *detect.Match {
+	transport, src, dst, payload, ok := transportPayload(packet)
+	if !ok {
+		return nil
+	}
+	for _, m := range detect.Default().Detect(transport, src, dst, payload) {
+		if m.Protocol == name {
+			m := m
+			return &m
 		}
 	}
-	return false
+	return nil
 }
 
 func (p *IndustrialProtocolParserImpl) isOPCUAPort(packet gopacket.Packet) bool {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
 		return tcp.SrcPort == 4840 || tcp.DstPort == 4840
-	}
-	return false
-}
-
-func (p *IndustrialProtocolParserImpl) isModbusTCPPort(packet gopacket.Packet) bool {
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		tcp := tcpLayer.(*layers.TCP)
-		return tcp.SrcPort == 502 || tcp.DstPort == 502
 	}
 	return false
 }
@@ -830,10 +823,10 @@ func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet
 	}
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		if udp.SrcPort == 2222 {
+		if udp.SrcPort == 2222 || udp.SrcPort == 44818 {
 			return "inbound"
 		}
-		if udp.DstPort == 2222 || udp.DstPort == 138 {
+		if udp.DstPort == 2222 || udp.DstPort == 44818 || udp.DstPort == 138 {
 			return "outbound"
 		}
 	}
@@ -848,60 +841,80 @@ func (p *IndustrialProtocolParserImpl) parseOPCUA(packet gopacket.Packet, timest
 	return info
 }
 
-// parseModbusTCP parses Modbus TCP protocol
+// parseModbusTCP parses Modbus TCP protocol.
+//
+// Detection is by content (an MBAP header with protocol ID 0, a consistent
+// length and a valid function code); port 502 only raises confidence. A
+// packet on port 502 without payload, such as a handshake segment, is
+// reported below the default confidence threshold.
 func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
-	if !p.isModbusTCPPort(packet) {
+	m := p.detectProtocol(packet, "Modbus")
+	if m == nil {
 		return nil
 	}
 
 	info := &model.IndustrialProtocolInfo{
 		Protocol:       "modbus",
 		Timestamp:      timestamp,
-		Confidence:     0.7,
 		DeviceIdentity: make(map[string]interface{}),
 		SecurityInfo:   make(map[string]interface{}),
 		AdditionalData: make(map[string]interface{}),
 	}
+	portErr := p.extractPortInfo(packet, info, []uint16{detect.ModbusPort})
 
-	if err := p.extractPortInfo(packet, info, []uint16{502}); err != nil {
-		return nil
+	switch {
+	case m.Result == detect.Recognized && m.PortHint && portErr == nil:
+		info.Confidence = 0.9
+	case m.Result == detect.Recognized:
+		info.Confidence = 0.8
+	default:
+		info.Confidence = 0.5
 	}
-
-	info.Confidence = 0.8
 	return info
 }
 
-// parseEtherNetIP parses EtherNet/IP (ENIP) protocol
+// parseEtherNetIP parses EtherNet/IP (ENIP) protocol.
+//
+// Detection is by content (see detect.ProbeENIPEncapsulation); the port only
+// raises confidence. A packet on an EtherNet/IP port that carries no payload
+// (for example a TCP handshake segment) or only a partial header is reported
+// with low confidence, which the default threshold filters out.
 func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
-	if !p.isEtherNetIPPort(packet) {
+	m := p.detectEtherNetIP(packet)
+	if m == nil {
 		return nil
 	}
 
 	protocolName := "EtherNet/IP"
-	ports := []uint16{44818, 2222}
+	ports := []uint16{detect.ENIPPortExplicit, detect.ENIPPortImplicit}
 	switch packet.TransportLayer().(type) {
 	case *layers.TCP:
 		protocolName = "EtherNet/IP(TCP)"
-		ports = []uint16{44818}
+		ports = []uint16{detect.ENIPPortExplicit}
 	case *layers.UDP:
 		protocolName = "EtherNet/IP(UDP)"
-		ports = []uint16{2222}
+		ports = []uint16{detect.ENIPPortExplicit, detect.ENIPPortImplicit}
 	}
 
 	info := &model.IndustrialProtocolInfo{
 		Protocol:       protocolName,
 		Timestamp:      timestamp,
-		Confidence:     0.6,
 		DeviceIdentity: make(map[string]interface{}),
 		SecurityInfo:   make(map[string]interface{}),
 		AdditionalData: make(map[string]interface{}),
 	}
-	// Determine ports and direction
-	if err := p.extractPortInfo(packet, info, ports); err != nil {
-		// Not necessarily an error; leave default info
-		info.Confidence = 0.5
-	} else {
+	// Port and direction are best effort; a content match on another port is
+	// still EtherNet/IP.
+	portErr := p.extractPortInfo(packet, info, ports)
+
+	switch {
+	case m.Result == detect.Recognized && m.PortHint && portErr == nil:
 		info.Confidence = 0.9
+	case m.Result == detect.Recognized:
+		info.Confidence = 0.8
+	default:
+		// Hint port with an empty or partial payload: not enough evidence.
+		info.Confidence = 0.5
 	}
 	return info
 }

@@ -299,7 +299,17 @@ func TestIndustrialProtocolParserImpl_extractPortInfo(t *testing.T) {
 // Helper functions for creating test packets
 
 func createEtherNetIPPacket(t *testing.T) gopacket.Packet {
-	return createTCPPacket(t, 12345, 44818)
+	// Detection is by content, so the packet carries a real ListIdentity
+	// encapsulation header. A bare SYN on the port is not EtherNet/IP.
+	eth, ip, tcp := getTCPPacketLayers(12345, 44818)
+	tcp.SYN = false
+	tcp.ACK = true
+
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+	err := gopacket.SerializeLayers(buffer, opts, eth, ip, tcp, gopacket.Payload(enipEncap(0x63, 0, nil)))
+	require.NoError(t, err)
+	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
 func createOPCUAPacket(t *testing.T) gopacket.Packet {

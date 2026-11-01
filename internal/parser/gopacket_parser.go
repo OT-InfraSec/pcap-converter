@@ -18,6 +18,7 @@ import (
 
 	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	liblayers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -70,6 +71,7 @@ type GopacketParser struct {
 
 	repo             repository.Repository
 	industrialParser IndustrialProtocolParser
+	connLabeler      *connectionLabeler
 }
 
 // DecodeFailures returns how many frames of the last ParseFile had a decode failure.
@@ -106,6 +108,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),       // Collect stats for deferred writing
 		repo:               repo,
 		industrialParser:   NewIndustrialProtocolParser(),
+		connLabeler:        newConnectionLabeler(detect.Default()),
 	}
 
 	// Import existing devices from repository into manager
@@ -537,7 +540,9 @@ func (p *GopacketParser) ParseFile() error {
 	}()
 
 	p.decodeFailures, p.firstDecodeErr = 0, nil
+	var packetsRead, packetsQueued int
 	for packet := range packetSource.Packets() {
+		packetsRead++
 		if errLayer := packet.ErrorLayer(); errLayer != nil {
 			p.decodeFailures++
 			if p.firstDecodeErr == nil {
@@ -555,6 +560,14 @@ func (p *GopacketParser) ParseFile() error {
 			srcPort, dstPort       string
 			srcPortNum, dstPortNum uint16
 			flowProto              string
+			// An ARP request names its target by IP only. The target may not
+			// exist (a host ARPing for public addresses is a misconfiguration,
+			// not 300 devices), so a request creates no device for the target
+			// and no flow to it. The packet itself is always stored. A reply
+			// from the target creates both, as before.
+			arpRequest bool
+			// An ARP probe uses 0.0.0.0 as sender: that is no device.
+			arpProbe bool
 		)
 
 		vlan := extractVLANTag(packet)
@@ -604,9 +617,10 @@ func (p *GopacketParser) ParseFile() error {
 				"operation":      arp.Operation,
 			}
 
-			if arp.Operation == layers.ARPRequest {
-				continue // Skip ARP requests
-			}
+			// Requests are stored like any other packet: dropping them hid ARP
+			// scans and storms and the senders that only ever send requests.
+			arpRequest = arp.Operation == layers.ARPRequest
+			arpProbe = arpRequest && net.IP(arp.SourceProtAddress).IsUnspecified()
 
 			protocols = append(protocols, "arp")
 		}
@@ -648,11 +662,6 @@ func (p *GopacketParser) ParseFile() error {
 				"typeCode": typeCode,
 				"checksum": icmp.Checksum,
 			}
-			if strings.Contains(typeCode, "DestinationUnreachable") {
-				// Skip packets that are ICMP Destination Unreachable
-				continue
-			}
-
 			protocols = append(protocols, "icmp")
 		}
 
@@ -936,11 +945,9 @@ func (p *GopacketParser) ParseFile() error {
 		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil {
 			dns := dnsLayer.(*layers.DNS)
 
-			if dns.ResponseCode != layers.DNSResponseCodeNoErr || len(dns.Answers) == 0 {
-				// Skip DNS packets with errors
-				continue
-			}
-
+			// Every DNS packet is stored. Only an answered response feeds the
+			// dns_queries table; queries, empty responses and error responses
+			// (NXDOMAIN, SERVFAIL, ...) are still packets and part of the flow.
 			flowProto = "dns"
 			layersMap["dns"] = map[string]interface{}{
 				"qr":          dns.QR,
@@ -958,8 +965,13 @@ func (p *GopacketParser) ParseFile() error {
 				"answers":     dns.Answers,
 				"authorities": dns.Authorities,
 				"additionals": dns.Additionals,
+				"rcode":       dns.ResponseCode.String(),
 			}
 			protocols = append(protocols, "dns")
+		}
+
+		if dnsLayer := packet.Layer(layers.LayerTypeDNS); dnsLayer != nil && dnsAnswered(dnsLayer.(*layers.DNS)) {
+			dns := dnsLayer.(*layers.DNS)
 			// Update service for DNS
 			dnsQuery := DNSQuery{
 				QueryingDeviceIP:  srcIP,
@@ -1444,15 +1456,16 @@ func (p *GopacketParser) ParseFile() error {
 
 		// Send the packet to the batch processing goroutine
 		packetChan <- modelPacket
+		packetsQueued++
 
 		// Device extraction and storage - optimized with cached values
 		// Handle MAC addresses
-		if srcMAC != "" && srcIP != "" {
+		if srcMAC != "" && srcIP != "" && !arpProbe {
 			addressSubType := GetAddressSubTypeForIP(srcIP)
 			p.deviceManager.UpsertDevice(srcIP, "IP", timestamp, addressSubType, srcMAC, "", false)
 			p.deviceManager.RecordVLAN(srcIP, "IP", vlan)
 		}
-		if dstMAC != "" && dstIP != "" {
+		if dstMAC != "" && dstIP != "" && !arpRequest {
 			addressSubType := GetAddressSubTypeForIP(dstIP)
 			p.deviceManager.UpsertDevice(dstIP, "IP", timestamp, addressSubType, dstMAC, "", true)
 			p.deviceManager.RecordVLAN(dstIP, "IP", vlan)
@@ -1503,8 +1516,15 @@ func (p *GopacketParser) ParseFile() error {
 			fmt.Printf("Warning: Industrial protocol parsing error: %v\n", err)
 		}
 
+		// Keep the label stable across the packets of a connection (handshake,
+		// ACKs and mid-message segments carry no recognisable payload).
+		if label := p.connLabeler.Label(packet, srcIP, dstIP, vlan); label != "" &&
+			(flowProto == "" || flowProto == "tcp" || flowProto == "udp") {
+			flowProto = label
+		}
+
 		// Flow extraction and storage
-		if srcIP != "" && dstIP != "" && flowProto != "" {
+		if srcIP != "" && dstIP != "" && flowProto != "" && !arpRequest {
 			var source, destination string
 
 			source = srcIP
@@ -1515,6 +1535,13 @@ func (p *GopacketParser) ParseFile() error {
 		}
 
 		packetID++
+	}
+
+	// Every packet read must be stored. A difference means some code path skips
+	// packets silently, which is what the ARP and DNS skips used to do.
+	if packetsRead != packetsQueued {
+		log.Warn().Int("read", packetsRead).Int("stored", packetsQueued).
+			Msg("Some packets were not stored")
 	}
 
 	if p.decodeFailures > 0 {
@@ -1538,6 +1565,21 @@ func (p *GopacketParser) ParseFile() error {
 	const maxBatchSize = 1000
 	deviceBatch := make([]*model2.Device, 0, maxBatchSize)
 	deviceCount := 0
+
+	// Every flow endpoint needs a device row. Packets seen only as the target of
+	// something (never as a sender with a MAC) would otherwise leave a flow
+	// without a device, which the repository rejects.
+	for _, flow := range p.flowManager.GetAllFlows() {
+		for _, ip := range []net.IP{flow.SrcIP, flow.DstIP} {
+			if ip == nil {
+				continue
+			}
+			addr := ip.String()
+			if p.deviceManager.GetDevice(addr, "IP") == nil {
+				p.deviceManager.UpsertDevice(addr, "IP", flow.FirstSeen, GetAddressSubTypeForIP(addr), "", "", true)
+			}
+		}
+	}
 
 	for _, dev := range p.deviceManager.GetAllDevices() {
 		deviceBatch = append(deviceBatch, dev)
@@ -1975,4 +2017,10 @@ func extractVLANTag(packet gopacket.Packet) model2.VLANTag {
 		}
 	}
 	return tag
+}
+
+// dnsAnswered reports whether a DNS packet is a successful response with at
+// least one answer. Only those are recorded in the dns_queries table.
+func dnsAnswered(d *layers.DNS) bool {
+	return d.ResponseCode == layers.DNSResponseCodeNoErr && len(d.Answers) > 0
 }

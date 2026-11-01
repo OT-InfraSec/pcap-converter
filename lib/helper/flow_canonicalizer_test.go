@@ -53,3 +53,19 @@ func TestCanonicalizeBothServicePorts(t *testing.T) {
 		t.Fatalf("unexpected canonicalization when both are service ports: got %s, %s, %v", cs, cd, rev)
 	}
 }
+
+func TestDefaultWellKnownPorts_FromDetectionRegistry(t *testing.T) {
+	ports := NewFlowCanonicalizer().GetWellKnownPorts()
+	want := map[uint16]string{
+		44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3",
+		80: "HTTP", 443: "HTTPS", 53: "DNS",
+	}
+	for port, name := range want {
+		if ports[port] != name {
+			t.Errorf("port %d: got %q, want %q", port, ports[port], name)
+		}
+	}
+	if _, ok := ports[102]; ok {
+		t.Error("port 102 must not be labelled; it is shared by S7, ISO-TSAP and MMS")
+	}
+}
