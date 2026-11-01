@@ -1513,7 +1513,7 @@ func (p *GopacketParser) ParseFile() error {
 			}
 		} else if err != nil {
 			// Log industrial protocol parsing errors but continue processing
-			fmt.Printf("Warning: Industrial protocol parsing error: %v\n", err)
+			log.Warn().Err(err).Msg("industrial protocol parsing error")
 		}
 
 		// Keep the label stable across the packets of a connection (handshake,

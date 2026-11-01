@@ -111,3 +111,13 @@ func makeTestRootCmd(provider *DependencyProvider) *cobra.Command {
 	rootCmd.SetErr(new(bytes.Buffer))
 	return rootCmd
 }
+
+func TestIndustrialPortLabels(t *testing.T) {
+	got := industrialPortLabels()
+	want := map[string]string{"502": "modbus", "44818": "ethernetip", "2222": "ethernetip", "4840": "opcua", "20000": "dnp3", "102": "s7"}
+	for port, label := range want {
+		if got[port] != label {
+			t.Errorf("port %s: got %q, want %q", port, got[port], label)
+		}
+	}
+}

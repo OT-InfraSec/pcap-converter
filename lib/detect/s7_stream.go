@@ -1,7 +1,5 @@
 package detect
 
-import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
-
 // S7Tracker turns the TCP payloads of connections into S7comm messages, as
 // ModbusTracker and ENIPTracker do for their protocols: segments are ordered by
 // sequence number (package tcpseq), frames are cut by the TPKT length, and a
@@ -17,23 +15,20 @@ import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
 // An invalid TPKT header, or bytes lost for good, drops the half frame and the
 // direction must show a valid start again before parsing resumes.
 type S7Tracker struct {
-	max   int
-	conns map[string]*s7Conn
+	tcpTracker[*s7Conn, S7Message]
 }
 
 type s7Conn struct {
-	recognized bool
-	needProbe  [2]bool
-	partial    [2][]byte
+	tcpConn
 	frags      [2][]S7Frame // COTP data fragments waiting for the EOT frame
 	fragBytes  [2]int
-	streams    [2]tcpseq.Stream
-	fin        [2]bool
 	rack, slot int
 	haveRack   bool
 	sawS7      bool // an S7 PDU was seen: the connection is S7, not only ISO-TSAP
 	sawPlus    bool // an S7CommPlus PDU was seen
 }
+
+func (c *s7Conn) resetPending(dir int) { c.frags[dir], c.fragBytes[dir] = nil, 0 }
 
 const (
 	maxS7Frags     = 64
@@ -41,20 +36,11 @@ const (
 )
 
 // NewS7Tracker returns a tracker with the default connection limit.
-func NewS7Tracker() *S7Tracker { return NewS7TrackerLimit(defaultModbusTrackerLimit) }
+func NewS7Tracker() *S7Tracker { return NewS7TrackerLimit(defaultTrackerLimit) }
 
 // NewS7TrackerLimit returns a tracker that keeps state for at most max connections.
 func NewS7TrackerLimit(max int) *S7Tracker {
-	return &S7Tracker{max: max, conns: make(map[string]*s7Conn)}
-}
-
-// Len is the number of connections with state.
-func (t *S7Tracker) Len() int { return len(t.conns) }
-
-// Known reports whether the connection has been recognised as ISO-on-TCP with S7.
-func (t *S7Tracker) Known(key string) bool {
-	c := t.conns[key]
-	return c != nil && c.recognized
+	return &S7Tracker{newTCPTracker[*s7Conn, S7Message](max, 0xffff, func() *s7Conn { return &s7Conn{} })}
 }
 
 // SawS7 reports whether an S7 PDU has been seen on the connection, which tells
@@ -74,46 +60,11 @@ func (t *S7Tracker) SawS7Plus(key string) bool {
 // the same for both directions; toServer is true for client to server; hint
 // says the connection uses port 102.
 func (t *S7Tracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []S7Message {
-	dir := 0
-	if toServer {
-		dir = 1
-	}
-	if seg.RST || (seg.SYN && !seg.ACK) {
-		delete(t.conns, key)
-		if seg.RST {
-			return nil
-		}
-	}
-	payload := seg.Payload
-	c := t.conns[key]
-	if c != nil {
-		data, gap := c.streams[dir].Push(seg.Seq, seg.SYN, payload)
-		if gap {
-			c.partial[dir], c.frags[dir], c.fragBytes[dir] = nil, nil, 0
-			c.needProbe[dir] = true
-		}
-		payload = data
-	}
-	var out []S7Message
-	if len(payload) > 0 {
-		out = t.feed(key, dir, payload, hint)
-	}
-	if c == nil {
-		if c = t.conns[key]; c != nil {
-			c.streams[dir].Push(seg.Seq, seg.SYN, seg.Payload)
-		}
-	}
-	if seg.FIN && c != nil {
-		c.fin[dir] = true
-		if c.fin[0] && c.fin[1] {
-			delete(t.conns, key)
-		}
-	}
-	return out
+	return t.feedTCP(key, toServer, seg, hint, t.feed)
 }
 
-// startsConnection reports whether buf may begin an ISO-on-TCP connection that
-// is worth following: an S7 PDU, or on port 102 a COTP connection frame.
+// startsS7 reports whether buf may begin an ISO-on-TCP connection that is worth
+// following: an S7 or S7CommPlus PDU, or on port 102 a COTP connection frame.
 func startsS7(buf []byte, hint bool) Result {
 	r7, rp := ProbeS7(buf), ProbeS7Plus(buf)
 	if r7 == Recognized || rp == Recognized {
@@ -134,8 +85,8 @@ func startsS7(buf []byte, hint bool) Result {
 func (t *S7Tracker) feed(key string, dir int, payload []byte, hint bool) []S7Message {
 	c := t.conns[key]
 	buf := payload
-	if c != nil && len(c.partial[dir]) > 0 {
-		buf = append(append(make([]byte, 0, len(c.partial[dir])+len(payload)), c.partial[dir]...), payload...)
+	if c != nil {
+		buf = pending(&c.tcpConn, dir, payload)
 	}
 	if len(buf) == 0 {
 		return nil
@@ -224,25 +175,4 @@ func (t *S7Tracker) frame(c *s7Conn, dir int, f S7Frame) (S7Message, bool) {
 		m.Rack, m.Slot = c.rack, c.slot
 	}
 	return m, true
-}
-
-func (t *S7Tracker) keep(key string, c **s7Conn, dir int, rest []byte, recognized bool) {
-	if *c == nil {
-		if !recognized && len(rest) == 0 {
-			return
-		}
-		if len(t.conns) >= t.max {
-			return
-		}
-		*c = &s7Conn{}
-		t.conns[key] = *c
-	}
-	if recognized {
-		(*c).recognized = true
-	}
-	if len(rest) == 0 || len(rest) > 0xffff {
-		(*c).partial[dir] = nil
-		return
-	}
-	(*c).partial[dir] = append([]byte(nil), rest...)
 }

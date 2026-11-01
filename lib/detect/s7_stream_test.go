@@ -147,6 +147,21 @@ func TestS7Tracker(t *testing.T) {
 		}
 		eq(t, feed(tr, C, seq, setup(6)), 6)
 	})
+	t.Run("a gap drops pending COTP fragments", func(t *testing.T) {
+		tr := NewS7Tracker()
+		feed(tr, C, 1, setup(1))
+		stale := tpkt([]byte{2, 0xf0, 0x00}, s7PDU(1, 99, []byte{0xf0, 0, 0, 1, 0, 1, 1, 0xe0}, nil)) // no EOT bit
+		seq := uint32(1000)
+		feed(tr, C, seq, stale)
+		seq += uint32(len(stale))
+		junk := []byte{9, 9, 9, 9, 9, 9, 9, 9}
+		seq += 5000 // bytes lost
+		for i := 0; i < 40; i++ {
+			feed(tr, C, seq, junk)
+			seq += uint32(len(junk))
+		}
+		eq(t, feed(tr, C, seq, setup(6)), 6) // must not be joined with the stale fragment
+	})
 	t.Run("RST, FIN both ways and a new SYN end the state", func(t *testing.T) {
 		tr := NewS7Tracker()
 		feed(tr, C, 1, setup(1))

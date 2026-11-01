@@ -515,6 +515,7 @@ func industrialPortLabels() map[string]string {
 		"OPC UA":      "opcua",
 		"Modbus":      "modbus",
 		"DNP3":        "dnp3",
+		"S7":          "s7",
 	}
 	out := make(map[string]string)
 	for port, name := range detect.Default().HintPorts() {

@@ -1,7 +1,5 @@
 package detect
 
-import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
-
 // ENIPTracker turns the TCP payloads of connections into EtherNet/IP
 // encapsulation messages, the way ModbusTracker does for Modbus.
 //
@@ -16,36 +14,20 @@ import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
 // State is kept only for recognised connections (and a short unrecognised
 // start on the ENIP port), and for at most the configured number of them.
 type ENIPTracker struct {
-	max   int
-	conns map[string]*enipConn
+	tcpTracker[*enipConn, ENIPMessage]
 }
 
-type enipConn struct {
-	recognized bool
-	needProbe  [2]bool // after a gap, per direction: [0] server to client, [1] client to server
-	partial    [2][]byte
-	streams    [2]tcpseq.Stream
-	fin        [2]bool
-}
+type enipConn struct{ tcpConn }
 
 // enipMaxPDU is the largest message: the header and a 16-bit length.
 const enipMaxPDU = ENIPHeaderLen + 0xffff
 
 // NewENIPTracker returns a tracker with the default connection limit.
-func NewENIPTracker() *ENIPTracker { return NewENIPTrackerLimit(defaultModbusTrackerLimit) }
+func NewENIPTracker() *ENIPTracker { return NewENIPTrackerLimit(defaultTrackerLimit) }
 
 // NewENIPTrackerLimit returns a tracker that keeps state for at most max connections.
 func NewENIPTrackerLimit(max int) *ENIPTracker {
-	return &ENIPTracker{max: max, conns: make(map[string]*enipConn)}
-}
-
-// Len is the number of connections with state.
-func (t *ENIPTracker) Len() int { return len(t.conns) }
-
-// Known reports whether the connection has been recognised as EtherNet/IP.
-func (t *ENIPTracker) Known(key string) bool {
-	c := t.conns[key]
-	return c != nil && c.recognized
+	return &ENIPTracker{newTCPTracker[*enipConn, ENIPMessage](max, enipMaxPDU, func() *enipConn { return &enipConn{} })}
 }
 
 // FeedTCP adds a TCP segment and returns the messages it completes. key must be
@@ -53,49 +35,14 @@ func (t *ENIPTracker) Known(key string) bool {
 // says the connection uses the EtherNet/IP port, which allows a first segment
 // shorter than a header to be kept until the rest arrives.
 func (t *ENIPTracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []ENIPMessage {
-	dir := 0
-	if toServer {
-		dir = 1
-	}
-	if seg.RST || (seg.SYN && !seg.ACK) {
-		delete(t.conns, key)
-		if seg.RST {
-			return nil
-		}
-	}
-	payload := seg.Payload
-	c := t.conns[key]
-	if c != nil {
-		data, gap := c.streams[dir].Push(seg.Seq, seg.SYN, payload)
-		if gap {
-			c.partial[dir] = nil
-			c.needProbe[dir] = true
-		}
-		payload = data
-	}
-	var out []ENIPMessage
-	if len(payload) > 0 {
-		out = t.feed(key, dir, payload, hint)
-	}
-	if c == nil {
-		if c = t.conns[key]; c != nil {
-			c.streams[dir].Push(seg.Seq, seg.SYN, seg.Payload)
-		}
-	}
-	if seg.FIN && c != nil {
-		c.fin[dir] = true
-		if c.fin[0] && c.fin[1] {
-			delete(t.conns, key)
-		}
-	}
-	return out
+	return t.feedTCP(key, toServer, seg, hint, t.feed)
 }
 
 func (t *ENIPTracker) feed(key string, dir int, payload []byte, hint bool) []ENIPMessage {
 	c := t.conns[key]
 	buf := payload
-	if c != nil && len(c.partial[dir]) > 0 {
-		buf = append(append(make([]byte, 0, len(c.partial[dir])+len(payload)), c.partial[dir]...), payload...)
+	if c != nil {
+		buf = pending(&c.tcpConn, dir, payload)
 	}
 	if len(buf) == 0 {
 		return nil
@@ -132,27 +79,6 @@ func (t *ENIPTracker) feed(key string, dir int, payload []byte, hint bool) []ENI
 	}
 	t.keep(key, &c, dir, buf, recognized)
 	return out
-}
-
-func (t *ENIPTracker) keep(key string, c **enipConn, dir int, rest []byte, recognized bool) {
-	if *c == nil {
-		if !recognized && len(rest) == 0 {
-			return
-		}
-		if len(t.conns) >= t.max {
-			return
-		}
-		*c = &enipConn{}
-		t.conns[key] = *c
-	}
-	if recognized {
-		(*c).recognized = true
-	}
-	if len(rest) == 0 || len(rest) > enipMaxPDU {
-		(*c).partial[dir] = nil
-		return
-	}
-	(*c).partial[dir] = append([]byte(nil), rest...)
 }
 
 // DecodeENIPDatagram decodes the message in a UDP datagram. A datagram stands

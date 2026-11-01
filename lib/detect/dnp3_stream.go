@@ -1,7 +1,5 @@
 package detect
 
-import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
-
 // DNP3Tracker turns the payloads of DNP3 connections into link frames and
 // application fragments, as the Modbus, ENIP and S7 trackers do for their
 // protocols. Frames are cut by the link length field; segments are ordered by
@@ -15,8 +13,7 @@ import "github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
 // lost for good, drop the half frame and the pending fragment; the direction
 // must show a frame start again before parsing resumes.
 type DNP3Tracker struct {
-	max   int
-	conns map[string]*dnp3Conn
+	tcpTracker[*dnp3Conn, DNP3Message]
 }
 
 type dnp3Reasm struct {
@@ -27,29 +24,18 @@ type dnp3Reasm struct {
 }
 
 type dnp3Conn struct {
-	recognized bool
-	needProbe  [2]bool
-	partial    [2][]byte
-	reasm      [2]dnp3Reasm
-	streams    [2]tcpseq.Stream
-	fin        [2]bool
+	tcpConn
+	reasm [2]dnp3Reasm
 }
 
+func (c *dnp3Conn) resetPending(dir int) { c.reasm[dir] = dnp3Reasm{} }
+
 // NewDNP3Tracker returns a tracker with the default connection limit.
-func NewDNP3Tracker() *DNP3Tracker { return NewDNP3TrackerLimit(defaultModbusTrackerLimit) }
+func NewDNP3Tracker() *DNP3Tracker { return NewDNP3TrackerLimit(defaultTrackerLimit) }
 
 // NewDNP3TrackerLimit returns a tracker that keeps state for at most max connections.
 func NewDNP3TrackerLimit(max int) *DNP3Tracker {
-	return &DNP3Tracker{max: max, conns: make(map[string]*dnp3Conn)}
-}
-
-// Len is the number of connections with state.
-func (t *DNP3Tracker) Len() int { return len(t.conns) }
-
-// Known reports whether the connection has been recognised as DNP3.
-func (t *DNP3Tracker) Known(key string) bool {
-	c := t.conns[key]
-	return c != nil && c.recognized
+	return &DNP3Tracker{newTCPTracker[*dnp3Conn, DNP3Message](max, dnp3MaxFrame, func() *dnp3Conn { return &dnp3Conn{} })}
 }
 
 // FeedTCP adds a TCP segment and returns the messages it completes. key must be
@@ -57,46 +43,10 @@ func (t *DNP3Tracker) Known(key string) bool {
 // says the connection uses the DNP3 port, which lets a first segment shorter
 // than a frame header be kept until the rest arrives.
 func (t *DNP3Tracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []DNP3Message {
-	dir := 0
-	if toServer {
-		dir = 1
-	}
-	if seg.RST || (seg.SYN && !seg.ACK) {
-		delete(t.conns, key)
-		if seg.RST {
-			return nil
-		}
-	}
-	payload := seg.Payload
-	c := t.conns[key]
-	if c != nil {
-		data, gap := c.streams[dir].Push(seg.Seq, seg.SYN, payload)
-		if gap {
-			c.partial[dir] = nil
-			c.reasm[dir] = dnp3Reasm{}
-			c.needProbe[dir] = true
-		}
-		payload = data
-	}
-	var out []DNP3Message
-	if len(payload) > 0 {
-		out = t.feed(key, dir, payload, hint)
-	}
-	if c == nil {
-		if c = t.conns[key]; c != nil {
-			c.streams[dir].Push(seg.Seq, seg.SYN, seg.Payload)
-		}
-	}
-	if seg.FIN && c != nil {
-		c.fin[dir] = true
-		if c.fin[0] && c.fin[1] {
-			delete(t.conns, key)
-		}
-	}
-	return out
+	return t.feedTCP(key, toServer, seg, hint, t.feed)
 }
 
-// DecodeDatagram decodes the link frames of a UDP datagram. A datagram stands
+// DecodeDNP3Datagram decodes the link frames of a UDP datagram. A datagram stands
 // alone: the probe decides, fragments are joined only within it, and bytes that
 // are not a whole frame are ignored.
 func DecodeDNP3Datagram(b []byte) []DNP3Message {
@@ -123,8 +73,8 @@ func DecodeDNP3Datagram(b []byte) []DNP3Message {
 func (t *DNP3Tracker) feed(key string, dir int, payload []byte, hint bool) []DNP3Message {
 	c := t.conns[key]
 	buf := payload
-	if c != nil && len(c.partial[dir]) > 0 {
-		buf = append(append(make([]byte, 0, len(c.partial[dir])+len(payload)), c.partial[dir]...), payload...)
+	if c != nil {
+		buf = pending(&c.tcpConn, dir, payload)
 	}
 	if len(buf) == 0 {
 		return nil
@@ -232,25 +182,4 @@ func (c *dnp3Conn) frame(f DNP3Frame, dir int) DNP3Message {
 		*r = dnp3Reasm{}
 	}
 	return m
-}
-
-func (t *DNP3Tracker) keep(key string, c **dnp3Conn, dir int, rest []byte, recognized bool) {
-	if *c == nil {
-		if !recognized && len(rest) == 0 {
-			return
-		}
-		if len(t.conns) >= t.max {
-			return
-		}
-		*c = &dnp3Conn{}
-		t.conns[key] = *c
-	}
-	if recognized {
-		(*c).recognized = true
-	}
-	if len(rest) == 0 || len(rest) > dnp3MaxFrame {
-		(*c).partial[dir] = nil
-		return
-	}
-	(*c).partial[dir] = append([]byte(nil), rest...)
 }

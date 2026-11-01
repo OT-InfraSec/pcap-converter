@@ -74,6 +74,20 @@ func connKey(t detect.Transport, srcIP string, srcPort uint16, dstIP string, dst
 	return fmt.Sprintf("%d|%s|%s|%s", t, ends[0], ends[1], vlan.Token())
 }
 
+// entry returns the connection's state, creating it if there is room. It
+// returns nil when the connection has none and the limit is reached.
+func (l *connectionLabeler) entry(key string, st *connState) *connState {
+	if st != nil {
+		return st
+	}
+	if len(l.conns) >= maxTrackedConnections {
+		return nil
+	}
+	st = &connState{}
+	l.conns[key] = st
+	return st
+}
+
 // Label updates the connection state with this packet and returns the label
 // for it, or "" if the registry has no opinion.
 func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, vlan model.VLANTag) string {
@@ -105,27 +119,17 @@ func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, v
 
 		switch {
 		case res == detect.Recognized:
-			if st == nil && len(l.conns) >= maxTrackedConnections {
-				return flowLabel(proto.Name, t)
-			}
-			if st == nil {
-				st = &connState{}
-				l.conns[key] = st
+			if st = l.entry(key, st); st == nil {
+				return flowLabel(proto.Name, t) // over the limit: label without state
 			}
 			st.label = flowLabel(proto.Name, t)
 			return st.label
 		case res == detect.Unrecognized && hint:
-			if st == nil && len(l.conns) < maxTrackedConnections {
-				st = &connState{}
-				l.conns[key] = st
-			}
-			if st != nil {
+			if st = l.entry(key, st); st != nil {
 				st.vetoed = true
 			}
 		case hint && (st == nil || !st.vetoed):
-			if st == nil && len(l.conns) < maxTrackedConnections {
-				l.conns[key] = &connState{}
-			}
+			l.entry(key, st)
 			return flowLabel(proto.Name, t)
 		}
 	}
