@@ -416,3 +416,28 @@ read.
 Not covered by real traffic: exception responses, FC1/2/4/5/6/15, diagnostics,
 `invalid_length`, `invalid_value`, `unsolicited_response`, `invalid_protocol_id`.
 Those need synthetic captures.
+
+## Modbus synthetic captures: results
+
+Captures: `minicps-testbed/build/modbus_synthetic` (generated from
+`MODBUS_SYNTHETIC_CAPTURES.md`, 9 pcaps, 41 connections), compared with
+`scripts/compare_modbus.py` (Suricata 8.0.8, midstream on). Transactions and
+events agree on groups A and B and on every well-formed row of the others.
+
+| Class | Scenarios | What differs | Status |
+|---|---|---|---|
+| Validation events | D1-D3, D5-D10, D12-D17 | none: `invalid_length` / `invalid_value` agree on all 15 | **Done, matches Suricata** |
+| Exception codes | B | `invalid_exception_code` 2 = 2 (incl. 08 on FC3, 02 on FC7) | Matches |
+| Framing: protocol id, length outside 2..254 | D11, E1-E5, E8 | Suricata keeps decoding inside a connection it already recognised and raises `invalid_protocol_id` / `invalid_length`. We drop the ADU, so those transactions and events are missing | **Gap**, needs a lenient framing mode for connections already labelled Modbus |
+| Function codes in requests | C | Requests with fc `0x80`-`0xFF` (and 0): we read the high bit as an exception and report `invalid_exception_code`; Suricata calls them `invalid_function_code` and keeps the raw code | **Bug**: no exceptions exist in the request direction |
+| Unassigned codes (`0x09`...) | C | we raise `unknown_function`, Suricata nothing | Intended divergence |
+| TCP reassembly | E9, G2-G5, G9, H5 | ADUs split across segments are not decoded by us (11 transactions on these connections) | **Evidence for Phase 2** |
+| Retransmission | I1, I2, I4 | we count a retransmitted ADU twice, Suricata once | Needs TCP sequence tracking (Phase 2) |
+| Transaction pairing | F1-F4, F8, H3, I5, E-group | `unsolicited_response` raised only by Suricata, as is `value_mismatch` (F5-F7; also fires on every register read, see above) | We do not pair requests with responses |
+| Request flood | F9 | Suricata stops at 501 of 600 requests (`flooded`); we decode all 600 | Suricata limit |
+| HTTP then Modbus on 502 | H4 | Suricata recognises no Modbus on that connection; we decode both exchanges (content probe per packet) | We are better here |
+| First packet | H1-H3, H6-H9 | agree (IPv6 and VLAN included) | Matches |
+
+Manifest notes: the D rows' `expect_our_events` are stale (generated before
+the validation rules existed); D11 in the capture is the old "qty 124,
+MBAP length 255" case, which is a framing case, not `invalid_value`.

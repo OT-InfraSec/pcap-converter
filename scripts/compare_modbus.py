@@ -17,7 +17,17 @@ function, address); responses per (server, client, client port, transaction
 id, function, exception). Retransmitted segments make us see an ADU twice where Suricata
 sees one, so keys are compared as sets and the repeat counts are shown apart.
 """
-import argparse, collections, json, os, re, subprocess, sys, tempfile
+import argparse, collections, ipaddress, json, os, re, subprocess, sys, tempfile
+
+LIMIT = 5
+
+def norm_ip(ip):
+    """Suricata prints IPv6 expanded, we print it compressed."""
+    try:
+        return str(ipaddress.ip_address(ip))
+    except ValueError:
+        return ip
+
 
 FUNC = {"RdCoils":1,"RdDiscreteInputs":2,"RdHoldRegs":3,"RdInputRegs":4,"WrSingleCoil":5,"WrSingleReg":6,
         "RdExcStatus":7,"Diagnostic":8,"GetCommEventCtr":11,"GetCommEventLog":12,"WrMultCoils":15,
@@ -45,8 +55,8 @@ SHARED_EVENTS = {"invalid_exception_code", "invalid_length", "invalid_value"}
 def client_of(e):
     """(client ip, client port) of an eve record; the server is on port 502."""
     if e.get("dest_port") == 502:
-        return e["src_ip"], e["src_port"]
-    return e["dest_ip"], e["dest_port"]
+        return norm_ip(e["src_ip"]), e["src_port"]
+    return norm_ip(e["dest_ip"]), e["dest_port"]
 
 def addr_qty(side):
     for k in ("read", "write"):
@@ -65,7 +75,7 @@ def read_suricata(eve):
         if e["event_type"] != "modbus":
             continue
         m = e["modbus"]
-        (c, cp), s = client_of(e), (e["dest_ip"] if e["dest_port"] == 502 else e["src_ip"])
+        (c, cp), s = client_of(e), norm_ip(e["dest_ip"] if e["dest_port"] == 502 else e["src_ip"])
         if "request" in m:
             q = m["request"]
             a, n = addr_qty(q)
@@ -95,7 +105,7 @@ def diff(name, theirs, ours):
     print(f"{name}: suricata={len(ts)} ours={len(os_)} both={len(ts & os_)} "
           f"suricata-only={len(ts - os_)} ours-only={len(os_ - ts)}")
     for label, keys in (("suricata-only", ts - os_), ("ours-only", os_ - ts)):
-        for k in sorted(keys, key=str)[:5]:
+        for k in sorted(keys, key=str)[:LIMIT]:
             print(f"  {label}: {k}")
     rep = sum(1 for k, n in ours.items() if n > 1)
     print(f"  keys we see more than once (retransmits/duplicates): {rep}")
@@ -115,7 +125,7 @@ def diff_events(theirs, ours, as_sets):
     for conn in sorted(set(ts) | set(os_), key=str):
         if ts.get(conn, {}) != os_.get(conn, {}):
             bad += 1
-            if bad <= 10:
+            if bad <= LIMIT * 2:
                 print(f"  event mismatch {conn[0]}:{conn[1]} suricata={dict(ts.get(conn, {}))} "
                       f"ours={dict(os_.get(conn, {}))}")
     print(f"events (shared names {sorted(SHARED_EVENTS)}): connections with a difference: {bad}")
@@ -133,9 +143,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pcap")
     ap.add_argument("--suricata-yaml")
+    ap.add_argument("--all", action="store_true", help="list every difference, not the first few")
     ap.add_argument("--events-as-sets", action="store_true",
                     help="compare which event names occur per connection, not how often")
     a = ap.parse_args()
+    global LIMIT
+    if a.all:
+        LIMIT = 10**9
     with tempfile.TemporaryDirectory() as tmp:
         yaml = suricata_yaml(a.suricata_yaml, tmp)
         subprocess.run(["suricata", "-c", yaml, "-r", a.pcap, "-l", tmp, "-k", "none",
@@ -151,4 +165,5 @@ def main():
     ok &= diff_events(sevents, events, a.events_as_sets)
     sys.exit(0 if ok else 1)
 
-main()
+if __name__ == "__main__":
+    main()
