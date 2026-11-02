@@ -45,6 +45,7 @@ type IndustrialParserConfig struct {
     EnableModbus     bool `json:"enable_modbus"`
     EnableDNP3       bool `json:"enable_dnp3"`
     EnableS7         bool `json:"enable_s7"`
+    EnableS7CommPlus bool `json:"enable_s7commplus"`
 
     // Confidence thresholds
     ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -169,6 +170,26 @@ The OPC UA implementation provides:
 - Secure channel analysis
 - Service call classification
 - Security mode detection (None, Sign, SignAndEncrypt)
+
+### Modbus, S7comm, S7CommPlus and DNP3
+
+These protocols are recognised by their content (`lib/detect`); the port is only
+a hint, and other data on the port is not labelled. Each has a strict probe, a
+decoder, and for TCP a tracker that orders segments and joins split frames.
+Details and the tshark or Suricata comparison are in
+`SURICATA_PROTOCOL_COMPARISON.md`.
+
+| Protocol | Flow label | Port hint | Decoded | Validated against |
+|---|---|---|---|---|
+| Modbus TCP | `modbus` | 502 | function, addresses, exceptions, validation events | Suricata, real and synthetic captures |
+| S7comm | `s7` | 102 | COTP TSAPs (rack, slot), setup, read and write items, PLC control, userdata, SZL identity | tshark, hand-built captures only |
+| S7CommPlus | `s7commplus` | 102 | PDU header: version, opcode, function, sequence, session id | **nothing** (no reference dissector or capture) |
+| DNP3 | `dnp3` | 20000 (TCP and UDP) | link, transport reassembly, application function, IIN, object headers | tshark, hand-built captures only |
+
+`EnableModbus`, `EnableS7`, `EnableS7CommPlus`, `EnableDNP3` and the other enable
+flags switch both the parser and the connection labeler when they are applied
+with `GopacketParser.SetIndustrialConfig`. The importer CLI has no options for
+them yet, so it runs with the defaults (everything on).
 
 ## Error Handling
 

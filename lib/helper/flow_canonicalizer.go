@@ -3,6 +3,7 @@ package helper
 import (
 	"strconv"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 )
 
@@ -25,23 +26,24 @@ func NewFlowCanonicalizer() *FlowCanonicalizerImpl {
 }
 
 func defaultWellKnownPorts() map[uint16]string {
-	// Keep keys as uint16 ports mapped to a human-readable service name
-	return map[uint16]string{
-		80:    "HTTP",
-		8080:  "HTTP",
-		8000:  "HTTP",
-		443:   "HTTPS",
-		8443:  "HTTPS",
-		4840:  "OPC UA",
-		502:   "Modbus",
-		44818: "EtherNet/IP",
-		2222:  "EtherNet/IP",
-		53:    "DNS",
-		161:   "SNMP",
-		162:   "SNMP",
-		22:    "SSH",
-		23:    "Telnet",
+	// Generic IT services. Industrial protocols come from the detection
+	// registry so the port knowledge lives in one place (lib/detect).
+	ports := map[uint16]string{
+		80:   "HTTP",
+		8080: "HTTP",
+		8000: "HTTP",
+		443:  "HTTPS",
+		8443: "HTTPS",
+		53:   "DNS",
+		161:  "SNMP",
+		162:  "SNMP",
+		22:   "SSH",
+		23:   "Telnet",
 	}
+	for port, name := range detect.Default().HintPorts() {
+		ports[port] = name
+	}
+	return ports
 }
 
 // GetWellKnownPorts returns the configured well-known ports map.

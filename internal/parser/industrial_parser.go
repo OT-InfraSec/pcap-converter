@@ -1,13 +1,14 @@
 package parser
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	lib_layers "github.com/InfraSecConsult/pcap-importer-go/lib/layers"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
@@ -63,6 +64,15 @@ type IndustrialParserConfig struct {
 	EnableModbus     bool `json:"enable_modbus"`
 	EnableDNP3       bool `json:"enable_dnp3"`
 	EnableS7         bool `json:"enable_s7"`
+	// EnableS7CommPlus is separate from EnableS7: both share port 102 and
+	// framing, but S7CommPlus is only validated for its header.
+	EnableS7CommPlus bool `json:"enable_s7commplus"`
+	// EnableSMB and EnableNBNS cover the host-identification protocols (SMB
+	// over TCP 445 and 139, the NetBIOS name service on UDP 137): flow labels
+	// and the host evidence taken from them. They are not industrial protocols
+	// but share the one protocol registry and its switches.
+	EnableSMB  bool `json:"enable_smb"`
+	EnableNBNS bool `json:"enable_nbns"`
 
 	// Confidence thresholds
 	ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -92,8 +102,11 @@ func DefaultIndustrialParserConfig() IndustrialParserConfig {
 		EnableEtherNetIP: true,
 		EnableOPCUA:      true,
 		EnableModbus:     true,
-		EnableDNP3:       false,
-		EnableS7:         false,
+		EnableDNP3:       true,
+		EnableS7:         true,
+		EnableS7CommPlus: true,
+		EnableSMB:        true,
+		EnableNBNS:       true,
 
 		// Conservative confidence thresholds
 		ConfidenceThreshold:               0.7,
@@ -154,11 +167,26 @@ type IndustrialProtocolParserImpl struct {
 	config IndustrialParserConfig
 
 	// Legacy configuration fields (deprecated, use config instead)
-	enabledProtocols    map[string]bool
 	confidenceThreshold float64
 	enableEtherNetIP    bool
 	enableOPCUA         bool
 	errorHandler        ErrorHandler
+
+	// Modbus connections and unfinished messages, see detect.ModbusTracker.
+	modbusMu sync.Mutex
+	modbus   *detect.ModbusTracker
+
+	// EtherNet/IP connections and unfinished messages, see detect.ENIPTracker.
+	enipMu sync.Mutex
+	enip   *detect.ENIPTracker
+
+	// S7comm connections and unfinished frames, see detect.S7Tracker.
+	// DNP3 connections and unfinished frames and fragments, see detect.DNP3Tracker.
+	dnp3Mu sync.Mutex
+	dnp3   *detect.DNP3Tracker
+
+	s7Mu sync.Mutex
+	s7   *detect.S7Tracker
 
 	// Performance optimization
 	packetCache map[string]model.IndustrialProtocolInfo
@@ -183,13 +211,6 @@ func NewIndustrialProtocolParserWithConfig(config IndustrialParserConfig) Indust
 		config: config,
 
 		// Legacy fields for backward compatibility
-		enabledProtocols: map[string]bool{
-			"EtherNet/IP": config.EnableEtherNetIP,
-			"OPC UA":      config.EnableOPCUA,
-			"Modbus":      config.EnableModbus,
-			"DNP3":        config.EnableDNP3,
-			"S7":          config.EnableS7,
-		},
 		confidenceThreshold: config.ConfidenceThreshold,
 		enableEtherNetIP:    config.EnableEtherNetIP,
 		enableOPCUA:         config.EnableOPCUA,
@@ -255,13 +276,6 @@ func (p *IndustrialProtocolParserImpl) UpdateConfig(config IndustrialParserConfi
 	p.config = config
 
 	// Update legacy fields for backward compatibility
-	p.enabledProtocols = map[string]bool{
-		"EtherNet/IP": config.EnableEtherNetIP,
-		"OPC UA":      config.EnableOPCUA,
-		"Modbus":      config.EnableModbus,
-		"DNP3":        config.EnableDNP3,
-		"S7":          config.EnableS7,
-	}
 	p.confidenceThreshold = config.ConfidenceThreshold
 	p.enableEtherNetIP = config.EnableEtherNetIP
 	p.enableOPCUA = config.EnableOPCUA
@@ -336,6 +350,23 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 	if p.config.EnableModbus {
 		if modbusInfo := p.parseModbusTCP(packet, timestamp); modbusInfo != nil && modbusInfo.Confidence >= p.config.ConfidenceThreshold {
 			protocols = append(protocols, *modbusInfo)
+		}
+	}
+
+	// Check for S7comm and S7CommPlus (one tracker, two switches)
+	if p.config.EnableS7 || p.config.EnableS7CommPlus {
+		if s7Info := p.parseS7(packet, timestamp); s7Info != nil && s7Info.Confidence >= p.config.ConfidenceThreshold {
+			plus := s7Info.Protocol == "s7commplus"
+			if (plus && p.config.EnableS7CommPlus) || (!plus && p.config.EnableS7) {
+				protocols = append(protocols, *s7Info)
+			}
+		}
+	}
+
+	// Check for DNP3
+	if p.config.EnableDNP3 {
+		if dnpInfo := p.parseDNP3(packet, timestamp); dnpInfo != nil && dnpInfo.Confidence >= p.config.ConfidenceThreshold {
+			protocols = append(protocols, *dnpInfo)
 		}
 	}
 
@@ -738,54 +769,47 @@ func (p *IndustrialProtocolParserImpl) safeIsRealTimeData(layer interface{}) boo
 }
 
 // Port detection methods
-func (p *IndustrialProtocolParserImpl) isEtherNetIPPort(packet gopacket.Packet) bool {
-	if p.isLikelyEtherNetIPPayload(packet) {
-		return true
-	}
+
+// transportPayload returns the transport protocol, ports and application
+// payload (not the TCP/UDP header) of a packet.
+func transportPayload(packet gopacket.Packet) (detect.Transport, uint16, uint16, []byte, bool) {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
-		return tcp.SrcPort == 44818 || tcp.DstPort == 44818
+		return detect.TCP, uint16(tcp.SrcPort), uint16(tcp.DstPort), tcp.Payload, true
 	}
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		return udp.SrcPort == 2222 || udp.DstPort == 2222
+		return detect.UDP, uint16(udp.SrcPort), uint16(udp.DstPort), udp.Payload, true
 	}
-	return false
+	return 0, 0, 0, nil, false
 }
 
-// isLikelyEtherNetIPPayload returns true if application payload looks like an ENIP encapsulation header.
-func (p *IndustrialProtocolParserImpl) isLikelyEtherNetIPPayload(packet gopacket.Packet) bool {
-	if app := packet.TransportLayer(); app != nil {
-		b := app.LayerContents()
-		if len(b) < 24 { // ENIP encapsulation header is 24 bytes
-			return false
-		}
-		cmd := binary.LittleEndian.Uint16(b[0:2])
-		length := int(binary.LittleEndian.Uint16(b[2:4]))
-		// basic sanity checks: non\-zero command and length consistent with total payload
-		if cmd == 0 || length < 0 {
-			return false
-		}
-		// ensure claimed length fits in the remaining payload
-		if length <= len(b)-24 {
-			return true
+// detectEtherNetIP runs the registry's EtherNet/IP probe on the packet payload.
+// The returned match is nil if the packet is not EtherNet/IP.
+func (p *IndustrialProtocolParserImpl) detectEtherNetIP(packet gopacket.Packet) *detect.Match {
+	return p.detectProtocol(packet, "EtherNet/IP")
+}
+
+// detectProtocol runs the registry on the packet payload and returns the match
+// for the named protocol, or nil.
+func (p *IndustrialProtocolParserImpl) detectProtocol(packet gopacket.Packet, name string) *detect.Match {
+	transport, src, dst, payload, ok := transportPayload(packet)
+	if !ok {
+		return nil
+	}
+	for _, m := range detect.Default().Detect(transport, src, dst, payload) {
+		if m.Protocol == name {
+			m := m
+			return &m
 		}
 	}
-	return false
+	return nil
 }
 
 func (p *IndustrialProtocolParserImpl) isOPCUAPort(packet gopacket.Packet) bool {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
 		return tcp.SrcPort == 4840 || tcp.DstPort == 4840
-	}
-	return false
-}
-
-func (p *IndustrialProtocolParserImpl) isModbusTCPPort(packet gopacket.Packet) bool {
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		tcp := tcpLayer.(*layers.TCP)
-		return tcp.SrcPort == 502 || tcp.DstPort == 502
 	}
 	return false
 }
@@ -821,19 +845,19 @@ func (p *IndustrialProtocolParserImpl) extractPortInfo(packet gopacket.Packet, i
 func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet) string {
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 		tcp := tcpLayer.(*layers.TCP)
-		if tcp.SrcPort == 44818 || tcp.SrcPort == 4840 || tcp.SrcPort == 502 {
+		if tcp.SrcPort == 44818 || tcp.SrcPort == 4840 || tcp.SrcPort == 502 || uint16(tcp.SrcPort) == detect.DNP3Port || uint16(tcp.SrcPort) == detect.S7Port {
 			return "inbound"
 		}
-		if tcp.DstPort == 44818 || tcp.DstPort == 4840 || tcp.DstPort == 502 {
+		if tcp.DstPort == 44818 || tcp.DstPort == 4840 || tcp.DstPort == 502 || uint16(tcp.DstPort) == detect.DNP3Port || uint16(tcp.DstPort) == detect.S7Port {
 			return "outbound"
 		}
 	}
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp := udpLayer.(*layers.UDP)
-		if udp.SrcPort == 2222 {
+		if udp.SrcPort == 2222 || udp.SrcPort == 44818 || uint16(udp.SrcPort) == detect.DNP3Port {
 			return "inbound"
 		}
-		if udp.DstPort == 2222 || udp.DstPort == 138 {
+		if udp.DstPort == 2222 || udp.DstPort == 44818 || udp.DstPort == 138 || uint16(udp.DstPort) == detect.DNP3Port {
 			return "outbound"
 		}
 	}
@@ -845,64 +869,6 @@ func (p *IndustrialProtocolParserImpl) determineDirection(packet gopacket.Packet
 // parseOPCUA parses OPC UA protocol (backward compatibility)
 func (p *IndustrialProtocolParserImpl) parseOPCUA(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
 	info, _ := p.parseOPCUAWithErrorHandling(packet, timestamp)
-	return info
-}
-
-// parseModbusTCP parses Modbus TCP protocol
-func (p *IndustrialProtocolParserImpl) parseModbusTCP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
-	if !p.isModbusTCPPort(packet) {
-		return nil
-	}
-
-	info := &model.IndustrialProtocolInfo{
-		Protocol:       "modbus",
-		Timestamp:      timestamp,
-		Confidence:     0.7,
-		DeviceIdentity: make(map[string]interface{}),
-		SecurityInfo:   make(map[string]interface{}),
-		AdditionalData: make(map[string]interface{}),
-	}
-
-	if err := p.extractPortInfo(packet, info, []uint16{502}); err != nil {
-		return nil
-	}
-
-	info.Confidence = 0.8
-	return info
-}
-
-// parseEtherNetIP parses EtherNet/IP (ENIP) protocol
-func (p *IndustrialProtocolParserImpl) parseEtherNetIP(packet gopacket.Packet, timestamp time.Time) *model.IndustrialProtocolInfo {
-	if !p.isEtherNetIPPort(packet) {
-		return nil
-	}
-
-	protocolName := "EtherNet/IP"
-	ports := []uint16{44818, 2222}
-	switch packet.TransportLayer().(type) {
-	case *layers.TCP:
-		protocolName = "EtherNet/IP(TCP)"
-		ports = []uint16{44818}
-	case *layers.UDP:
-		protocolName = "EtherNet/IP(UDP)"
-		ports = []uint16{2222}
-	}
-
-	info := &model.IndustrialProtocolInfo{
-		Protocol:       protocolName,
-		Timestamp:      timestamp,
-		Confidence:     0.6,
-		DeviceIdentity: make(map[string]interface{}),
-		SecurityInfo:   make(map[string]interface{}),
-		AdditionalData: make(map[string]interface{}),
-	}
-	// Determine ports and direction
-	if err := p.extractPortInfo(packet, info, ports); err != nil {
-		// Not necessarily an error; leave default info
-		info.Confidence = 0.5
-	} else {
-		info.Confidence = 0.9
-	}
 	return info
 }
 
@@ -1187,4 +1153,42 @@ func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) 
 		return ""
 	}
 	return patterns[0].PatternType
+}
+
+// protocolSwitches maps a detect.Protocol Key (also the name accepted by
+// --disable-protocols) to the Enable* field of the configuration. It is the
+// one place that ties the configuration to the registry.
+var protocolSwitches = map[string]func(*IndustrialParserConfig) *bool{
+	"ethernetip": func(c *IndustrialParserConfig) *bool { return &c.EnableEtherNetIP },
+	"opcua":      func(c *IndustrialParserConfig) *bool { return &c.EnableOPCUA },
+	"modbus":     func(c *IndustrialParserConfig) *bool { return &c.EnableModbus },
+	"dnp3":       func(c *IndustrialParserConfig) *bool { return &c.EnableDNP3 },
+	"s7":         func(c *IndustrialParserConfig) *bool { return &c.EnableS7 },
+	"s7commplus": func(c *IndustrialParserConfig) *bool { return &c.EnableS7CommPlus },
+	"smb":        func(c *IndustrialParserConfig) *bool { return &c.EnableSMB },
+	"nbns":       func(c *IndustrialParserConfig) *bool { return &c.EnableNBNS },
+}
+
+// ProtocolSwitchNames returns the names DisableProtocols accepts, sorted.
+func ProtocolSwitchNames() []string {
+	names := make([]string, 0, len(protocolSwitches))
+	for n := range protocolSwitches {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// DisableProtocols switches the named protocols off. Names are case
+// insensitive; an unknown name is an error so a typo cannot silently leave a
+// protocol on.
+func (c *IndustrialParserConfig) DisableProtocols(names []string) error {
+	for _, n := range names {
+		sw, ok := protocolSwitches[strings.ToLower(strings.TrimSpace(n))]
+		if !ok {
+			return fmt.Errorf("unknown protocol %q (valid: %s)", n, strings.Join(ProtocolSwitchNames(), ", "))
+		}
+		*sw(c) = false
+	}
+	return nil
 }

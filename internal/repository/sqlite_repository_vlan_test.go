@@ -202,3 +202,26 @@ func TestSQLiteRepository_UpdatePacketStoresVLANAndFlow(t *testing.T) {
 	require.NotNil(t, packets[0].VlanInnerID)
 	assert.Equal(t, 200, *packets[0].VlanInnerID)
 }
+
+func TestSQLiteRepository_UpsertDevicesKeepsHostname(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	dev := &model.Device{
+		TenantID: "t", Address: "10.0.0.1", AddressType: "IP", AddressScope: "IPv4", Hostname: "plc-line3",
+		FirstSeen: time.Now(), LastSeen: time.Now(),
+		MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
+		VLANSet: model.NewVLANSet(),
+	}
+	require.NoError(t, repo.UpsertDevices([]*model.Device{dev}))
+
+	got, err := repo.GetDevices("t", nil)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "plc-line3", got[0].Hostname, "insert")
+
+	got[0].Hostname = "plc-line3b"
+	got[0].TenantID = "t" // GetDevices does not load the tenant
+	require.NoError(t, repo.UpsertDevices([]*model.Device{got[0]}))
+	single, err := repo.GetDevice("t", "10.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, "plc-line3b", single.Hostname, "update")
+}

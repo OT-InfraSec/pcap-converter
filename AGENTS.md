@@ -137,6 +137,9 @@ pcap-importer-go/
 │   │   ├── sqlite_repository.go # SQLite implementation
 │   │   └── *_test.go            # Tests
 │   │
+│   │   ├── connection_labeler.go # Per-connection protocol label (ConnectionLabeler interface)
+│   │   └── industrial_{enip,modbus,dnp3,s7}.go # Map lib/detect messages to IndustrialProtocolInfo
+│   │
 │   ├── dns/                     # DNS post-processing
 │   │   ├── dns_processor.go
 │   │   └── dns_processor_impl.go
@@ -150,6 +153,14 @@ pcap-importer-go/
 │       └── mock_*.go            # Interface mocks
 │
 ├── lib/                         # Public reusable library code
+│   ├── detect/                  # Protocol registry, content probes and OT decoders
+│   │   ├── detect.go, default.go    # Registry; hint ports; the default protocol set
+│   │   ├── tcptrack.go              # Shared TCP stream tracker core (ordering, limits, partial frames)
+│   │   ├── modbus*.go, enip*.go, s7*.go, dnp3*.go  # Probe, decoder and tracker per protocol
+│   │   └── *_test.go                # Unit, corpus, fuzz and random-input tests
+│   │
+│   ├── tcpseq/                  # TCP sequence-number ordering of segments
+│   │
 │   ├── model/
 │   │   ├── device.go            # Device data structures
 │   │   ├── flow.go              # Flow data structures
@@ -157,6 +168,9 @@ pcap-importer-go/
 │   │   ├── security_zone.go     # IEC 62443 zones (planned)
 │   │   ├── set.go               # Set data structure
 │   │   └── *_test.go            # Validation tests
+│   │
+│   ├── hostid/                  # NetBIOS name service, session service, SMB2 negotiate, NTLMSSP decoders
+│   │   └── hostidtest/          # spec-built messages for tests
 │   │
 │   ├── helper/
 │   │   ├── address.go           # Address parsing utilities
@@ -173,6 +187,8 @@ pcap-importer-go/
 │   └── pcapgo/
 │       ├── ngread.go            # PCAP-NG reading
 │       └── pcapng.go            # PCAP-NG utilities
+│
+├── scripts/                     # Differential tools: *_demo_pcap.py, *_dump/, compare_*.py
 │
 ├── go.mod / go.sum              # Module definition and dependencies
 ├── database.sqlite              # Default SQLite database
@@ -456,6 +472,13 @@ go mod download
 - Integration tests verify end-to-end behavior
 
 ### Common Tasks
+
+#### Adding an OT Protocol Decoder (lib/detect)
+1. Write the strict probe and the decoder in `lib/detect/<proto>*.go`; register the protocol in `default.go`.
+2. For TCP, embed `tcpTracker[*yourConn, YourMessage]` (see `tcptrack.go`); the protocol keeps only framing and decoding.
+3. Set `Key` (short name for `--disable-protocols` and port-based labels) and `Label` (the `flows.protocol` value, `UDPLabel` if it differs) on the `detect.Protocol` in `default.go`, then add the `Key` to `protocolSwitches` in `internal/parser/industrial_parser.go` with an `Enable*` field. `TestEveryRegisteredProtocolHasASwitch` and `TestProtocolFlowLabelsAndKeys` fail if one is missing.
+4. Add the decoder to `decodeAllNoPanic` in `lib/detect/fuzz_test.go`, and its probe to `FuzzProbes`.
+5. Build a `scripts/<proto>_demo_pcap.py`, `<proto>_dump` and `compare_<proto>.py` against an independent dissector, and record the result in `docs/SURICATA_PROTOCOL_COMPARISON.md`.
 
 #### Adding a New Protocol Parser
 1. Implement protocol detection in `internal/parser/gopacket_parser.go`

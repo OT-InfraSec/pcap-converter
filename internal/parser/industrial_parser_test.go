@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -485,7 +486,7 @@ func createEtherNetIPTCPPacket() gopacket.Packet {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 
-	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, tcpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, tcpLayer, gopacket.Payload(enipEncap(0x63, 0, nil)))
 
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
@@ -514,7 +515,7 @@ func createEtherNetIPUDPPacket() gopacket.Packet {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 
-	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, udpLayer, gopacket.Payload([]byte{0x01, 0x00, 0x00, 0x00}))
+	gopacket.SerializeLayers(buffer, opts, ethLayer, ipLayer, udpLayer, gopacket.Payload(enipEncap(0x63, 0, nil)))
 
 	return gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
@@ -535,4 +536,43 @@ func createMultipleFlows(count int, interval time.Duration) []model.Flow {
 	}
 
 	return flows
+}
+
+func TestDisableProtocols(t *testing.T) {
+	cfg := DefaultIndustrialParserConfig()
+	require.NoError(t, cfg.DisableProtocols([]string{"S7CommPlus", " dnp3 "}))
+	assert.False(t, cfg.EnableS7CommPlus)
+	assert.False(t, cfg.EnableDNP3)
+	assert.True(t, cfg.EnableS7, "s7 stays on when only s7commplus is disabled")
+	assert.True(t, cfg.EnableModbus)
+
+	err := cfg.DisableProtocols([]string{"modbus", "modbuss"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "modbuss")
+	assert.Contains(t, err.Error(), "s7commplus")
+}
+
+func TestS7CommPlusSwitchIsSeparateFromS7(t *testing.T) {
+	plus := []byte{3, 0, 0, 7 + 4 + 15 + 4, 2, 0xf0, 0x80, 0x72, 1, 0, 15, 0x31, 0, 0, 0x04, 0xbb, 0, 0, 0, 1, 0, 0, 0, 0, 0x34, 0, 0x72, 1, 0, 0}
+	cfg := DefaultIndustrialParserConfig()
+	cfg.EnableS7CommPlus = false
+	l := newConnectionLabeler(labelerRegistry(cfg))
+	assert.Equal(t, "", tcpPkt(t, 50002, 102, plus, false)(l), "disabled S7CommPlus is not labelled")
+}
+
+// Every registered protocol must be switchable: a new protocol that is added to
+// the registry without a Key and an entry in protocolSwitches fails here.
+func TestEveryRegisteredProtocolHasASwitch(t *testing.T) {
+	for _, p := range detect.Default().Protocols() {
+		sw, ok := protocolSwitches[p.Key]
+		if !assert.True(t, ok, "%s (key %q) has no entry in protocolSwitches", p.Name, p.Key) {
+			continue
+		}
+		cfg := DefaultIndustrialParserConfig()
+		assert.True(t, *sw(&cfg), "%s is on by default", p.Name)
+		require.NoError(t, cfg.DisableProtocols([]string{p.Key}))
+		assert.False(t, *sw(&cfg), "%s is off after DisableProtocols", p.Name)
+		_, kept := labelerRegistry(cfg).Lookup(p.Name)
+		assert.False(t, kept, "%s is dropped from the labeler registry", p.Name)
+	}
 }

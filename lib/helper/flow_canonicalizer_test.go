@@ -53,3 +53,19 @@ func TestCanonicalizeBothServicePorts(t *testing.T) {
 		t.Fatalf("unexpected canonicalization when both are service ports: got %s, %s, %v", cs, cd, rev)
 	}
 }
+
+func TestDefaultWellKnownPorts_FromDetectionRegistry(t *testing.T) {
+	ports := NewFlowCanonicalizer().GetWellKnownPorts()
+	want := map[uint16]string{
+		44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3",
+		102: "S7", 80: "HTTP", 443: "HTTPS", 53: "DNS",
+	}
+	for port, name := range want {
+		if ports[port] != name {
+			t.Errorf("port %d: got %q, want %q", port, ports[port], name)
+		}
+	}
+	// Port 102 is a service port for orienting flows (the server side), whatever
+	// runs on it. It is only a hint for the protocol: the connection labeler
+	// needs S7 content before it calls a connection S7 (finding F-05).
+}

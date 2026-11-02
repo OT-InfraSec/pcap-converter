@@ -1,0 +1,270 @@
+package parser
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/InfraSecConsult/pcap-importer-go/internal/repository"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Real request from the minicps testbed capture: FC3, 4 registers from 0x37d0.
+var modbusReadRequest = []byte{0x2d, 0xe9, 0x00, 0x00, 0x00, 0x06, 0x03, 0x03, 0x37, 0xd0, 0x00, 0x04}
+
+func TestParseModbusTCP_Detection(t *testing.T) {
+	p := newENIPTestParser(t)
+	ts := time.Unix(1700000000, 0)
+	tcp := func(src, dst uint16, syn bool, payload []byte) gopacket.Packet {
+		return buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), SYN: syn, ACK: !syn}, nil, payload)
+	}
+
+	t.Run("valid request on 502", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, false, modbusReadRequest), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "modbus", info.Protocol)
+		assert.Equal(t, 0.9, info.Confidence)
+		assert.Equal(t, uint16(502), info.Port)
+		assert.Equal(t, "outbound", info.Direction)
+	})
+
+	t.Run("response from 502 is inbound", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(502, 50000, false, modbusReadRequest), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "inbound", info.Direction)
+	})
+
+	t.Run("content on another port is detected with lower confidence", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 1502, false, modbusReadRequest), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, 0.8, info.Confidence)
+	})
+
+	t.Run("garbage on 502 is not Modbus", func(t *testing.T) {
+		// A fresh parser: a connection already recognised as Modbus decodes
+		// anything as a (malformed) frame.
+		fresh := newENIPTestParser(t)
+		assert.Nil(t, fresh.parseModbusTCP(tcp(50000, 502, false, []byte("GET / HTTP/1.1\r\nHost: plc\r\n")), ts))
+	})
+
+	t.Run("non-zero protocol id is not Modbus", func(t *testing.T) {
+		bad := append([]byte(nil), modbusReadRequest...)
+		bad[3] = 1
+		fresh := newENIPTestParser(t)
+		assert.Nil(t, fresh.parseModbusTCP(tcp(50000, 502, false, bad), ts))
+	})
+
+	t.Run("handshake segment is below the default threshold", func(t *testing.T) {
+		pkt := tcp(50000, 502, true, nil)
+		info := p.parseModbusTCP(pkt, ts)
+		require.NotNil(t, info)
+		assert.Less(t, info.Confidence, DefaultIndustrialParserConfig().ConfidenceThreshold)
+		got, err := p.ParseIndustrialProtocols(pkt)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("UDP is never Modbus/TCP", func(t *testing.T) {
+		pkt := buildTransportPacket(t, nil, &layers.UDP{SrcPort: 50000, DstPort: 502}, modbusReadRequest)
+		assert.Nil(t, p.parseModbusTCP(pkt, ts))
+	})
+}
+
+func TestConnectionLabeler_Modbus(t *testing.T) {
+	l := newConnectionLabeler(detect.Default())
+	mk := func(src, dst uint16, syn bool, payload []byte) string {
+		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), SYN: syn, ACK: !syn}, nil, payload)
+		srcIP, dstIP := "10.0.0.1", "10.0.0.2"
+		if src < dst {
+			srcIP, dstIP = dstIP, srcIP
+		}
+		return l.Label(pkt, srcIP, dstIP, model.VLANTag{})
+	}
+	assert.Equal(t, "modbus", mk(50000, 502, true, nil))
+	assert.Equal(t, "modbus", mk(502, 50000, true, nil))
+	assert.Equal(t, "modbus", mk(50000, 502, false, modbusReadRequest))
+	assert.Equal(t, "modbus", mk(502, 50000, false, nil))
+	// Mid-ADU continuation after recognition keeps the label.
+	assert.Equal(t, "modbus", mk(502, 50000, false, []byte("rest of a long response........")))
+}
+
+func TestModbusConnectionIsOneFlow(t *testing.T) {
+	repo, err := repository.NewSQLiteRepository(filepath.Join(t.TempDir(), "db.sqlite"))
+	require.NoError(t, err)
+	cli := func(f layers.TCP, payload []byte) gopacket.Packet {
+		f.SrcPort, f.DstPort = 50000, 502
+		return buildTransportPacket(t, &f, nil, payload)
+	}
+	pkts := []gopacket.Packet{
+		cli(layers.TCP{SYN: true}, nil),
+		cli(layers.TCP{ACK: true}, nil),
+		cli(layers.TCP{ACK: true, PSH: true}, modbusReadRequest),
+		cli(layers.TCP{ACK: true}, nil),
+		cli(layers.TCP{ACK: true, PSH: true}, modbusReadRequest),
+		cli(layers.TCP{ACK: true, FIN: true}, nil),
+	}
+	require.NoError(t, NewGopacketParser(writePCAP(t, pkts), repo, "").ParseFile())
+
+	flows, err := repo.GetFlows("", nil)
+	require.NoError(t, err)
+	require.Len(t, flows, 1, "handshake, data and teardown must be one flow")
+	assert.Equal(t, "modbus", flows[0].Protocol)
+	assert.Equal(t, 6, flows[0].PacketCountOut+flows[0].PacketCountIn)
+}
+
+func TestNonModbusOnPort502IsNotLabelled(t *testing.T) {
+	repo, err := repository.NewSQLiteRepository(filepath.Join(t.TempDir(), "db.sqlite"))
+	require.NoError(t, err)
+	pkts := []gopacket.Packet{
+		buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 502, ACK: true, PSH: true}, nil,
+			[]byte("GET /index.html HTTP/1.1\r\nHost: plc\r\n\r\n")),
+		buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 502, ACK: true}, nil, nil),
+	}
+	require.NoError(t, NewGopacketParser(writePCAP(t, pkts), repo, "").ParseFile())
+	flows, err := repo.GetFlows("", nil)
+	require.NoError(t, err)
+	for _, f := range flows {
+		assert.NotEqual(t, "modbus", f.Protocol, "flow %+v", f)
+	}
+}
+
+func TestParseModbusTCP_DecodesFunction(t *testing.T) {
+	p := newENIPTestParser(t)
+	ts := time.Unix(1700000000, 0)
+	// Sequence numbers advance per direction, as on a real connection: a
+	// repeated number would be a retransmission and be dropped.
+	seqs := map[[2]uint16]uint32{}
+	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
+		k := [2]uint16{src, dst}
+		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true, Seq: 1000 + seqs[k]}, nil, payload)
+		seqs[k] += uint32(len(payload))
+		return pkt
+	}
+	writeReq := []byte{0, 7, 0, 0, 0, 6, 1, 6, 0, 9, 0x12, 0x34} // FC6 write single register 9
+	exception := []byte{0, 7, 0, 0, 0, 3, 1, 0x86, 2}
+
+	t.Run("request", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "Read Holding Registers", info.MessageType)
+		assert.Equal(t, "read", info.AdditionalData["access"])
+		assert.Equal(t, uint8(3), info.AdditionalData["function_code"])
+		assert.Equal(t, 0x37d0, info.AdditionalData["address"])
+		assert.Equal(t, 4, info.AdditionalData["quantity"])
+		assert.Equal(t, uint8(3), info.AdditionalData["unit_id"])
+		assert.Equal(t, false, info.AdditionalData["is_exception"])
+	})
+	t.Run("write is flagged as configuration", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, writeReq), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, "write", info.AdditionalData["access"])
+		assert.True(t, info.IsConfiguration)
+	})
+	t.Run("exception response", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(502, 50000, exception), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, true, info.AdditionalData["is_exception"])
+		assert.Equal(t, "Illegal Data Address", info.AdditionalData["exception"])
+		assert.NotContains(t, info.AdditionalData, "address", "response bodies are not read as requests")
+	})
+	t.Run("read/write multiple registers reports both ranges", func(t *testing.T) {
+		rw := []byte{0, 8, 0, 0, 0, 15, 1, 23, 0x39, 0xd8, 0, 10, 0x39, 0xe0, 0, 2, 4, 0, 1, 0, 2}
+		info := p.parseModbusTCP(tcp(50000, 502, rw), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, 0x39d8, info.AdditionalData["address"])
+		assert.Equal(t, 0x39e0, info.AdditionalData["write_address"])
+		assert.Equal(t, 2, info.AdditionalData["write_quantity"])
+		assert.True(t, info.IsConfiguration)
+	})
+	t.Run("pipelined ADUs are all counted", func(t *testing.T) {
+		info := p.parseModbusTCP(tcp(50000, 502, append(append([]byte(nil), modbusReadRequest...), writeReq...)), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, 2, info.AdditionalData["message_count"])
+		assert.Equal(t, []uint8{3, 6}, info.AdditionalData["function_codes"])
+		assert.Equal(t, "write", info.AdditionalData["access"], "a write anywhere in the segment wins")
+	})
+}
+
+func TestParseModbusTCP_RecognisedConnection(t *testing.T) {
+	ts := time.Unix(1700000000, 0)
+	// Sequence numbers advance per direction, as on a real connection: a
+	// repeated number would be a retransmission and be dropped.
+	seqs := map[[2]uint16]uint32{}
+	tcp := func(src, dst uint16, payload []byte) gopacket.Packet {
+		k := [2]uint16{src, dst}
+		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), ACK: true, Seq: 1000 + seqs[k]}, nil, payload)
+		seqs[k] += uint32(len(payload))
+		return pkt
+	}
+	badProto := append([]byte(nil), modbusReadRequest...)
+	badProto[3] = 1
+
+	t.Run("a malformed ADU is Modbus once the connection is recognised", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		info := p.parseModbusTCP(tcp(50000, 502, badProto), ts)
+		require.NotNil(t, info)
+		assert.Equal(t, []string{detect.ModbusEventInvalidProtocolID}, info.AdditionalData["events"])
+		assert.Equal(t, uint8(3), info.AdditionalData["function_code"])
+	})
+	t.Run("the same ADU first on a connection is not Modbus", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		assert.Nil(t, p.parseModbusTCP(tcp(50000, 502, badProto), ts))
+	})
+	t.Run("another connection is not affected", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		assert.Nil(t, p.parseModbusTCP(tcp(50001, 502, badProto), ts))
+	})
+	t.Run("a message split across segments is decoded when complete", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		first := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest[:7]), ts)
+		require.NotNil(t, first, "the segment still belongs to a Modbus connection")
+		assert.NotContains(t, first.AdditionalData, "function_code")
+		second := p.parseModbusTCP(tcp(50000, 502, modbusReadRequest[7:]), ts)
+		require.NotNil(t, second)
+		assert.Equal(t, uint8(3), second.AdditionalData["function_code"])
+		assert.Equal(t, 0x37d0, second.AdditionalData["address"])
+	})
+	t.Run("the continuation of a long response raises no events", func(t *testing.T) {
+		p := newENIPTestParser(t)
+		require.NotNil(t, p.parseModbusTCP(tcp(50000, 502, modbusReadRequest), ts))
+		resp := append([]byte{0, 9, 0, 0, 0, 3 + 250, 3, 3, 250}, make([]byte, 250)...)
+		for _, seg := range [][]byte{resp[:100], resp[100:200]} {
+			info := p.parseModbusTCP(tcp(502, 50000, seg), ts)
+			require.NotNil(t, info)
+			assert.NotContains(t, info.AdditionalData, "events")
+			assert.NotContains(t, info.AdditionalData, "function_code")
+		}
+		last := p.parseModbusTCP(tcp(502, 50000, resp[200:]), ts)
+		require.NotNil(t, last)
+		assert.Equal(t, uint8(3), last.AdditionalData["function_code"])
+		assert.NotContains(t, last.AdditionalData, "events")
+	})
+}
+
+func TestParseModbusTCP_Retransmission(t *testing.T) {
+	ts := time.Unix(1700000000, 0)
+	p := newENIPTestParser(t)
+	at := func(seq uint32, payload []byte) gopacket.Packet {
+		return buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 502, ACK: true, Seq: seq}, nil, payload)
+	}
+	first := p.parseModbusTCP(at(1000, modbusReadRequest), ts)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.AdditionalData["message_count"])
+
+	again := p.parseModbusTCP(at(1000, modbusReadRequest), ts)
+	require.NotNil(t, again, "a retransmitted segment still belongs to a Modbus connection")
+	assert.NotContains(t, again.AdditionalData, "function_code", "the message was already counted")
+	assert.NotContains(t, again.AdditionalData, "message_count")
+
+	next := p.parseModbusTCP(at(1000+uint32(len(modbusReadRequest)), modbusReadRequest), ts)
+	require.NotNil(t, next)
+	assert.Equal(t, 1, next.AdditionalData["message_count"])
+}

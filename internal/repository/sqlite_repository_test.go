@@ -2,6 +2,7 @@ package repository
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -435,4 +436,34 @@ func TestSQLiteRepository_LinkPacketsToFlows(t *testing.T) {
 	linkedCount, err = repo.LinkPacketsToFlows(tenantID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), linkedCount, "Should link 0 packets on second run (all already linked)")
+}
+
+// A flow whose endpoint has no device row used to end the whole process through
+// log.Fatalf, with the reason only in importer.log. It must be a returned error.
+func TestSQLiteRepository_AddFlowWithoutDeviceReturnsError(t *testing.T) {
+	repo, err := NewSQLiteRepository(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create repo: %v", err)
+	}
+	defer repo.Close()
+	ts := time.Now()
+
+	src := &model.Device{Address: "192.168.1.1", AddressType: "IPv4", FirstSeen: ts, LastSeen: ts, MACAddressSet: model.NewMACAddressSet()}
+	if err := repo.AddDevice(src); err != nil {
+		t.Fatalf("AddDevice failed: %v", err)
+	}
+
+	flow := &model.Flow{
+		SrcIP: net.ParseIP("192.168.1.1"), DstIP: net.ParseIP("192.168.1.99"),
+		SrcPort: 1234, DstPort: 80, Protocol: "TCP",
+		PacketCountOut: 1, ByteCountOut: 100, FirstSeen: ts, LastSeen: ts,
+		PacketRefs: []int64{1}, SourcePorts: model.NewSet(), DestinationPorts: model.NewSet(),
+	}
+	err = repo.AddFlow(flow)
+	if err == nil {
+		t.Fatal("expected an error for a flow to an unknown device")
+	}
+	if !strings.Contains(err.Error(), "192.168.1.99") {
+		t.Fatalf("error should name the missing address, got: %v", err)
+	}
 }

@@ -513,7 +513,7 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 }
 
 func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interface{}) ([]*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans FROM devices WHERE tenant_id = ?`
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname FROM devices WHERE tenant_id = ?`
 	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
@@ -532,13 +532,14 @@ func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interf
 	var devices []*model2.Device
 	for rows.Next() {
 		var firstSeenStr, lastSeenStr, macAddressesStr string
-		var vlansStr sql.NullString
+		var vlansStr, hostname sql.NullString
 		var device model2.Device
 
 		if err := rows.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
-			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination, &vlansStr); err != nil {
+			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination, &vlansStr, &hostname); err != nil {
 			return nil, err
 		}
+		device.Hostname = hostname.String
 
 		device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
 		device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
@@ -584,14 +585,12 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 
 	srcDevice, err := r.GetDeviceForAddress(srcAddress)
 	if err != nil {
-		log.Fatalf("Error getting source device for address %s: %v", srcAddress, err)
-		return err
+		return fmt.Errorf("flow source device %s: %w", srcAddress, err)
 	}
 
 	destDevice, err := r.GetDeviceForAddress(destAddress)
 	if err != nil {
-		log.Fatalf("Error getting destination device for address %s: %v", destAddress, err)
-		return err
+		return fmt.Errorf("flow destination device %s: %w", destAddress, err)
 	}
 
 	if flow.Duration <= 0 {
@@ -626,14 +625,13 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		intPtrToArg(flow.VlanInnerID),
 	)
 	if err != nil {
-		log.Fatalf("Error inserting flow: %v", err)
-		return err
+		return fmt.Errorf("insert flow: %w", err)
 	}
 	flow.ID, err = result.LastInsertId()
 	if err != nil {
-		log.Fatalf("Error getting last insert ID for flow: %v", err)
+		return fmt.Errorf("last insert id for flow: %w", err)
 	}
-	return err
+	return nil
 }
 
 func (r *SQLiteRepository) GetFlows(tenantID string, filters map[string]interface{}) ([]*model2.Flow, error) {
@@ -1516,13 +1514,13 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ?, hostname = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1561,6 +1559,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.AdditionalData,
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
+				device.Hostname,
 				deviceID,
 			)
 			if err != nil {
@@ -1586,6 +1585,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.AdditionalData,
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
+				device.Hostname,
 			)
 			if err != nil {
 				return err
