@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/InfraSecConsult/pcap-importer-go/internal/testutil"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
-	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 )
@@ -139,20 +139,13 @@ func TestLabelerRegistryHonoursTheEnableFlags(t *testing.T) {
 	assert.Equal(t, "", tcpPkt(t, 50003, 102, nil, true)(off), "no port hint for a disabled protocol")
 }
 
-// fakeLabeler shows GopacketParser takes any ConnectionLabeler.
-type fakeLabeler struct{ calls int }
-
-func (f *fakeLabeler) Label(gopacket.Packet, string, string, model.VLANTag) string {
-	f.calls++
-	return "fake"
-}
-
 func TestGopacketParserTakesAnInjectedLabeler(t *testing.T) {
 	p := &GopacketParser{}
-	f := &fakeLabeler{}
+	f := &testutil.MockConnectionLabeler{Result: "fake"}
 	p.SetConnectionLabeler(f)
-	assert.Equal(t, "fake", p.connLabeler.Label(nil, "", "", model.VLANTag{}))
-	assert.Equal(t, 1, f.calls)
+	vlan := model.VLANTag{}
+	assert.Equal(t, "fake", p.connLabeler.Label(nil, "10.0.0.1", "10.0.0.2", vlan))
+	assert.Equal(t, []testutil.LabelCall{{SrcIP: "10.0.0.1", DstIP: "10.0.0.2", VLAN: vlan}}, f.Calls)
 }
 
 func TestSetIndustrialConfigReachesParserAndLabeler(t *testing.T) {

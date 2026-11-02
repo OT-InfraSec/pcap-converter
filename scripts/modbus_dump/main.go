@@ -7,68 +7,38 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
+	"github.com/InfraSecConsult/pcap-importer-go/scripts/internal/dumpcap"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: modbus_dump capture.pcap")
-		os.Exit(2)
-	}
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer f.Close()
-	r, err := pcapgo.NewReader(f)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	enc := json.NewEncoder(os.Stdout)
 	// The same tracker the importer uses, so the dump shows what it would see.
 	tracker := detect.NewModbusTracker()
-	for n := 1; ; n++ {
-		data, _, err := r.ReadPacketData()
-		if err == io.EOF {
-			return
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		pkt := gopacket.NewPacket(data, r.LinkType(), gopacket.NoCopy)
+	dumpcap.ForEachPacket("modbus_dump", func(n int, pkt gopacket.Packet) {
 		tcp, _ := pkt.Layer(layers.LayerTypeTCP).(*layers.TCP)
 		nl := pkt.NetworkLayer()
 		if tcp == nil || nl == nil {
-			continue
+			return
 		}
 		request := uint16(tcp.DstPort) == detect.ModbusPort
 		if !request && uint16(tcp.SrcPort) != detect.ModbusPort {
-			continue
+			return
 		}
-		key := fmt.Sprintf("%s:%d|%s:%d", nl.NetworkFlow().Src(), tcp.SrcPort, nl.NetworkFlow().Dst(), tcp.DstPort)
-		if !request {
-			key = fmt.Sprintf("%s:%d|%s:%d", nl.NetworkFlow().Dst(), tcp.DstPort, nl.NetworkFlow().Src(), tcp.SrcPort)
-		}
-		for _, m := range tracker.FeedTCP(key, request, detect.TCPSegment{
-			Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: tcp.Payload,
-		}, true) {
+		src, dst := nl.NetworkFlow().Src().String(), nl.NetworkFlow().Dst().String()
+		key := dumpcap.Key(src, tcp.SrcPort, dst, tcp.DstPort, request)
+		for _, m := range tracker.FeedTCP(key, request, dumpcap.Segment(tcp), true) {
 			enc.Encode(map[string]any{
-				"pkt": n, "src": nl.NetworkFlow().Src().String(), "dst": nl.NetworkFlow().Dst().String(),
+				"pkt": n, "src": src, "dst": dst,
 				"sport": uint16(tcp.SrcPort), "dport": uint16(tcp.DstPort),
 				"request": request, "txn": m.TransactionID, "unit": m.UnitID, "fc": m.FunctionCode, "raw_fc": m.RawFunction,
 				"exception": m.IsException, "exc_code": m.ExceptionCode, "addr": m.Address, "qty": m.Quantity,
 				"access": m.Access, "events": m.Events,
 			})
 		}
-	}
+	})
 }

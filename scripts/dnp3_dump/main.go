@@ -8,14 +8,12 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
+	"github.com/InfraSecConsult/pcap-importer-go/scripts/internal/dumpcap"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 )
 
 func record(n int, src, dst string, sport, dport uint16, request bool, transport string, m detect.DNP3Message) map[string]any {
@@ -45,37 +43,13 @@ func record(n int, src, dst string, sport, dport uint16, request bool, transport
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: dnp3_dump capture.pcap")
-		os.Exit(2)
-	}
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer f.Close()
-	r, err := pcapgo.NewReader(f)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	enc := json.NewEncoder(os.Stdout)
 	tracker := detect.NewDNP3Tracker()
 	const port = detect.DNP3Port
-	for n := 1; ; n++ {
-		data, _, err := r.ReadPacketData()
-		if err == io.EOF {
-			return
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		pkt := gopacket.NewPacket(data, r.LinkType(), gopacket.NoCopy)
+	dumpcap.ForEachPacket("dnp3_dump", func(n int, pkt gopacket.Packet) {
 		nl := pkt.NetworkLayer()
 		if nl == nil {
-			continue
+			return
 		}
 		src, dst := nl.NetworkFlow().Src().String(), nl.NetworkFlow().Dst().String()
 		if udp, _ := pkt.Layer(layers.LayerTypeUDP).(*layers.UDP); udp != nil {
@@ -83,21 +57,16 @@ func main() {
 			for _, m := range detect.DecodeDNP3Datagram(udp.Payload) {
 				enc.Encode(record(n, src, dst, uint16(udp.SrcPort), uint16(udp.DstPort), request, "udp", m))
 			}
-			continue
+			return
 		}
 		tcp, _ := pkt.Layer(layers.LayerTypeTCP).(*layers.TCP)
 		if tcp == nil {
-			continue
+			return
 		}
 		request := uint16(tcp.DstPort) == port
-		key := fmt.Sprintf("%s:%d|%s:%d", src, tcp.SrcPort, dst, tcp.DstPort)
-		if !request {
-			key = fmt.Sprintf("%s:%d|%s:%d", dst, tcp.DstPort, src, tcp.SrcPort)
-		}
-		for _, m := range tracker.FeedTCP(key, request, detect.TCPSegment{
-			Seq: tcp.Seq, SYN: tcp.SYN, FIN: tcp.FIN, RST: tcp.RST, ACK: tcp.ACK, Payload: tcp.Payload,
-		}, true) {
+		key := dumpcap.Key(src, tcp.SrcPort, dst, tcp.DstPort, request)
+		for _, m := range tracker.FeedTCP(key, request, dumpcap.Segment(tcp), true) {
 			enc.Encode(record(n, src, dst, uint16(tcp.SrcPort), uint16(tcp.DstPort), request, "tcp", m))
 		}
-	}
+	})
 }
