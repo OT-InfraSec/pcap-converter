@@ -52,7 +52,7 @@ State at the time of writing: PR #13, head `f77086c`.
 5. **FIXED: flags had no CLI.** `importer import --disable-protocols s7commplus,dnp3` now applies the flags, and `EnableS7CommPlus` is separate from `EnableS7`. Original finding: `SetIndustrialConfig` exists, but the importer CLI
    cannot set `Enable*`; it runs with everything on. S7 and S7CommPlus share
    `EnableS7`. Decide whether to add flags and a separate S7CommPlus switch.
-6. **Scope that rode along and the plan did not ask for:** `AddFlow` returns
+6. **DECIDED: stays in this PR, no split** (entangled in `gopacket_parser.go`, already reviewed together). Scope that rode along and the plan did not ask for: `AddFlow` returns
    errors instead of `log.Fatalf`; ARP-request and 0.0.0.0 device rules and a
    synthesised device row per flow endpoint (`gopacket_parser.go`); the
    per-protocol dump tools. Decide whether to split them into their own PRs.
