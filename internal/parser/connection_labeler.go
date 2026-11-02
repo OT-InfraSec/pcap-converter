@@ -38,9 +38,9 @@ func labelerRegistry(cfg IndustrialParserConfig) *detect.Registry {
 	return detect.Default().Without(off...)
 }
 
-// maxTrackedConnections bounds the labeler's memory on very large captures.
+// maxLabelerConnections bounds the labeler's memory on very large captures.
 // Past the limit new connections are labelled per packet only.
-const maxTrackedConnections = 500_000
+const maxLabelerConnections = 500_000
 
 // connectionLabeler gives every packet of a connection the same application
 // protocol label, which the flow table needs: flows are keyed by host pair and
@@ -65,16 +65,16 @@ const maxTrackedConnections = 500_000
 // deferred flow accounting and is tracked in the plan.
 type connectionLabeler struct {
 	registry *detect.Registry
-	conns    map[string]*connState
+	conns    map[string]*labelState
 }
 
-type connState struct {
+type labelState struct {
 	label  string // fixed by recognised content
 	vetoed bool   // payload contradicted the hint-port guess
 }
 
 func newConnectionLabeler(r *detect.Registry) *connectionLabeler {
-	return &connectionLabeler{registry: r, conns: make(map[string]*connState)}
+	return &connectionLabeler{registry: r, conns: make(map[string]*labelState)}
 }
 
 // flowLabel is the label stored in the flows table for a protocol on a
@@ -108,14 +108,14 @@ func connKey(t detect.Transport, srcIP string, srcPort uint16, dstIP string, dst
 
 // entry returns the connection's state, creating it if there is room. It
 // returns nil when the connection has none and the limit is reached.
-func (l *connectionLabeler) entry(key string, st *connState) *connState {
+func (l *connectionLabeler) entry(key string, st *labelState) *labelState {
 	if st != nil {
 		return st
 	}
-	if len(l.conns) >= maxTrackedConnections {
+	if len(l.conns) >= maxLabelerConnections {
 		return nil
 	}
-	st = &connState{}
+	st = &labelState{}
 	l.conns[key] = st
 	return st
 }
@@ -165,7 +165,7 @@ func sharedLabel(ps []detect.Protocol, t detect.Transport) string {
 // labelShared applies the neutral label to a connection on a shared hint port.
 // decided is false when every candidate vetoed the payload, so the caller
 // falls through to the normal rules.
-func (l *connectionLabeler) labelShared(key string, st *connState, t detect.Transport, payload []byte, shared []detect.Protocol) (label string, decided bool) {
+func (l *connectionLabeler) labelShared(key string, st *labelState, t detect.Transport, payload []byte, shared []detect.Protocol) (label string, decided bool) {
 	if st != nil && st.vetoed {
 		return "", false
 	}

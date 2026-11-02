@@ -28,22 +28,16 @@ type dnp3Conn struct {
 	reasm [2]dnp3Reasm
 }
 
-func (c *dnp3Conn) resetPending(dir int) { c.reasm[dir] = dnp3Reasm{} }
+func (c *dnp3Conn) resetPending(dir streamDir) { c.reasm[dir] = dnp3Reasm{} }
 
 // NewDNP3Tracker returns a tracker with the default connection limit.
-func NewDNP3Tracker() *DNP3Tracker { return NewDNP3TrackerLimit(defaultTrackerLimit) }
+func NewDNP3Tracker() *DNP3Tracker { return NewDNP3TrackerLimit(defaultMaxConnections) }
 
 // NewDNP3TrackerLimit returns a tracker that keeps state for at most max connections.
 func NewDNP3TrackerLimit(max int) *DNP3Tracker {
-	return &DNP3Tracker{newTCPTracker[*dnp3Conn, DNP3Message](max, dnp3MaxFrame, func() *dnp3Conn { return &dnp3Conn{} })}
-}
-
-// FeedTCP adds a TCP segment and returns the messages it completes. key must be
-// the same for both directions; toServer is true for client to server; hint
-// says the connection uses the DNP3 port, which lets a first segment shorter
-// than a frame header be kept until the rest arrives.
-func (t *DNP3Tracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []DNP3Message {
-	return t.feedTCP(key, toServer, seg, hint, t.feed)
+	t := &DNP3Tracker{}
+	t.tcpTracker = newTCPTracker(max, dnp3MaxFrame, func() *dnp3Conn { return &dnp3Conn{} }, t.feed)
+	return t
 }
 
 // DecodeDNP3Datagram decodes the link frames of a UDP datagram. A datagram stands
@@ -70,7 +64,7 @@ func DecodeDNP3Datagram(b []byte) []DNP3Message {
 	return out
 }
 
-func (t *DNP3Tracker) feed(key string, dir int, payload []byte, hint bool) []DNP3Message {
+func (t *DNP3Tracker) feed(key string, dir streamDir, payload []byte, hint bool) []DNP3Message {
 	c := t.conns[key]
 	buf := payload
 	if c != nil {
@@ -143,7 +137,7 @@ func (t *DNP3Tracker) feed(key string, dir int, payload []byte, hint bool) []DNP
 
 // frame handles one link frame: it adds the transport segment to the pending
 // fragment of the direction and decodes the fragment when it is complete.
-func (c *dnp3Conn) frame(f DNP3Frame, dir int) DNP3Message {
+func (c *dnp3Conn) frame(f DNP3Frame, dir streamDir) DNP3Message {
 	m := DNP3Message{Frame: f, LinkName: DNP3LinkFunctionName(f.Primary(), f.LinkFunction()), Events: append([]string(nil), f.Events...)}
 	// Only user data frames carry transport segments.
 	if !f.Primary() || (f.LinkFunction() != 3 && f.LinkFunction() != 4) || len(f.UserData) == 0 {

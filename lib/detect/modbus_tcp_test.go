@@ -3,6 +3,8 @@ package detect
 import (
 	"reflect"
 	"testing"
+
+	"github.com/InfraSecConsult/pcap-importer-go/lib/tcpseq"
 )
 
 func seg(seq uint32, payload []byte) TCPSegment {
@@ -25,6 +27,15 @@ func TestModbusTrackerTCP(t *testing.T) {
 	}
 	const C, S = true, false
 
+	t.Run("after lost bytes the direction must show a valid ADU again", func(t *testing.T) {
+		tr := NewModbusTracker()
+		eq(t, tr.FeedTCP("c", C, seg(1000, req(1)), true), 1)
+		// Far beyond the window: bytes are lost for good. The segment starts
+		// mid-message, so it is not an ADU and must not be decoded.
+		junk := []byte{0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+		eq(t, tr.FeedTCP("c", C, seg(1000+2*tcpseq.MaxWindow, junk), true))
+		eq(t, tr.FeedTCP("c", C, seg(1000+2*tcpseq.MaxWindow+uint32(len(junk)), req(2)), true), 2)
+	})
 	t.Run("a retransmitted ADU is decoded once", func(t *testing.T) {
 		tr := NewModbusTracker()
 		r := req(1)

@@ -93,8 +93,8 @@ func TestConnectionLabeler_UDPImplicitIO(t *testing.T) {
 
 func TestConnectionLabeler_Cap(t *testing.T) {
 	l := newConnectionLabeler(detect.Default())
-	for i := 0; i < maxTrackedConnections; i++ {
-		l.conns[fmt.Sprintf("filler-%d", i)] = &connState{}
+	for i := 0; i < maxLabelerConnections; i++ {
+		l.conns[fmt.Sprintf("filler-%d", i)] = &labelState{}
 	}
 	before := len(l.conns)
 	pkt := buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 44818, SYN: true}, nil, nil)

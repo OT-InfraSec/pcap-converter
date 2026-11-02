@@ -23,22 +23,16 @@ type enipConn struct{ tcpConn }
 const enipMaxPDU = ENIPHeaderLen + 0xffff
 
 // NewENIPTracker returns a tracker with the default connection limit.
-func NewENIPTracker() *ENIPTracker { return NewENIPTrackerLimit(defaultTrackerLimit) }
+func NewENIPTracker() *ENIPTracker { return NewENIPTrackerLimit(defaultMaxConnections) }
 
 // NewENIPTrackerLimit returns a tracker that keeps state for at most max connections.
 func NewENIPTrackerLimit(max int) *ENIPTracker {
-	return &ENIPTracker{newTCPTracker[*enipConn, ENIPMessage](max, enipMaxPDU, func() *enipConn { return &enipConn{} })}
+	t := &ENIPTracker{}
+	t.tcpTracker = newTCPTracker(max, enipMaxPDU, func() *enipConn { return &enipConn{} }, t.feed)
+	return t
 }
 
-// FeedTCP adds a TCP segment and returns the messages it completes. key must be
-// the same for both directions; toServer is true for client to server; hint
-// says the connection uses the EtherNet/IP port, which allows a first segment
-// shorter than a header to be kept until the rest arrives.
-func (t *ENIPTracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []ENIPMessage {
-	return t.feedTCP(key, toServer, seg, hint, t.feed)
-}
-
-func (t *ENIPTracker) feed(key string, dir int, payload []byte, hint bool) []ENIPMessage {
+func (t *ENIPTracker) feed(key string, dir streamDir, payload []byte, hint bool) []ENIPMessage {
 	c := t.conns[key]
 	buf := payload
 	if c != nil {

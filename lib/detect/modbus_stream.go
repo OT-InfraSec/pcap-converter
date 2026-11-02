@@ -7,8 +7,9 @@ package detect
 // leniently, so a bad protocol id or length is an event and not silence, and
 // a message split across segments is held until it is complete. The bytes of a
 // partial message are kept per connection and direction (at most one ADU, 260
-// bytes). Segments are taken in the order they arrive: retransmitted or
-// reordered segments are not recognised, that needs real TCP reassembly.
+// bytes). FeedTCP orders segments by sequence number (package tcpseq), so
+// retransmitted or reordered segments are handled; after bytes are lost for good
+// the direction must show a valid ADU again before decoding resumes.
 // Before a connection is known, only a payload that is a valid ADU counts, so
 // other traffic on the same port leaves no state.
 //
@@ -22,20 +23,14 @@ type ModbusTracker struct {
 type modbusConn struct{ tcpConn }
 
 // NewModbusTracker returns a tracker with the default connection limit.
-func NewModbusTracker() *ModbusTracker { return NewModbusTrackerLimit(defaultTrackerLimit) }
+func NewModbusTracker() *ModbusTracker { return NewModbusTrackerLimit(defaultMaxConnections) }
 
 // NewModbusTrackerLimit returns a tracker that keeps state for at most max
 // connections.
 func NewModbusTrackerLimit(max int) *ModbusTracker {
-	return &ModbusTracker{newTCPTracker[*modbusConn, ModbusMessage](max, ModbusMaxADULen, func() *modbusConn { return &modbusConn{} })}
-}
-
-// FeedTCP is Feed for a TCP segment with its sequence number and flags: see
-// tcpTracker.feedTCP for how segments are ordered and connections end.
-func (t *ModbusTracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []ModbusMessage {
-	return t.feedTCP(key, toServer, seg, hint, func(key string, dir int, p []byte, hint bool) []ModbusMessage {
-		return t.Feed(key, dir == dirToServer, p, hint)
-	})
+	t := &ModbusTracker{}
+	t.tcpTracker = newTCPTracker(max, ModbusMaxADULen, func() *modbusConn { return &modbusConn{} }, t.feed)
+	return t
 }
 
 // Feed adds the payload of one TCP segment and returns the messages it
@@ -44,7 +39,11 @@ func (t *ModbusTracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint 
 // uses the Modbus port, which allows a first segment shorter than a header to
 // be kept until the rest arrives.
 func (t *ModbusTracker) Feed(key string, toServer bool, payload []byte, hint bool) []ModbusMessage {
-	dir := direction(toServer)
+	return t.feed(key, direction(toServer), payload, hint)
+}
+
+func (t *ModbusTracker) feed(key string, dir streamDir, payload []byte, hint bool) []ModbusMessage {
+	toServer := dir == dirToServer
 	c := t.conns[key]
 	buf := payload
 	if c != nil {
@@ -55,10 +54,10 @@ func (t *ModbusTracker) Feed(key string, toServer bool, payload []byte, hint boo
 	}
 
 	recognized := c != nil && c.recognized
-	if !recognized {
+	if !recognized || (c != nil && c.needProbe[dir]) {
 		if len(buf) < ModbusMBAPLen+1 {
 			if hint {
-				t.keep(key, &c, dir, buf, false)
+				t.keep(key, &c, dir, buf, recognized)
 			}
 			return nil
 		}
@@ -69,6 +68,9 @@ func (t *ModbusTracker) Feed(key string, toServer bool, payload []byte, hint boo
 			return nil
 		}
 		recognized = true
+		if c != nil {
+			c.needProbe[dir] = false
+		}
 	}
 
 	var out []ModbusMessage

@@ -28,7 +28,7 @@ type s7Conn struct {
 	sawPlus    bool // an S7CommPlus PDU was seen
 }
 
-func (c *s7Conn) resetPending(dir int) { c.frags[dir], c.fragBytes[dir] = nil, 0 }
+func (c *s7Conn) resetPending(dir streamDir) { c.frags[dir], c.fragBytes[dir] = nil, 0 }
 
 const (
 	maxS7Frags     = 64
@@ -36,11 +36,13 @@ const (
 )
 
 // NewS7Tracker returns a tracker with the default connection limit.
-func NewS7Tracker() *S7Tracker { return NewS7TrackerLimit(defaultTrackerLimit) }
+func NewS7Tracker() *S7Tracker { return NewS7TrackerLimit(defaultMaxConnections) }
 
 // NewS7TrackerLimit returns a tracker that keeps state for at most max connections.
 func NewS7TrackerLimit(max int) *S7Tracker {
-	return &S7Tracker{newTCPTracker[*s7Conn, S7Message](max, 0xffff, func() *s7Conn { return &s7Conn{} })}
+	t := &S7Tracker{}
+	t.tcpTracker = newTCPTracker(max, 0xffff, func() *s7Conn { return &s7Conn{} }, t.feed)
+	return t
 }
 
 // SawS7 reports whether an S7 PDU has been seen on the connection, which tells
@@ -54,13 +56,6 @@ func (t *S7Tracker) SawS7(key string) bool {
 func (t *S7Tracker) SawS7Plus(key string) bool {
 	c := t.conns[key]
 	return c != nil && c.sawPlus
-}
-
-// FeedTCP adds a TCP segment and returns the messages it completes. key must be
-// the same for both directions; toServer is true for client to server; hint
-// says the connection uses port 102.
-func (t *S7Tracker) FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []S7Message {
-	return t.feedTCP(key, toServer, seg, hint, t.feed)
 }
 
 // startsS7 reports whether buf may begin an ISO-on-TCP connection that is worth
@@ -82,7 +77,7 @@ func startsS7(buf []byte, hint bool) Result {
 	return Incomplete
 }
 
-func (t *S7Tracker) feed(key string, dir int, payload []byte, hint bool) []S7Message {
+func (t *S7Tracker) feed(key string, dir streamDir, payload []byte, hint bool) []S7Message {
 	c := t.conns[key]
 	buf := payload
 	if c != nil {
@@ -140,7 +135,7 @@ func (t *S7Tracker) feed(key string, dir int, payload []byte, hint bool) []S7Mes
 
 // frame handles one parsed frame: it joins COTP data fragments and returns the
 // message when one is complete.
-func (t *S7Tracker) frame(c *s7Conn, dir int, f S7Frame) (S7Message, bool) {
+func (t *S7Tracker) frame(c *s7Conn, dir streamDir, f S7Frame) (S7Message, bool) {
 	if c == nil { // over the connection limit: no fragments, no rack and slot
 		if f.COTPType == cotpDT && !f.EOT {
 			return S7Message{}, false
