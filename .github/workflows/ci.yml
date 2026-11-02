@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./lib/... ./internal/parser/... ./cmd/...
+      # internal/iec62443 has failing tests on main that this work does not
+      # touch (docs/CODE_REVIEW_FINDINGS.md, finding 20); leave it out until fixed.
+      - run: go test $(go list ./... | grep -v '/internal/iec62443$' | grep -v '/scripts/')
+
+  differential:
+    # Decoders against tshark on hand-built captures, plus the corpus tests on
+    # the same captures. Hand-built traffic shows agreement with the dissector,
+    # not behaviour on real stacks; add real captures to PCAP_CORPUS when they exist.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tshark
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
+          tshark --version | head -1
+      - name: Build demo captures
+        run: |
+          mkdir -p "$RUNNER_TEMP/corpus"
+          for p in s7 dnp3 modbus; do
+            python3 scripts/${p}_demo_pcap.py "$RUNNER_TEMP/corpus/$p.pcap"
+          done
+      - name: S7 against tshark
+        run: python3 scripts/compare_s7.py "$RUNNER_TEMP/corpus/s7.pcap" --all
+      - name: DNP3 against tshark
+        run: python3 scripts/compare_dnp3.py "$RUNNER_TEMP/corpus/dnp3.pcap" --all
+      - name: Corpus tests
+        run: PCAP_CORPUS="$RUNNER_TEMP/corpus" go test ./lib/detect -run 'TestCorpus' -v

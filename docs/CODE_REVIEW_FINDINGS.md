@@ -92,9 +92,9 @@ State at the time of writing: PR #13, head `f77086c`.
 
 ### Process
 
-18. **No CI job** runs the differential scripts or the corpus tests; DNP3 is not
+18. **FIXED:** `.github/workflows/ci.yml` runs build, vet, tests and a tshark differential job (S7, DNP3) with the corpus tests; DNP3 and S7 corpus tests added. The CI file has not run on GitHub yet, and the Suricata comparisons (ENIP, Modbus) are not in CI. Original finding: no CI job runs the differential scripts or the corpus tests; DNP3 is not
     in the corpus. The plan lists both as not done.
-19. **Plan text out of step with the code:** it says Phase 2 (reassembly) is
+19. **FIXED:** plan phases 0, 2 and the port-table step and `docs/API_REFERENCE.md` brought up to date. Original finding, plan text out of step with the code: it says Phase 2 (reassembly) is
     "not started" while TCP sequence tracking exists, and that old port tables
     are deleted while they remain as hints in `main.go` and
     `flow_canonicalizer.go`. `docs/API_REFERENCE.md` was not updated.

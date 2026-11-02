@@ -119,6 +119,48 @@ func (c *IndustrialParserConfig) Validate() error
 func DefaultIndustrialParserConfig() IndustrialParserConfig
 ```
 
+### Disabling protocols
+
+```go
+// DisableProtocols clears the Enable* flag of each named protocol. Names:
+// dnp3, ethernetip, modbus, opcua, s7, s7commplus (case insensitive).
+// An unknown name returns an error.
+func (c *IndustrialParserConfig) DisableProtocols(names []string) error
+func ProtocolSwitchNames() []string
+
+// SetIndustrialConfig applies one configuration to both the industrial
+// protocol parser and the connection labeler. Call it before ParseFile.
+func (p *GopacketParser) SetIndustrialConfig(cfg IndustrialParserConfig)
+```
+
+CLI: `importer import <pcap> --disable-protocols s7commplus,dnp3`.
+
+## Protocol Detection
+
+`lib/detect` detects protocols by content; the port is only a hint.
+
+```go
+// Default returns the registry of all protocols (Modbus, EtherNet/IP, S7,
+// S7CommPlus, DNP3, ...). Without returns a copy minus the named protocols.
+func Default() *Registry
+func (r *Registry) Without(names ...string) *Registry
+func (r *Registry) Lookup(name string) (Protocol, bool)
+func (r *Registry) Detect(t Transport, srcPort, dstPort uint16, payload []byte) []Match
+
+// A probe returns Recognized, Incomplete or Unrecognized (three states, as in Suricata).
+type Probe func(payload []byte) Result
+```
+
+Each TCP protocol has a tracker (`NewModbusTracker`, `NewENIPTracker`,
+`NewS7Tracker`, `NewDNP3Tracker`) with
+`FeedTCP(key string, toServer bool, seg TCPSegment, hint bool) []Message`.
+It orders segments, drops retransmissions and frames messages.
+
+`internal/parser.ConnectionLabeler` gives every packet of a connection one
+flow label (`modbus`, `dnp3`, `EtherNet/IP(TCP)`, ...). A port hinted by
+several protocols gets a neutral label for the whole connection: `s7+s7commplus`
+on 102. See `docs/db_schema.md`, "Flow protocol labels".
+
 ## Protocol Layers
 
 ### EtherNet/IP Layer
