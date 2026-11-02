@@ -13,6 +13,10 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Install libpcap headers
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpcap-dev
       - run: go build ./...
       - run: go vet ./lib/... ./internal/parser/... ./cmd/...
       # internal/iec62443 has failing tests on main that this work does not
