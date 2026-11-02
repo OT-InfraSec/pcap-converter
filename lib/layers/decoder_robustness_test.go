@@ -1,6 +1,7 @@
 package lib_layers
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"runtime/debug"
@@ -92,5 +93,28 @@ func TestStockGopacketCDPPanicIsRecovered(t *testing.T) {
 		if p.ErrorLayer() == nil {
 			t.Errorf("expected a decode failure for %v", data)
 		}
+	}
+}
+
+func TestCiscoDiscoveryInfoMalformedPowerTLVsDoNotPanic(t *testing.T) {
+	tests := []struct {
+		name    string
+		tlvType CDPTLVType
+	}{
+		{name: "power requested", tlvType: CDPTLVPowerRequested},
+		{name: "power available", tlvType: CDPTLVPowerAvailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for valueLen := 5; valueLen <= 7; valueLen++ {
+				data := make([]byte, 4+valueLen)
+				binary.BigEndian.PutUint16(data[0:2], uint16(tt.tlvType))
+				binary.BigEndian.PutUint16(data[2:4], uint16(len(data)))
+				if s := panicSite(decodeCiscoDiscoveryInfo, data); s != "" {
+					t.Fatalf("unexpected panic for valueLen=%d: %s", valueLen, s)
+				}
+			}
+		})
 	}
 }
