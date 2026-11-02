@@ -29,7 +29,7 @@ func labelerRegistry(cfg IndustrialParserConfig) *detect.Registry {
 		"Modbus":      cfg.EnableModbus,
 		"DNP3":        cfg.EnableDNP3,
 		"S7":          cfg.EnableS7,
-		"S7CommPlus":  cfg.EnableS7,
+		"S7CommPlus":  cfg.EnableS7CommPlus,
 	} {
 		if !enabled {
 			off = append(off, name)

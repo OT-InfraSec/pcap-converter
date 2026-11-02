@@ -131,7 +131,7 @@ func TestLabelerRegistryHonoursTheEnableFlags(t *testing.T) {
 	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50002, 102, plus, false)(all))
 
 	cfg := DefaultIndustrialParserConfig()
-	cfg.EnableDNP3, cfg.EnableS7 = false, false
+	cfg.EnableDNP3, cfg.EnableS7, cfg.EnableS7CommPlus = false, false, false
 	off := newConnectionLabeler(labelerRegistry(cfg))
 	assert.Equal(t, "", tcpPkt(t, 50000, 20000, read, false)(off))
 	assert.Equal(t, "", tcpPkt(t, 50001, 102, s7, false)(off))

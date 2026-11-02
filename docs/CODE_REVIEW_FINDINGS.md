@@ -49,7 +49,7 @@ State at the time of writing: PR #13, head `f77086c`.
    the same author as the decoders. Real stacks may expose object sizes, TSAP
    forms and framing the demos do not (`docs/S7_SYNTHETIC_CAPTURES.md`,
    `docs/DNP3_SYNTHETIC_CAPTURES.md`).
-5. **Flags have no CLI.** `SetIndustrialConfig` exists, but the importer CLI
+5. **FIXED: flags had no CLI.** `importer import --disable-protocols s7commplus,dnp3` now applies the flags, and `EnableS7CommPlus` is separate from `EnableS7`. Original finding: `SetIndustrialConfig` exists, but the importer CLI
    cannot set `Enable*`; it runs with everything on. S7 and S7CommPlus share
    `EnableS7`. Decide whether to add flags and a separate S7CommPlus switch.
 6. **Scope that rode along and the plan did not ask for:** `AddFlow` returns
@@ -88,7 +88,7 @@ State at the time of writing: PR #13, head `f77086c`.
 17. **Port-102 hint ownership:** `HintPorts()` gives a shared port to the
     earliest-registered protocol. With S7 removed and S7CommPlus kept, 102 would
     map to S7CommPlus, which has no CLI label. Unreachable today because both
-    follow `EnableS7`; breaks if a separate flag is added (see 5).
+    follow `EnableS7`; the separate `EnableS7CommPlus` flag now exists (see 5), so check this item against it.
 
 ### Process
 

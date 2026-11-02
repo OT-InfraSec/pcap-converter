@@ -89,6 +89,7 @@ type IndustrialParserConfig struct {
     EnableModbus     bool `json:"enable_modbus"`
     EnableDNP3       bool `json:"enable_dnp3"`
     EnableS7         bool `json:"enable_s7"`
+    EnableS7CommPlus bool `json:"enable_s7commplus"`
 
     // Confidence and classification thresholds
     ConfidenceThreshold               float64 `json:"confidence_threshold"`

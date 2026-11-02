@@ -64,6 +64,9 @@ type IndustrialParserConfig struct {
 	EnableModbus     bool `json:"enable_modbus"`
 	EnableDNP3       bool `json:"enable_dnp3"`
 	EnableS7         bool `json:"enable_s7"`
+	// EnableS7CommPlus is separate from EnableS7: both share port 102 and
+	// framing, but S7CommPlus is only validated for its header.
+	EnableS7CommPlus bool `json:"enable_s7commplus"`
 
 	// Confidence thresholds
 	ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -95,6 +98,7 @@ func DefaultIndustrialParserConfig() IndustrialParserConfig {
 		EnableModbus:     true,
 		EnableDNP3:       true,
 		EnableS7:         true,
+		EnableS7CommPlus: true,
 
 		// Conservative confidence thresholds
 		ConfidenceThreshold:               0.7,
@@ -356,10 +360,13 @@ func (p *IndustrialProtocolParserImpl) ParseIndustrialProtocols(packet gopacket.
 		}
 	}
 
-	// Check for S7comm
-	if p.config.EnableS7 {
+	// Check for S7comm and S7CommPlus (one tracker, two switches)
+	if p.config.EnableS7 || p.config.EnableS7CommPlus {
 		if s7Info := p.parseS7(packet, timestamp); s7Info != nil && s7Info.Confidence >= p.config.ConfidenceThreshold {
-			protocols = append(protocols, *s7Info)
+			plus := s7Info.Protocol == "s7commplus"
+			if (plus && p.config.EnableS7CommPlus) || (!plus && p.config.EnableS7) {
+				protocols = append(protocols, *s7Info)
+			}
 		}
 	}
 
@@ -1153,4 +1160,39 @@ func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) 
 		return ""
 	}
 	return patterns[0].PatternType
+}
+
+// protocolSwitches maps the names accepted by --disable-protocols to the
+// config flag each one clears.
+var protocolSwitches = map[string]func(*IndustrialParserConfig){
+	"ethernetip": func(c *IndustrialParserConfig) { c.EnableEtherNetIP = false },
+	"opcua":      func(c *IndustrialParserConfig) { c.EnableOPCUA = false },
+	"modbus":     func(c *IndustrialParserConfig) { c.EnableModbus = false },
+	"dnp3":       func(c *IndustrialParserConfig) { c.EnableDNP3 = false },
+	"s7":         func(c *IndustrialParserConfig) { c.EnableS7 = false },
+	"s7commplus": func(c *IndustrialParserConfig) { c.EnableS7CommPlus = false },
+}
+
+// ProtocolSwitchNames returns the names DisableProtocols accepts, sorted.
+func ProtocolSwitchNames() []string {
+	names := make([]string, 0, len(protocolSwitches))
+	for n := range protocolSwitches {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// DisableProtocols switches the named protocols off. Names are case
+// insensitive; an unknown name is an error so a typo cannot silently leave a
+// protocol on.
+func (c *IndustrialParserConfig) DisableProtocols(names []string) error {
+	for _, n := range names {
+		off, ok := protocolSwitches[strings.ToLower(strings.TrimSpace(n))]
+		if !ok {
+			return fmt.Errorf("unknown protocol %q (valid: %s)", n, strings.Join(ProtocolSwitchNames(), ", "))
+		}
+		off(c)
+	}
+	return nil
 }

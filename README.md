@@ -55,6 +55,7 @@ After importing a PCAP file, the application version is automatically stored in 
 - `--batch-size`: Number of packets per batch (future optimization)
 - `--clear`: (planned) Clear the database before importing
 - `--industrial`: Enable industrial protocol analysis and device classification
+- `--disable-protocols <list>`: comma-separated protocols to neither parse nor label: `dnp3`, `ethernetip`, `modbus`, `opcua`, `s7`, `s7commplus` (S7 and S7CommPlus are separate switches)
 
 ### Run Industrial Analysis
 ```

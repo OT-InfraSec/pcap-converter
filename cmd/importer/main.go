@@ -37,6 +37,7 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 		enableIndustrialAnalysis bool
 		outputFormat             string
 		tenantID                 string
+		disabledProtocols        []string
 	)
 
 	rootCmd := &cobra.Command{
@@ -50,6 +51,11 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pcapFile := args[0]
+
+			industrialCfg := parser.DefaultIndustrialParserConfig()
+			if err := industrialCfg.DisableProtocols(disabledProtocols); err != nil {
+				return fmt.Errorf("--disable-protocols: %w", err)
+			}
 
 			if clearDB {
 				log.Printf("Clearing database at %s before import", dbPath)
@@ -70,7 +76,9 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 				}
 				log.Printf("Using database at %s", dbPath)
 				provider.Repository = repo
-				provider.Parser = parser.NewGopacketParser(pcapFile, repo, tenantID)
+				gp := parser.NewGopacketParser(pcapFile, repo, tenantID)
+				gp.SetIndustrialConfig(industrialCfg)
+				provider.Parser = gp
 				// TODO: Replace with real DNS processor implementation
 				provider.DNSProcessor = &dns.NoopDNSProcessor{}
 			}
@@ -120,6 +128,8 @@ func newRootCmd(provider *DependencyProvider) *cobra.Command {
 	importCmd.Flags().IntVar(&batchSize, "batch-size", 1000, "Number of packets to import in each batch")
 	importCmd.Flags().BoolVar(&clearDB, "clear", false, "Clear the database before importing")
 	importCmd.Flags().BoolVar(&enableIndustrialAnalysis, "industrial", false, "Enable industrial protocol analysis and device classification")
+	importCmd.Flags().StringSliceVar(&disabledProtocols, "disable-protocols", nil,
+		"Comma-separated industrial protocols to neither parse nor label ("+strings.Join(parser.ProtocolSwitchNames(), ", ")+")")
 	importCmd.Flags().StringVar(&tenantID, "tenant-id", "", "Tenant ID to associate with all imported data")
 
 	// Industrial device analysis commands

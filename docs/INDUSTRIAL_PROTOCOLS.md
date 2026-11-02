@@ -45,6 +45,7 @@ type IndustrialParserConfig struct {
     EnableModbus     bool `json:"enable_modbus"`
     EnableDNP3       bool `json:"enable_dnp3"`
     EnableS7         bool `json:"enable_s7"`
+    EnableS7CommPlus bool `json:"enable_s7commplus"`
 
     // Confidence thresholds
     ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -185,7 +186,7 @@ Details and the tshark or Suricata comparison are in
 | S7CommPlus | `s7commplus` | 102 | PDU header: version, opcode, function, sequence, session id | **nothing** (no reference dissector or capture) |
 | DNP3 | `dnp3` | 20000 (TCP and UDP) | link, transport reassembly, application function, IIN, object headers | tshark, hand-built captures only |
 
-`EnableModbus`, `EnableS7` (also S7CommPlus), `EnableDNP3` and the other enable
+`EnableModbus`, `EnableS7`, `EnableS7CommPlus`, `EnableDNP3` and the other enable
 flags switch both the parser and the connection labeler when they are applied
 with `GopacketParser.SetIndustrialConfig`. The importer CLI has no options for
 them yet, so it runs with the defaults (everything on).

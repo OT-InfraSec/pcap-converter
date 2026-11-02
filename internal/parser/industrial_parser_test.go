@@ -536,3 +536,25 @@ func createMultipleFlows(count int, interval time.Duration) []model.Flow {
 
 	return flows
 }
+
+func TestDisableProtocols(t *testing.T) {
+	cfg := DefaultIndustrialParserConfig()
+	require.NoError(t, cfg.DisableProtocols([]string{"S7CommPlus", " dnp3 "}))
+	assert.False(t, cfg.EnableS7CommPlus)
+	assert.False(t, cfg.EnableDNP3)
+	assert.True(t, cfg.EnableS7, "s7 stays on when only s7commplus is disabled")
+	assert.True(t, cfg.EnableModbus)
+
+	err := cfg.DisableProtocols([]string{"modbus", "modbuss"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "modbuss")
+	assert.Contains(t, err.Error(), "s7commplus")
+}
+
+func TestS7CommPlusSwitchIsSeparateFromS7(t *testing.T) {
+	plus := []byte{3, 0, 0, 7 + 4 + 15 + 4, 2, 0xf0, 0x80, 0x72, 1, 0, 15, 0x31, 0, 0, 0x04, 0xbb, 0, 0, 0, 1, 0, 0, 0, 0, 0x34, 0, 0x72, 1, 0, 0}
+	cfg := DefaultIndustrialParserConfig()
+	cfg.EnableS7CommPlus = false
+	l := newConnectionLabeler(labelerRegistry(cfg))
+	assert.Equal(t, "", tcpPkt(t, 50002, 102, plus, false)(l), "disabled S7CommPlus is not labelled")
+}
