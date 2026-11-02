@@ -536,9 +536,10 @@ value the probe vetoes the connection. Next: group G of
 `S7_SYNTHETIC_CAPTURES.md`, then check the header against a real capture and,
 if available, the Wireshark plugin.
 
-A known wrinkle: the connection request and confirmation on port 102 are
-labelled `s7` (first registered, hint only) and the data TPDUs `s7commplus`, so
-an S7CommPlus connection may split into two flow labels.
+Flow labels: S7comm and S7CommPlus share port 102, so every packet of such a
+connection gets the neutral flow label `s7+s7commplus` (handshake, data, ACK),
+and a connection stays one flow record. The protocol is reported by the
+decoders (`s7` or `s7commplus`), not by the flow label.
 
 ## DNP3 differential against tshark
 

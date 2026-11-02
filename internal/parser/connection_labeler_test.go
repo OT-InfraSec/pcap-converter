@@ -107,14 +107,17 @@ func TestConnectionLabeler_S7Plus(t *testing.T) {
 	pdu := append(append([]byte{0x72, 1, 0, byte(len(d))}, d...), 0x72, 1, 0, 0)
 	frame := append([]byte{3, 0, 0, byte(7 + len(pdu)), 2, 0xf0, 0x80}, pdu...)
 
+	// Port 102 is shared by S7comm and S7CommPlus: handshake, data and ACK
+	// packets of one connection all get the neutral label, so it is one flow.
 	l := newConnectionLabeler(detect.Default())
-	assert.Equal(t, "s7commplus", tcpPkt(t, 50000, 102, frame, false)(l))
-	assert.Equal(t, "s7commplus", tcpPkt(t, 50000, 102, nil, false)(l), "label sticks")
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50000, 102, nil, false)(l), "handshake")
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50000, 102, frame, false)(l), "data")
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50000, 102, nil, false)(l), "label sticks")
 
-	// Classic S7comm on the same port is still s7.
+	// Classic S7comm on the same port gets the same neutral label.
 	s7 := []byte{3, 0, 0, 25, 2, 0xf0, 0x80, 0x32, 1, 0, 0, 0, 1, 0, 8, 0, 0, 0xf0, 0, 0, 1, 0, 1, 1, 0xe0}
 	l2 := newConnectionLabeler(detect.Default())
-	assert.Equal(t, "s7", tcpPkt(t, 50001, 102, s7, false)(l2))
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50001, 102, s7, false)(l2))
 }
 
 func TestLabelerRegistryHonoursTheEnableFlags(t *testing.T) {
@@ -124,8 +127,8 @@ func TestLabelerRegistryHonoursTheEnableFlags(t *testing.T) {
 
 	all := newConnectionLabeler(labelerRegistry(DefaultIndustrialParserConfig()))
 	assert.Equal(t, "dnp3", tcpPkt(t, 50000, 20000, read, false)(all))
-	assert.Equal(t, "s7", tcpPkt(t, 50001, 102, s7, false)(all))
-	assert.Equal(t, "s7commplus", tcpPkt(t, 50002, 102, plus, false)(all))
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50001, 102, s7, false)(all))
+	assert.Equal(t, "s7+s7commplus", tcpPkt(t, 50002, 102, plus, false)(all))
 
 	cfg := DefaultIndustrialParserConfig()
 	cfg.EnableDNP3, cfg.EnableS7 = false, false

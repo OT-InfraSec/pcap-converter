@@ -259,9 +259,12 @@ communication_patterns  -->  tenants : tenant_id:id
 
 `flows.protocol` is the application protocol of a connection, chosen by content
 where the detection registry has a probe (see `lib/detect`): `modbus`,
-`EtherNet/IP(TCP)`, `EtherNet/IP(UDP)`, `s7`, `s7commplus`, `dnp3`, plus the
+`EtherNet/IP(TCP)`, `EtherNet/IP(UDP)`, `s7+s7commplus`, `dnp3`, plus the
 transport-level names (`tcp`, `udp`) and the labels of the other analysers
 (`http`, `dns`, ...). A connection's handshake and acknowledgement packets
 carry no payload, so on a port with a hint they get the hint's label, and
-that can differ from the content label (for S7CommPlus on port 102 the
-handshake is `s7`). `s7commplus` is not validated against real traffic.
+that can differ from the content label. Where several protocols share a hint
+port (S7comm and S7CommPlus on 102) the whole connection gets the neutral
+label `s7+s7commplus`, so it stays one flow; the protocol itself is in the
+decoder's protocol info (`s7` or `s7commplus`). S7CommPlus is not validated
+against real traffic.

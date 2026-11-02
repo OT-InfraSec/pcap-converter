@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
@@ -54,6 +55,9 @@ const maxTrackedConnections = 500_000
 //   - Before recognition, a connection on a hint port keeps the hint label
 //     (handshake and ACK segments carry no payload), until a payload shows it
 //     is something else (probe says Unrecognized). That is a veto and sticks.
+//   - A port hinted by several protocols (S7comm and S7CommPlus on 102) gets
+//     the neutral label "s7+s7commplus" for the whole connection, before and
+//     after recognition, so one connection stays one flow record.
 //   - Off the hint ports nothing is labelled until content is recognised.
 //
 // Packets before the first recognition or veto keep the label they were given.
@@ -116,6 +120,81 @@ func (l *connectionLabeler) entry(key string, st *connState) *connState {
 	return st
 }
 
+func containsProto(ps []detect.Protocol, name string) bool {
+	for _, p := range ps {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedHint returns the probe-based protocols that hint the port of this
+// connection on transport t. More than one means the port cannot name the
+// protocol (S7comm and S7CommPlus on 102).
+func (l *connectionLabeler) sharedHint(t detect.Transport, srcPort, dstPort uint16) []detect.Protocol {
+	var out []detect.Protocol
+	for _, proto := range l.registry.Protocols() {
+		if proto.ProbeFor(t) == nil || proto.Transports&t == 0 {
+			continue
+		}
+		for _, h := range proto.HintPorts {
+			if h.Transport&t != 0 && (h.Port == srcPort || h.Port == dstPort) {
+				out = append(out, proto)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sharedLabel is the neutral flow label of a connection on a port several
+// protocols hint, e.g. "s7+s7commplus". It stays for the whole connection,
+// including after content is recognised, so handshake, ACK and data packets
+// land in one flow record. Which protocol it really is comes from the
+// decoders' protocol info, not from the flow label.
+func sharedLabel(ps []detect.Protocol, t detect.Transport) string {
+	names := make([]string, 0, len(ps))
+	for _, p := range ps {
+		names = append(names, flowLabel(p.Name, t))
+	}
+	sort.Strings(names)
+	return strings.Join(names, "+")
+}
+
+// labelShared applies the neutral label to a connection on a shared hint port.
+// decided is false when every candidate vetoed the payload, so the caller
+// falls through to the normal rules.
+func (l *connectionLabeler) labelShared(key string, st *connState, t detect.Transport, payload []byte, shared []detect.Protocol) (label string, decided bool) {
+	if st != nil && st.vetoed {
+		return "", false
+	}
+	label = sharedLabel(shared, t)
+	if len(payload) == 0 {
+		l.entry(key, st)
+		return label, true
+	}
+	allUnrecognized := true
+	for _, p := range shared {
+		switch p.ProbeFor(t)(payload) {
+		case detect.Recognized:
+			if st = l.entry(key, st); st != nil {
+				st.label = label
+			}
+			return label, true
+		case detect.Incomplete:
+			allUnrecognized = false
+		}
+	}
+	if allUnrecognized {
+		if st = l.entry(key, st); st != nil {
+			st.vetoed = true
+		}
+		return "", false
+	}
+	return label, true
+}
+
 // Label updates the connection state with this packet and returns the label
 // for it, or "" if the registry has no opinion.
 func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, vlan model.VLANTag) string {
@@ -129,10 +208,20 @@ func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, v
 		return st.label
 	}
 
+	shared := l.sharedHint(t, srcPort, dstPort)
+	if len(shared) > 1 {
+		if label, decided := l.labelShared(key, st, t, payload, shared); decided {
+			return label
+		}
+	}
+
 	for _, proto := range l.registry.Protocols() {
 		probe := proto.ProbeFor(t)
 		if probe == nil || proto.Transports&t == 0 {
 			continue
+		}
+		if len(shared) > 1 && containsProto(shared, proto.Name) {
+			continue // handled above under the neutral label
 		}
 		res := detect.Incomplete
 		if len(payload) > 0 {

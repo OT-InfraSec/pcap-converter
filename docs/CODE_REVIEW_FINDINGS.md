@@ -29,7 +29,7 @@ State at the time of writing: PR #13, head `f77086c`.
 
 ### Needs a design decision
 
-1. **Label before content (S7CommPlus on port 102).** Handshake and ACK
+1. **FIXED (option C): label before content (S7CommPlus on port 102).** Shared hint ports now get the neutral flow label `s7+s7commplus` for the whole connection. Original finding: Handshake and ACK
    packets carry no payload, so they get the hint port's label (`s7`, first
    registered) and the data packets `s7commplus`. One connection can become
    two flow records, because the flow key includes the label. Fixing it needs
@@ -37,7 +37,7 @@ State at the time of writing: PR #13, head `f77086c`.
    tracks it; docs mention it.
    *Options:* defer flow creation until the first decisive payload; or merge
    flow rows afterwards; or label shared hint ports with a neutral name.
-2. **No "unverified s7" state.** The plan said port-102 traffic should be
+2. **Largely addressed by 1** (port 102 is no longer asserted as `s7`; the flow label is neutral). **No "unverified s7" state.** The plan said port-102 traffic should be
    reported as unverified until a decoder confirms it. The code labels `s7`
    from the hint alone before the first payload. Related to 1.
 3. **S7CommPlus is unvalidated.** Header layout, function numbers and the

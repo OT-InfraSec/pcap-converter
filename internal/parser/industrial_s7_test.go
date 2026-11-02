@@ -167,10 +167,10 @@ func TestParseS7(t *testing.T) {
 		require.NotNil(t, info)
 		assert.Equal(t, []string{"invalid_s7"}, info.AdditionalData["events"])
 	})
-	t.Run("the flow label is s7", func(t *testing.T) {
+	t.Run("the flow label on port 102 is neutral", func(t *testing.T) {
 		l := newConnectionLabeler(detect.Default())
 		pkt := buildTransportPacket(t, &layers.TCP{SrcPort: 50000, DstPort: 102, ACK: true}, nil, setup)
-		assert.Equal(t, "s7", l.Label(pkt, "10.0.0.1", "10.0.0.2", model.VLANTag{}))
+		assert.Equal(t, "s7+s7commplus", l.Label(pkt, "10.0.0.1", "10.0.0.2", model.VLANTag{}))
 		mms := buildTransportPacket(t, &layers.TCP{SrcPort: 50001, DstPort: 102, ACK: true}, nil, s7DT([]byte{0x01, 0x01, 0x01, 0x00, 0x61, 0x02, 0x02, 0x01}))
 		assert.Equal(t, "", l.Label(mms, "10.0.0.1", "10.0.0.2", model.VLANTag{}))
 	})
