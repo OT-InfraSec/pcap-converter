@@ -102,6 +102,30 @@ State at the time of writing: PR #13, head `f77086c`.
     `internal/iec62443`, and `TestDeviceClassifierImpl_ClassifyDevice` fails
     intermittently on `main` too (about 2 runs in 10).
 
+### Found while working on later items (not from the original review)
+
+21. **OPEN: `GetDevices` does not load `tenant_id`.** The list query selects no
+    tenant column, so a device read back from it and saved with `UpsertDevices`
+    is written with an empty tenant and then no longer matches
+    `GetDevice(tenant, address)`. `NewGopacketParser` loads existing devices
+    this way, so a re-import into a multi-tenant database may blank tenants.
+    Not verified end to end; a round-trip test showed the effect on the
+    repository (`sqlite_repository_vlan_test.go`, comment in
+    `TestSQLiteRepository_UpsertDevicesKeepsHostname`). *Fix:* select
+    `tenant_id` in `GetDevices` and add a test.
+22. **FIXED: `UpsertDevices` and `GetDevices` ignored `devices.hostname`.**
+    The column existed and `AddDevice` wrote it, but the batch path the parser
+    uses did not, so hostnames could never be stored. Fixed with the DHCP and
+    LLMNR change (`dde3792`). `AddDevices` (batch insert) still does not write
+    it; it is not on the parser's path, so left as is.
+23. **OPEN: "invalid communication role" on off-port industrial traffic.**
+    `CollectProtocolUsageStats` rejects direction "unknown". DNP3 now sets the
+    direction from the link DIR bit; EtherNet/IP and S7 found off their usual
+    ports can still hit it and fail the import. From the handoff notes, not
+    reproduced in this session.
+24. **OPEN: baseline test failures** in `internal/iec62443` (see 20) are not in
+    CI (`ci.yml` leaves the package out).
+
 ## Claims and how far they hold
 
 - "Identical to tshark" (S7 62 PDUs, DNP3 88 frames): holds for hand-built
