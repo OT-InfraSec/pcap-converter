@@ -268,3 +268,26 @@ port (S7comm and S7CommPlus on 102) the whole connection gets the neutral
 label `s7+s7commplus`, so it stays one flow; the protocol itself is in the
 decoder's protocol info (`s7` or `s7commplus`). S7CommPlus is not validated
 against real traffic.
+
+## Host evidence from DHCP and LLMNR
+
+DHCPv4 clients and LLMNR responders say who they are; the importer keeps that
+on the device row. Both are untrusted input (anyone on the segment can send
+them): strings must be printable ASCII and at most 255 bytes, or they are
+dropped whole.
+
+- `devices.hostname` is the DHCP client's hostname (option 12), or its FQDN
+  (option 81) when it sent no hostname. It is only set while empty.
+- `devices.additional_data` gets a `dhcp` object: `mac`, and when present
+  `hostname`, `fqdn`, `vendor_class` (option 60), `param_request_list`
+  (option 55 as `1,3,6,15`: the order is the fingerprint of the client's DHCP
+  stack) and `lease_seconds` (option 51, from the server's reply).
+- LLMNR response names (A and AAAA answers) are added to `additional_data`
+  `dnsNames` of the address in the answer. LLMNR queries are not evidence.
+- LLMNR packets (UDP 5355) have `flows.protocol` `llmnr`.
+
+A client is known by its MAC first. Its address comes from `ciaddr`, the
+requested address (option 50) or the server's `yiaddr`, whichever a packet of
+that MAC shows last. Evidence for an address that has no device (never seen as
+an endpoint) is dropped; it does not create a host. Not covered: LLMNR over TCP,
+DHCPv6 client identity, DHCP relay-agent options.

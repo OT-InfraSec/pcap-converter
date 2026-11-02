@@ -2,6 +2,7 @@ package parser
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -57,6 +58,9 @@ type GopacketParser struct {
 	ssdpQueries map[string]*SSDPQuery
 	// DNS queries
 	dnsQueries map[string]*DNSQuery
+
+	// DHCP and LLMNR evidence, applied to devices before they are saved
+	hostEvidence *hostEvidenceStore
 
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 
@@ -115,6 +119,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		subnetManager:      NewDefaultSubnetManager(tenantID),
 		cdpManager:         NewDefaultCDPManager(tenantID),
 		dnsQueries:         make(map[string]*DNSQuery),
+		hostEvidence:       newHostEvidenceStore(),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
 		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),       // Collect stats for deferred writing
@@ -948,6 +953,18 @@ func (p *GopacketParser) ParseFile() error {
 				"dst_port": udp.DstPort.String(),
 			}
 			protocols = append(protocols, detectedProto)
+
+			// LLMNR (RFC 4795) is DNS on UDP 5355. gopacket does not decode it, so
+			// the records are read here; only responses name an address's owner.
+			if (srcPortNum == llmnrPort || dstPortNum == llmnrPort) && len(udp.Payload) >= 12 {
+				flowProto = "llmnr"
+				layersMap["llmnr"] = map[string]interface{}{
+					"id": binary.BigEndian.Uint16(udp.Payload[0:2]),
+					"qr": udp.Payload[2]&0x80 != 0,
+				}
+				protocols = append(protocols, "llmnr")
+				p.evidence().observeLLMNR(llmnrResponses(udp.Payload))
+			}
 			// Update service for UDP (use detected protocol)
 			timestamp := packet.Metadata().Timestamp
 			p.serviceManager.UpdateService(srcIP, int(srcPortNum), detectedProto, "", timestamp, nil)
@@ -1105,6 +1122,9 @@ func (p *GopacketParser) ParseFile() error {
 				"options":        dhcpv4.Options,
 			}
 			protocols = append(protocols, "dhcpv4")
+			if e, ok := dhcpv4ClientEvidence(dhcpv4); ok {
+				p.evidence().observeDHCP(e)
+			}
 
 			// If request is a Reply, we can extract more information about the network and its servers
 			if dhcpv4.Operation == layers.DHCPOpReply {
@@ -1592,6 +1612,8 @@ func (p *GopacketParser) ParseFile() error {
 			}
 		}
 	}
+
+	p.applyHostEvidence()
 
 	for _, dev := range p.deviceManager.GetAllDevices() {
 		deviceBatch = append(deviceBatch, dev)

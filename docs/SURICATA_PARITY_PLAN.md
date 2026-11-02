@@ -118,8 +118,8 @@ Priority is asset identification and zone evidence, not full IDS coverage.
 
 | Order | Protocol | Why |
 |---|---|---|
-| 1 | LLMNR (5355) | Missing hostnames. Small change on top of the DNS and mDNS code. |
-| 2 | DHCP | Gives vendor class, hostname and lease data. |
+| 1 | LLMNR (5355) | Missing hostnames. **Done** for UDP responses (`internal/parser/host_evidence.go`); TCP not decoded. |
+| 2 | DHCP | Gives vendor class, hostname and lease data. **Done** for DHCPv4 clients (hostname, FQDN, vendor class, parameter request list, lease); DHCPv6 client identity not done. |
 | 3 | SMB 1/2/3 and NetBIOS name service (137) | Windows host identification. Register SMB on 139/445 by probe. |
 | 4 | TLS | Move to content probe, SNI, certificates, JA3/JA4 (Suricata has them). Check TLS 1.3 draft and GREASE values (F-08). |
 | 5 | Kerberos, LDAP | Domain controller and domain evidence. |
