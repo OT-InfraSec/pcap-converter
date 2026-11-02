@@ -17,9 +17,9 @@ runs:
     # Step 2: Set up Go
     # Using Go 1.24 as specified in go.mod
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
-        go-version: '1.24'
+        go-version: '1.27'
     
     # Step 3: Download dependencies
     - name: Download Go modules
@@ -81,7 +81,7 @@ runs:
     # Uploads coverage.out, coverage-summary.txt, and coverage.html as artifacts
     # These can be downloaded from the GitHub Actions run page
     - name: Upload coverage artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage
         path: |
