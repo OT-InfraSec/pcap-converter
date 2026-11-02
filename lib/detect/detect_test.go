@@ -141,7 +141,7 @@ func TestRegistryPortOnlyProtocols(t *testing.T) {
 
 func TestRegistryHintPorts(t *testing.T) {
 	got := Default().HintPorts()
-	want := map[uint16]string{44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3", 102: "S7"}
+	want := map[uint16]string{44818: "EtherNet/IP", 2222: "EtherNet/IP", 4840: "OPC UA", 502: "Modbus", 20000: "DNP3", 102: "S7", 445: "SMB", 139: "SMB", 137: "NetBIOS NS"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
 	}
@@ -279,7 +279,10 @@ func TestProtocolFlowLabelsAndKeys(t *testing.T) {
 		"S7":          {"s7", "s7", "s7"},
 		"S7CommPlus":  {"s7commplus", "s7commplus", "s7commplus"},
 		"DNP3":        {"dnp3", "dnp3", "dnp3"},
+		"SMB":         {"smb", "smb", "smb"},
+		"NetBIOS NS":  {"nbns", "nbns", "nbns"},
 	}
+	industrial := map[string]bool{"EtherNet/IP": true, "OPC UA": true, "Modbus": true, "S7": true, "S7CommPlus": true, "DNP3": true}
 	keys := map[string]bool{}
 	for _, p := range Default().Protocols() {
 		w, ok := want[p.Name]
@@ -289,6 +292,9 @@ func TestProtocolFlowLabelsAndKeys(t *testing.T) {
 		}
 		if p.Key != w[0] || p.FlowLabel(TCP) != w[1] || p.FlowLabel(UDP) != w[2] {
 			t.Errorf("%s: key %q, labels %q/%q, want %v", p.Name, p.Key, p.FlowLabel(TCP), p.FlowLabel(UDP), w)
+		}
+		if p.Industrial != industrial[p.Name] {
+			t.Errorf("%s: Industrial = %v", p.Name, p.Industrial)
 		}
 		if keys[p.Key] {
 			t.Errorf("%s: duplicate key %q", p.Name, p.Key)

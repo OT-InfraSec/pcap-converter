@@ -291,3 +291,51 @@ requested address (option 50) or the server's `yiaddr`, whichever a packet of
 that MAC shows last. Evidence for an address that has no device (never seen as
 an endpoint) is dropped; it does not create a host. Not covered: LLMNR over TCP,
 DHCPv6 client identity, DHCP relay-agent options.
+
+## Host identity from NetBIOS and SMB
+
+The NetBIOS name service (UDP 137) and the start of SMB connections (TCP 445,
+and 139 behind the NetBIOS session service) say what a Windows or Samba host is
+called and what it runs. They are decoded in `lib/hostid` and written to the
+device row once, before devices are saved. Flows on these ports are labelled
+`nbns` and `smb` by content.
+
+`devices.additional_data`, key `netbios`:
+
+| Field | Meaning |
+|---|---|
+| `names` | the host's NetBIOS names as `NAME<suffix>`, with ` G` for group names, sorted; at most 32 |
+| `computer_name` | the unique `<00>` name |
+| `workgroup` | the group `<00>` name (workgroup or domain) |
+| `mac` | the adapter address from a node status reply; absent when the reply gave all zeros |
+| `session_calling_name` | the name the host gave in a TCP 139 session request |
+
+Key `smb`:
+
+| Field | Meaning |
+|---|---|
+| `dialect` | SMB 2/3 dialect a server chose: `2.0.2`, `2.1`, `3.0`, `3.0.2`, `3.1.1` |
+| `offered_dialects` | the dialects a client offered, at most 8 |
+| `signing_enabled`, `signing_required` | the server's signing mode from its negotiate response |
+| `client_signing_required` | the client's signing mode from its negotiate request |
+| `server_guid`, `client_guid` | the GUIDs of a negotiate |
+| `server_time`, `uptime_seconds` | the server's clock and the time since it started |
+| `netbios_computer`, `netbios_domain`, `dns_computer`, `dns_domain` | the server's names from its NTLM challenge |
+| `domain`, `workstation` | what a client said in its NTLM authenticate message |
+| `windows_version` | `major.minor.build` from an NTLM message, for example `10.0.17763`; an edition is not inferred |
+| `smb1` | a server answered in SMB 1 |
+| `encrypted` | the host sent an encrypted (transform) message |
+
+`devices.hostname` is set from the NetBIOS computer name, the NTLM NetBIOS
+computer name or the NTLM workstation name, in that order, only while it is
+empty (DHCP wins, see above). The NTLM DNS computer name is added to `dnsNames`.
+
+What is not kept: user names from NTLM authenticate messages. They are personal
+data the importer was not asked to store.
+
+Limits: only the first PDU of a TCP segment is read and nothing is reassembled.
+A negotiate or an NTLM challenge is a few hundred bytes and fits one segment in
+practice, but a larger or split one is missed. SMB 1 negotiate and session
+setup are not decoded beyond "a server answered in SMB 1": native OS and domain
+strings are not read. Evidence for an address with no device is dropped.
+`--disable-protocols smb,nbns` turns collection and labelling off.

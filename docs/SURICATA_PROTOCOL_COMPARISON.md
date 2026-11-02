@@ -588,3 +588,45 @@ Open: real DNP3 traffic (specification in `DNP3_SYNTHETIC_CAPTURES.md`), object
 sizes for groups outside the table, variable-format objects (qualifier 0x0b)
 and secure authentication objects (groups 120 and 121), whose headers are kept
 and whose bodies are not walked.
+
+## NetBIOS name service and SMB identity against tshark (`scripts/compare_hostid.py`)
+
+Suricata has no host identity output for these, so tshark is the reference.
+`scripts/hostid_demo_pcap.py` writes a classic pcap from RFC 1001/1002, MS-SMB2
+and MS-NLMP: nine NBNS datagrams (registrations, a refresh, a release, a name
+query and answers with a scope id and two addresses, two node status replies),
+two SMB2 connections on 445 (3.1.1 with signing required, 2.1 without), one on
+139 behind a session request, and HTTP on 445. Each NTLM exchange has the
+NEGOTIATE inside a SPNEGO NegTokenInit, as tshark needs to follow the later
+tokens. `scripts/hostid_dump` prints what `lib/hostid` decodes and
+`compare_hostid.py` diffs per-packet facts:
+
+```text
+host identity facts (tshark vs ours): 69 facts, both=69, tshark-only=0, ours-only=0
+```
+
+Facts: NB bindings (name, group flag, address), node status names, adapter
+address, session request names, SMB2 command and response flag, negotiate
+dialects, signing mode, GUIDs, server time and start time, NTLM challenge names
+and version, NTLM authenticate domain, user, workstation and version.
+Deliberately wrong decoders (group flag mask, DNS domain/tree mixup, boot time
+offset, signing mask) each make the script report differences, so it can fail.
+
+The differential found two mistakes in the demo capture builders, not in the
+decoders: a session setup request built with the response layout
+(`[Malformed Packet]` in tshark) and a hand-typed SPNEGO wrapper with wrong DER
+lengths. Our decoder had accepted both because it finds NTLMSSP by signature.
+
+Limits of this result:
+
+- The capture is hand-built by the same author as the decoders; it shows
+  agreement with tshark on the frames we thought of, not behaviour of real
+  Windows, Samba or embedded stacks. No real capture has been run.
+- Our decoder reads the first PDU of a TCP segment only; the demo has one per
+  segment. tshark reassembles.
+- SMB 1 is classified (and a server answering in SMB 1 is recorded) but its
+  negotiate and session setup strings are not decoded, and tshark was not
+  compared on them.
+- `lib/hostid` has a fuzz target (`FuzzHostid`, 20 s run: no failure) and a
+  random-input test. Mutation checks left one equivalent mutant (a non-message
+  session frame is skipped before decoding, and decoding it fails anyway).

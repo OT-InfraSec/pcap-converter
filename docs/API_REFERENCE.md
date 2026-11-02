@@ -90,6 +90,8 @@ type IndustrialParserConfig struct {
     EnableDNP3       bool `json:"enable_dnp3"`
     EnableS7         bool `json:"enable_s7"`
     EnableS7CommPlus bool `json:"enable_s7commplus"`
+    EnableSMB        bool `json:"enable_smb"`
+    EnableNBNS       bool `json:"enable_nbns"`
 
     // Confidence and classification thresholds
     ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -123,7 +125,7 @@ func DefaultIndustrialParserConfig() IndustrialParserConfig
 
 ```go
 // DisableProtocols clears the Enable* flag of each named protocol. Names:
-// dnp3, ethernetip, modbus, opcua, s7, s7commplus (case insensitive).
+// dnp3, ethernetip, modbus, nbns, opcua, s7, s7commplus, smb (case insensitive).
 // An unknown name returns an error.
 func (c *IndustrialParserConfig) DisableProtocols(names []string) error
 func ProtocolSwitchNames() []string

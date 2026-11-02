@@ -54,5 +54,9 @@ jobs:
         run: python3 scripts/compare_s7.py "$RUNNER_TEMP/corpus/s7.pcap" --all
       - name: DNP3 against tshark
         run: python3 scripts/compare_dnp3.py "$RUNNER_TEMP/corpus/dnp3.pcap" --all
+      - name: NetBIOS and SMB host identity against tshark
+        run: |
+          python3 scripts/hostid_demo_pcap.py "$RUNNER_TEMP/hostid.pcap"
+          python3 scripts/compare_hostid.py "$RUNNER_TEMP/hostid.pcap" --all
       - name: Corpus tests
         run: PCAP_CORPUS="$RUNNER_TEMP/corpus" go test ./lib/detect -run 'TestCorpus' -v

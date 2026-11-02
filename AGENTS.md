@@ -169,6 +169,9 @@ pcap-importer-go/
 │   │   ├── set.go               # Set data structure
 │   │   └── *_test.go            # Validation tests
 │   │
+│   ├── hostid/                  # NetBIOS name service, session service, SMB2 negotiate, NTLMSSP decoders
+│   │   └── hostidtest/          # spec-built messages for tests
+│   │
 │   ├── helper/
 │   │   ├── address.go           # Address parsing utilities
 │   │   ├── ringbuffer.go        # Ring buffer implementation

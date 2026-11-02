@@ -59,6 +59,10 @@ type Protocol struct {
 	// labels; empty means Name. UDPLabel replaces it on UDP when set.
 	Label    string
 	UDPLabel string
+	// Industrial marks the OT protocols (Modbus, EtherNet/IP, S7, DNP3, ...) as
+	// opposed to the host-identification protocols (SMB, NetBIOS name
+	// service). Port-based industrial evidence uses only these.
+	Industrial bool
 
 	Transports Transport
 	HintPorts  []HintPort

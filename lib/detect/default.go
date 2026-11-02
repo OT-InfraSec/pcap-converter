@@ -11,6 +11,7 @@ func Default() *Registry {
 	r.Register(Protocol{
 		Name:       "EtherNet/IP",
 		Key:        "ethernetip",
+		Industrial: true,
 		Label:      "EtherNet/IP(TCP)",
 		UDPLabel:   "EtherNet/IP(UDP)",
 		Transports: TCP | UDP,
@@ -24,12 +25,14 @@ func Default() *Registry {
 	r.Register(Protocol{
 		Name:       "OPC UA",
 		Key:        "opcua",
+		Industrial: true,
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, 4840}},
 	})
 	r.Register(Protocol{
 		Name:       "Modbus",
 		Key:        "modbus",
+		Industrial: true,
 		Label:      "modbus",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, ModbusPort}},
@@ -38,6 +41,7 @@ func Default() *Registry {
 	r.Register(Protocol{
 		Name:       "S7",
 		Key:        "s7",
+		Industrial: true,
 		Label:      "s7",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, S7Port}},
@@ -46,14 +50,32 @@ func Default() *Registry {
 	r.Register(Protocol{
 		Name:       "S7CommPlus",
 		Key:        "s7commplus",
+		Industrial: true,
 		Label:      "s7commplus",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, S7Port}},
 		Probe:      ProbeS7Plus,
 	})
 	r.Register(Protocol{
+		Name:       "SMB",
+		Key:        "smb",
+		Label:      "smb",
+		Transports: TCP,
+		HintPorts:  []HintPort{{TCP, SMBPort}, {TCP, SMBNetBIOSPort}},
+		Probe:      ProbeSMB,
+	})
+	r.Register(Protocol{
+		Name:       "NetBIOS NS",
+		Key:        "nbns",
+		Label:      "nbns",
+		Transports: UDP,
+		HintPorts:  []HintPort{{UDP, NBNSPort}},
+		Probe:      ProbeNBNS,
+	})
+	r.Register(Protocol{
 		Name:       "DNP3",
 		Key:        "dnp3",
+		Industrial: true,
 		Label:      "dnp3",
 		Transports: TCP | UDP,
 		HintPorts:  []HintPort{{TCP | UDP, DNP3Port}},

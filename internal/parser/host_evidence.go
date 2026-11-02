@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
+	"github.com/InfraSecConsult/pcap-importer-go/lib/hostid"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -205,6 +207,8 @@ type hostEvidenceStore struct {
 	dhcp  map[string]*dhcpClientEvidence // by MAC; the latest non-empty value of each field
 	macIP map[string]string              // MAC -> the latest address bound to it
 	llmnr map[string]map[string]struct{} // IP -> names its responder gave
+
+	identity map[string]*hostIdentity // IP -> NetBIOS and SMB identity, see host_identity.go
 }
 
 func newHostEvidenceStore() *hostEvidenceStore {
@@ -212,6 +216,8 @@ func newHostEvidenceStore() *hostEvidenceStore {
 		dhcp:  make(map[string]*dhcpClientEvidence),
 		macIP: make(map[string]string),
 		llmnr: make(map[string]map[string]struct{}),
+
+		identity: make(map[string]*hostIdentity),
 	}
 }
 
@@ -336,4 +342,31 @@ func setAdditionalData(dev *model.Device, key string, value interface{}) error {
 	}
 	dev.AdditionalData = string(b)
 	return nil
+}
+
+// observeHostIdentity feeds NetBIOS name service messages (UDP 137) and the
+// start of SMB connections (TCP 445 and 139) to the identity store.
+func (p *GopacketParser) observeHostIdentity(packet gopacket.Packet, srcIP string) {
+	t, srcPort, dstPort, payload, ok := transportPayload(packet)
+	if !ok || len(payload) == 0 || srcIP == "" {
+		return
+	}
+	switch t {
+	case detect.UDP:
+		if p.noNBNS || (srcPort != detect.NBNSPort && dstPort != detect.NBNSPort) {
+			return
+		}
+		if m, ok := hostid.DecodeNBNS(payload); ok {
+			p.evidence().observeNBNS(srcIP, m)
+		}
+	case detect.TCP:
+		if p.noSMB {
+			return
+		}
+		isSMBPort := func(port uint16) bool { return port == detect.SMBPort || port == detect.SMBNetBIOSPort }
+		if !isSMBPort(srcPort) && !isSMBPort(dstPort) {
+			return
+		}
+		p.evidence().observeSMB(srcIP, isSMBPort(srcPort) && !isSMBPort(dstPort), payload)
+	}
 }

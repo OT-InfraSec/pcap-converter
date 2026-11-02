@@ -75,6 +75,9 @@ type GopacketParser struct {
 	repo             repository.Repository
 	industrialParser IndustrialProtocolParser
 	connLabeler      ConnectionLabeler
+
+	// Host identity collection follows the protocol switches (zero value: on).
+	noSMB, noNBNS bool
 }
 
 // DecodeFailures returns how many frames of the last ParseFile had a decode failure.
@@ -87,6 +90,7 @@ func (p *GopacketParser) DecodeFailures() int { return p.decodeFailures }
 func (p *GopacketParser) SetIndustrialConfig(cfg IndustrialParserConfig) {
 	p.industrialParser = NewIndustrialProtocolParserWithConfig(cfg)
 	p.connLabeler = newConnectionLabeler(labelerRegistry(cfg))
+	p.noSMB, p.noNBNS = !cfg.EnableSMB, !cfg.EnableNBNS
 }
 
 // SetConnectionLabeler replaces the labeler that gives the packets of a
@@ -1548,6 +1552,8 @@ func (p *GopacketParser) ParseFile() error {
 			log.Warn().Err(err).Msg("industrial protocol parsing error")
 		}
 
+		p.observeHostIdentity(packet, srcIP)
+
 		// Keep the label stable across the packets of a connection (handshake,
 		// ACKs and mid-message segments carry no recognisable payload).
 		if label := p.connLabeler.Label(packet, srcIP, dstIP, vlan); label != "" &&
@@ -1614,6 +1620,7 @@ func (p *GopacketParser) ParseFile() error {
 	}
 
 	p.applyHostEvidence()
+	p.applyIdentity()
 
 	for _, dev := range p.deviceManager.GetAllDevices() {
 		deviceBatch = append(deviceBatch, dev)

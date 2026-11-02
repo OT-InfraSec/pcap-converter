@@ -67,6 +67,12 @@ type IndustrialParserConfig struct {
 	// EnableS7CommPlus is separate from EnableS7: both share port 102 and
 	// framing, but S7CommPlus is only validated for its header.
 	EnableS7CommPlus bool `json:"enable_s7commplus"`
+	// EnableSMB and EnableNBNS cover the host-identification protocols (SMB
+	// over TCP 445 and 139, the NetBIOS name service on UDP 137): flow labels
+	// and the host evidence taken from them. They are not industrial protocols
+	// but share the one protocol registry and its switches.
+	EnableSMB  bool `json:"enable_smb"`
+	EnableNBNS bool `json:"enable_nbns"`
 
 	// Confidence thresholds
 	ConfidenceThreshold               float64 `json:"confidence_threshold"`
@@ -99,6 +105,8 @@ func DefaultIndustrialParserConfig() IndustrialParserConfig {
 		EnableDNP3:       true,
 		EnableS7:         true,
 		EnableS7CommPlus: true,
+		EnableSMB:        true,
+		EnableNBNS:       true,
 
 		// Conservative confidence thresholds
 		ConfidenceThreshold:               0.7,
@@ -1157,6 +1165,8 @@ var protocolSwitches = map[string]func(*IndustrialParserConfig) *bool{
 	"dnp3":       func(c *IndustrialParserConfig) *bool { return &c.EnableDNP3 },
 	"s7":         func(c *IndustrialParserConfig) *bool { return &c.EnableS7 },
 	"s7commplus": func(c *IndustrialParserConfig) *bool { return &c.EnableS7CommPlus },
+	"smb":        func(c *IndustrialParserConfig) *bool { return &c.EnableSMB },
+	"nbns":       func(c *IndustrialParserConfig) *bool { return &c.EnableNBNS },
 }
 
 // ProtocolSwitchNames returns the names DisableProtocols accepts, sorted.

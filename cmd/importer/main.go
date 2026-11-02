@@ -522,7 +522,7 @@ func formatProtocolStats(stats []*model.ProtocolUsageStats, format string) error
 func industrialPortLabels() map[string]string {
 	out := make(map[string]string)
 	for port, p := range detect.Default().HintPortOwners() {
-		if p.Key != "" {
+		if p.Industrial {
 			out[strconv.Itoa(int(port))] = p.Key
 		}
 	}
