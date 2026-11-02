@@ -159,7 +159,6 @@ type IndustrialProtocolParserImpl struct {
 	config IndustrialParserConfig
 
 	// Legacy configuration fields (deprecated, use config instead)
-	enabledProtocols    map[string]bool
 	confidenceThreshold float64
 	enableEtherNetIP    bool
 	enableOPCUA         bool
@@ -204,13 +203,6 @@ func NewIndustrialProtocolParserWithConfig(config IndustrialParserConfig) Indust
 		config: config,
 
 		// Legacy fields for backward compatibility
-		enabledProtocols: map[string]bool{
-			"EtherNet/IP": config.EnableEtherNetIP,
-			"OPC UA":      config.EnableOPCUA,
-			"Modbus":      config.EnableModbus,
-			"DNP3":        config.EnableDNP3,
-			"S7":          config.EnableS7,
-		},
 		confidenceThreshold: config.ConfidenceThreshold,
 		enableEtherNetIP:    config.EnableEtherNetIP,
 		enableOPCUA:         config.EnableOPCUA,
@@ -276,13 +268,6 @@ func (p *IndustrialProtocolParserImpl) UpdateConfig(config IndustrialParserConfi
 	p.config = config
 
 	// Update legacy fields for backward compatibility
-	p.enabledProtocols = map[string]bool{
-		"EtherNet/IP": config.EnableEtherNetIP,
-		"OPC UA":      config.EnableOPCUA,
-		"Modbus":      config.EnableModbus,
-		"DNP3":        config.EnableDNP3,
-		"S7":          config.EnableS7,
-	}
 	p.confidenceThreshold = config.ConfidenceThreshold
 	p.enableEtherNetIP = config.EnableEtherNetIP
 	p.enableOPCUA = config.EnableOPCUA
@@ -1162,15 +1147,16 @@ func (p *IndustrialProtocolParserImpl) DeterminePatternType(flows []model.Flow) 
 	return patterns[0].PatternType
 }
 
-// protocolSwitches maps the names accepted by --disable-protocols to the
-// config flag each one clears.
-var protocolSwitches = map[string]func(*IndustrialParserConfig){
-	"ethernetip": func(c *IndustrialParserConfig) { c.EnableEtherNetIP = false },
-	"opcua":      func(c *IndustrialParserConfig) { c.EnableOPCUA = false },
-	"modbus":     func(c *IndustrialParserConfig) { c.EnableModbus = false },
-	"dnp3":       func(c *IndustrialParserConfig) { c.EnableDNP3 = false },
-	"s7":         func(c *IndustrialParserConfig) { c.EnableS7 = false },
-	"s7commplus": func(c *IndustrialParserConfig) { c.EnableS7CommPlus = false },
+// protocolSwitches maps a detect.Protocol Key (also the name accepted by
+// --disable-protocols) to the Enable* field of the configuration. It is the
+// one place that ties the configuration to the registry.
+var protocolSwitches = map[string]func(*IndustrialParserConfig) *bool{
+	"ethernetip": func(c *IndustrialParserConfig) *bool { return &c.EnableEtherNetIP },
+	"opcua":      func(c *IndustrialParserConfig) *bool { return &c.EnableOPCUA },
+	"modbus":     func(c *IndustrialParserConfig) *bool { return &c.EnableModbus },
+	"dnp3":       func(c *IndustrialParserConfig) *bool { return &c.EnableDNP3 },
+	"s7":         func(c *IndustrialParserConfig) *bool { return &c.EnableS7 },
+	"s7commplus": func(c *IndustrialParserConfig) *bool { return &c.EnableS7CommPlus },
 }
 
 // ProtocolSwitchNames returns the names DisableProtocols accepts, sorted.
@@ -1188,11 +1174,11 @@ func ProtocolSwitchNames() []string {
 // protocol on.
 func (c *IndustrialParserConfig) DisableProtocols(names []string) error {
 	for _, n := range names {
-		off, ok := protocolSwitches[strings.ToLower(strings.TrimSpace(n))]
+		sw, ok := protocolSwitches[strings.ToLower(strings.TrimSpace(n))]
 		if !ok {
 			return fmt.Errorf("unknown protocol %q (valid: %s)", n, strings.Join(ProtocolSwitchNames(), ", "))
 		}
-		off(c)
+		*sw(c) = false
 	}
 	return nil
 }

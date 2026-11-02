@@ -10,6 +10,9 @@ func Default() *Registry {
 	r := &Registry{}
 	r.Register(Protocol{
 		Name:       "EtherNet/IP",
+		Key:        "ethernetip",
+		Label:      "EtherNet/IP(TCP)",
+		UDPLabel:   "EtherNet/IP(UDP)",
 		Transports: TCP | UDP,
 		HintPorts: []HintPort{
 			{TCP | UDP, ENIPPortExplicit},
@@ -20,29 +23,38 @@ func Default() *Registry {
 	})
 	r.Register(Protocol{
 		Name:       "OPC UA",
+		Key:        "opcua",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, 4840}},
 	})
 	r.Register(Protocol{
 		Name:       "Modbus",
+		Key:        "modbus",
+		Label:      "modbus",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, ModbusPort}},
 		Probe:      ProbeModbusTCP,
 	})
 	r.Register(Protocol{
 		Name:       "S7",
+		Key:        "s7",
+		Label:      "s7",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, S7Port}},
 		Probe:      ProbeS7,
 	})
 	r.Register(Protocol{
 		Name:       "S7CommPlus",
+		Key:        "s7commplus",
+		Label:      "s7commplus",
 		Transports: TCP,
 		HintPorts:  []HintPort{{TCP, S7Port}},
 		Probe:      ProbeS7Plus,
 	})
 	r.Register(Protocol{
 		Name:       "DNP3",
+		Key:        "dnp3",
+		Label:      "dnp3",
 		Transports: TCP | UDP,
 		HintPorts:  []HintPort{{TCP | UDP, DNP3Port}},
 		Probe:      ProbeDNP3,

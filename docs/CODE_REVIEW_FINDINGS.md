@@ -59,33 +59,33 @@ State at the time of writing: PR #13, head `f77086c`.
 
 ### Code quality, judgement calls
 
-7. **Protocol names as bare strings** (Primitive Obsession, Repeated
+7. **FIXED:** `detect.Protocol` now carries `Key`, `Label` and `UDPLabel`; `flowLabel`, `industrialPortLabels`, `labelerRegistry` and the unused `enabledProtocols` maps are gone, and `protocolSwitches` is the one table that ties the configuration to the registry. Original finding: protocol names as bare strings (Primitive Obsession, Repeated
    Switches): `flowLabel`, `industrialPortLabels`, `labelerRegistry`,
    `detectProtocol` and the registry all match "S7", "DNP3" and so on. A new
    protocol means editing each. *Option:* a stored `Label` field on
    `detect.Protocol`.
-8. **Direction as a bare int** (`dir int`, `dirToClient=0`, `dirToServer=1`
+8. **FIXED** (`type streamDir`). Original finding: direction as a bare int (`dir int`, `dirToClient=0`, `dirToServer=1`
    indexing `[2]` arrays). *Option:* `type dir int`.
-9. **Per-protocol `FeedTCP` wrappers** (Middle Man, mild): each is a closure
+9. **FIXED:** `FeedTCP` lives on the shared tracker and the protocol feed is passed to `newTCPTracker`; the direction is no longer converted back and forth, except in Modbus's public `Feed`. Original finding: per-protocol `FeedTCP` wrappers (Middle Man, mild): each is a closure
    over `feedTCP`, and the direction is converted to a bool and back.
-10. **Type parameter `M`** appears only in the feed callback's return type, so
+10. **FIXED:** the types are inferred in `newTCPTracker(max, maxPartial, newConn, feed)`. `M` stays because the feed returns `[]M`. Original finding: type parameter `M` appears only in the feed callback's return type, so
     every call site spells `[*xConn, XMessage]` (mild).
-11. **`tcpTracker` details:** `c.tcp().…` is repeated about six times in
+11. **FIXED** (`tc := c.tcp()`, `keep` and `hint` documented). Original finding: `tcpTracker` details: `c.tcp().…` is repeated about six times in
     `feedTCP` (assign once); `keep` writes `*c` only when it creates the entry
     and does not say so; `hint` is unexplained in `feedTCP`'s doc.
-12. **Similar names for different things:** `defaultTrackerLimit` (200k) versus
+12. **FIXED:** `defaultMaxConnections`, `maxLabelerConnections`, `trackedConn` (detect) and `labelState` (parser). Original finding: similar names for different things: `defaultTrackerLimit` (200k) versus
     `maxTrackedConnections` (500k, labeler); `connState` is an interface in
     `lib/detect` and a struct in `internal/parser`.
-13. **Modbus sets `needProbe` on a gap** but never reads it (dead state there).
-14. **Tests:** `tcptrack_test.go` uses `panic` inside table closures, mixes
+13. **FIXED:** Modbus now re-probes after lost bytes like the other trackers (test added). Original finding: Modbus sets `needProbe` on a gap but never reads it (dead state there).
+14. **FIXED:** `tcptrack_test.go` is table-driven with no panics, and the gap is forced with `tcpseq.MaxWindow`; the labeler fake is `testutil.MockConnectionLabeler` and records its calls. Original finding: tests: `tcptrack_test.go` uses `panic` inside table closures, mixes
     `Fatal` and `Errorf`, and the gap subtest loops up to 40 times, which ties it
     to tcpseq's window size. `fakeLabeler` is inline rather than a
     `testutil/mock_*.go` and only checks assignment.
 15. **`industrial_parser.go` is still 1156 lines**, mostly OPC UA, CIFS and
     device and pattern analysis; the protocol split was partial.
-16. **Duplicated boilerplate** in `scripts/*_dump/main.go` (usage check, open,
+16. **PARTLY FIXED:** the dump tools share `scripts/internal/dumpcap`; the long `Label()` function is untouched. Original finding: duplicated boilerplate in `scripts/*_dump/main.go` (usage check, open,
     reader, exit), and the `Label()` function is still long.
-17. **Port-102 hint ownership:** `HintPorts()` gives a shared port to the
+17. **FIXED:** every protocol has a `Key`, so the owner of a shared port always has a label; `Registry.HintPortOwners` documents the earliest-wins rule and a test covers 102 with and without S7. Original finding: port-102 hint ownership: `HintPorts()` gives a shared port to the
     earliest-registered protocol. With S7 removed and S7CommPlus kept, 102 would
     map to S7CommPlus, which has no CLI label. Unreachable today because both
     follow `EnableS7`; the separate `EnableS7CommPlus` flag now exists (see 5), so check this item against it.

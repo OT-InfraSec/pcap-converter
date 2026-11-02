@@ -270,3 +270,39 @@ func TestRegistryWithout(t *testing.T) {
 		t.Errorf("port 102 hint remains: %q", got)
 	}
 }
+
+func TestProtocolFlowLabelsAndKeys(t *testing.T) {
+	want := map[string][3]string{ // name -> key, TCP label, UDP label
+		"EtherNet/IP": {"ethernetip", "EtherNet/IP(TCP)", "EtherNet/IP(UDP)"},
+		"OPC UA":      {"opcua", "OPC UA", "OPC UA"},
+		"Modbus":      {"modbus", "modbus", "modbus"},
+		"S7":          {"s7", "s7", "s7"},
+		"S7CommPlus":  {"s7commplus", "s7commplus", "s7commplus"},
+		"DNP3":        {"dnp3", "dnp3", "dnp3"},
+	}
+	keys := map[string]bool{}
+	for _, p := range Default().Protocols() {
+		w, ok := want[p.Name]
+		if !ok {
+			t.Errorf("%s: add it to this table, with its Key and labels", p.Name)
+			continue
+		}
+		if p.Key != w[0] || p.FlowLabel(TCP) != w[1] || p.FlowLabel(UDP) != w[2] {
+			t.Errorf("%s: key %q, labels %q/%q, want %v", p.Name, p.Key, p.FlowLabel(TCP), p.FlowLabel(UDP), w)
+		}
+		if keys[p.Key] {
+			t.Errorf("%s: duplicate key %q", p.Name, p.Key)
+		}
+		keys[p.Key] = true
+	}
+}
+
+func TestHintPortOwnerOfASharedPort(t *testing.T) {
+	if got := Default().HintPortOwners()[102]; got.Key != "s7" {
+		t.Errorf("owner of 102 = %q, want s7 (registered first)", got.Key)
+	}
+	// With S7 gone the other protocol that hints 102 owns it, and has a key.
+	if got := Default().Without("S7").HintPortOwners()[102]; got.Key != "s7commplus" {
+		t.Errorf("owner of 102 without S7 = %q, want s7commplus", got.Key)
+	}
+}

@@ -518,19 +518,12 @@ func formatProtocolStats(stats []*model.ProtocolUsageStats, format string) error
 // Helper functions for industrial analysis
 
 // industrialPortLabels maps port strings to the protocol labels stored in the
-// database, derived from the detection registry's hint ports.
+// database (the registry's Protocol.Key), derived from its hint ports.
 func industrialPortLabels() map[string]string {
-	labels := map[string]string{
-		"EtherNet/IP": "ethernetip",
-		"OPC UA":      "opcua",
-		"Modbus":      "modbus",
-		"DNP3":        "dnp3",
-		"S7":          "s7",
-	}
 	out := make(map[string]string)
-	for port, name := range detect.Default().HintPorts() {
-		if label, ok := labels[name]; ok {
-			out[strconv.Itoa(int(port))] = label
+	for port, p := range detect.Default().HintPortOwners() {
+		if p.Key != "" {
+			out[strconv.Itoa(int(port))] = p.Key
 		}
 	}
 	return out

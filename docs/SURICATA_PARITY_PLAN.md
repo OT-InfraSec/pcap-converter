@@ -65,7 +65,7 @@ decision is recorded in the comparison doc.
 4. Keep the old port tables behind the registry as hints only, then delete
    them from `main.go` and `flow_canonicalizer.go`. *Status:* the port-to-label
    table in `main.go` (`industrialPortLabels`) is now derived from the registry
-   hint ports; `flow_canonicalizer.go` still carries its own well-known-port map.
+   hint ports (`Protocol.Key`); `flow_canonicalizer.go` still carries its own well-known-port map.
 - Exit: ENIP differential results at least equal Suricata on the corpus.
 
 ## Phase 2: Stream reassembly (prerequisite for 3 and 4)

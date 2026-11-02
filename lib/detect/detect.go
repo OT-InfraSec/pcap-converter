@@ -50,7 +50,16 @@ type HintPort struct {
 
 // Protocol describes one detectable protocol.
 type Protocol struct {
-	Name       string
+	Name string
+	// Key is the short lowercase identifier other code uses for the protocol:
+	// the --disable-protocols names and the labels of port-based evidence
+	// ("modbus", "ethernetip", "s7commplus").
+	Key string
+	// Label is stored in flows.protocol for a connection this protocol
+	// labels; empty means Name. UDPLabel replaces it on UDP when set.
+	Label    string
+	UDPLabel string
+
 	Transports Transport
 	HintPorts  []HintPort
 	// Probe may be nil while no content check exists. Such a protocol is only
@@ -59,6 +68,18 @@ type Protocol struct {
 	// ProbeUDP, if set, replaces Probe for UDP payloads (for protocols whose
 	// datagram format differs from the stream format).
 	ProbeUDP Probe
+}
+
+// FlowLabel returns the flows.protocol label for a connection of this
+// protocol on transport t.
+func (p Protocol) FlowLabel(t Transport) string {
+	switch {
+	case t == UDP && p.UDPLabel != "":
+		return p.UDPLabel
+	case p.Label != "":
+		return p.Label
+	}
+	return p.Name
 }
 
 // ProbeFor returns the probe to use on a transport, or nil.
@@ -165,16 +186,29 @@ func hasHint(p Protocol, t Transport, srcPort, dstPort uint16) bool {
 	return false
 }
 
-// HintPorts returns port -> protocol name for every hint port, across
-// transports. If two protocols share a port the earlier registration wins.
-func (r *Registry) HintPorts() map[uint16]string {
-	out := make(map[uint16]string)
+// HintPortOwners returns port -> protocol for every hint port, across
+// transports. If two protocols share a port the earlier registration wins, so
+// the owner of a shared port (102: S7 before S7CommPlus) depends on which
+// protocols the registry still holds; code that must treat the sharers alike
+// asks Protocols and filters on HintPorts itself.
+func (r *Registry) HintPortOwners() map[uint16]Protocol {
+	out := make(map[uint16]Protocol)
 	for _, p := range r.protocols {
 		for _, h := range p.HintPorts {
 			if _, ok := out[h.Port]; !ok {
-				out[h.Port] = p.Name
+				out[h.Port] = p
 			}
 		}
+	}
+	return out
+}
+
+// HintPorts returns port -> protocol name for every hint port, see
+// HintPortOwners.
+func (r *Registry) HintPorts() map[uint16]string {
+	out := make(map[uint16]string)
+	for port, p := range r.HintPortOwners() {
+		out[port] = p.Name
 	}
 	return out
 }

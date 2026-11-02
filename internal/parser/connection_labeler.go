@@ -23,16 +23,9 @@ var _ ConnectionLabeler = (*connectionLabeler)(nil)
 // configuration disables, so a disabled protocol is neither parsed nor labelled.
 func labelerRegistry(cfg IndustrialParserConfig) *detect.Registry {
 	var off []string
-	for name, enabled := range map[string]bool{
-		"EtherNet/IP": cfg.EnableEtherNetIP,
-		"OPC UA":      cfg.EnableOPCUA,
-		"Modbus":      cfg.EnableModbus,
-		"DNP3":        cfg.EnableDNP3,
-		"S7":          cfg.EnableS7,
-		"S7CommPlus":  cfg.EnableS7CommPlus,
-	} {
-		if !enabled {
-			off = append(off, name)
+	for _, p := range detect.Default().Protocols() {
+		if sw, ok := protocolSwitches[p.Key]; ok && !*sw(&cfg) {
+			off = append(off, p.Name)
 		}
 	}
 	return detect.Default().Without(off...)
@@ -75,27 +68,6 @@ type labelState struct {
 
 func newConnectionLabeler(r *detect.Registry) *connectionLabeler {
 	return &connectionLabeler{registry: r, conns: make(map[string]*labelState)}
-}
-
-// flowLabel is the label stored in the flows table for a protocol on a
-// transport. It keeps the names the importer used before the registry existed.
-func flowLabel(name string, t detect.Transport) string {
-	switch name {
-	case "EtherNet/IP":
-		if t == detect.TCP {
-			return "EtherNet/IP(TCP)"
-		}
-		return "EtherNet/IP(UDP)"
-	case "Modbus":
-		return "modbus"
-	case "S7":
-		return "s7"
-	case "DNP3":
-		return "dnp3"
-	case "S7CommPlus":
-		return "s7commplus"
-	}
-	return name
 }
 
 func connKey(t detect.Transport, srcIP string, srcPort uint16, dstIP string, dstPort uint16, vlan model.VLANTag) string {
@@ -156,7 +128,7 @@ func (l *connectionLabeler) sharedHint(t detect.Transport, srcPort, dstPort uint
 func sharedLabel(ps []detect.Protocol, t detect.Transport) string {
 	names := make([]string, 0, len(ps))
 	for _, p := range ps {
-		names = append(names, flowLabel(p.Name, t))
+		names = append(names, p.FlowLabel(t))
 	}
 	sort.Strings(names)
 	return strings.Join(names, "+")
@@ -237,9 +209,9 @@ func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, v
 		switch {
 		case res == detect.Recognized:
 			if st = l.entry(key, st); st == nil {
-				return flowLabel(proto.Name, t) // over the limit: label without state
+				return proto.FlowLabel(t) // over the limit: label without state
 			}
-			st.label = flowLabel(proto.Name, t)
+			st.label = proto.FlowLabel(t)
 			return st.label
 		case res == detect.Unrecognized && hint:
 			if st = l.entry(key, st); st != nil {
@@ -247,7 +219,7 @@ func (l *connectionLabeler) Label(packet gopacket.Packet, srcIP, dstIP string, v
 			}
 		case hint && (st == nil || !st.vetoed):
 			l.entry(key, st)
-			return flowLabel(proto.Name, t)
+			return proto.FlowLabel(t)
 		}
 	}
 	return ""

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/InfraSecConsult/pcap-importer-go/lib/detect"
 	"github.com/InfraSecConsult/pcap-importer-go/lib/model"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -557,4 +558,21 @@ func TestS7CommPlusSwitchIsSeparateFromS7(t *testing.T) {
 	cfg.EnableS7CommPlus = false
 	l := newConnectionLabeler(labelerRegistry(cfg))
 	assert.Equal(t, "", tcpPkt(t, 50002, 102, plus, false)(l), "disabled S7CommPlus is not labelled")
+}
+
+// Every registered protocol must be switchable: a new protocol that is added to
+// the registry without a Key and an entry in protocolSwitches fails here.
+func TestEveryRegisteredProtocolHasASwitch(t *testing.T) {
+	for _, p := range detect.Default().Protocols() {
+		sw, ok := protocolSwitches[p.Key]
+		if !assert.True(t, ok, "%s (key %q) has no entry in protocolSwitches", p.Name, p.Key) {
+			continue
+		}
+		cfg := DefaultIndustrialParserConfig()
+		assert.True(t, *sw(&cfg), "%s is on by default", p.Name)
+		require.NoError(t, cfg.DisableProtocols([]string{p.Key}))
+		assert.False(t, *sw(&cfg), "%s is off after DisableProtocols", p.Name)
+		_, kept := labelerRegistry(cfg).Lookup(p.Name)
+		assert.False(t, kept, "%s is dropped from the labeler registry", p.Name)
+	}
 }

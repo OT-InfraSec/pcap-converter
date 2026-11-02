@@ -473,7 +473,7 @@ go mod download
 #### Adding an OT Protocol Decoder (lib/detect)
 1. Write the strict probe and the decoder in `lib/detect/<proto>*.go`; register the protocol in `default.go`.
 2. For TCP, embed `tcpTracker[*yourConn, YourMessage]` (see `tcptrack.go`); the protocol keeps only framing and decoding.
-3. Add the label in `internal/parser/connection_labeler.go` (`flowLabel`) and `cmd/importer/main.go` (`industrialPortLabels`).
+3. Set `Key` (short name for `--disable-protocols` and port-based labels) and `Label` (the `flows.protocol` value, `UDPLabel` if it differs) on the `detect.Protocol` in `default.go`, then add the `Key` to `protocolSwitches` in `internal/parser/industrial_parser.go` with an `Enable*` field. `TestEveryRegisteredProtocolHasASwitch` and `TestProtocolFlowLabelsAndKeys` fail if one is missing.
 4. Add the decoder to `decodeAllNoPanic` in `lib/detect/fuzz_test.go`, and its probe to `FuzzProbes`.
 5. Build a `scripts/<proto>_demo_pcap.py`, `<proto>_dump` and `compare_<proto>.py` against an independent dissector, and record the result in `docs/SURICATA_PROTOCOL_COMPARISON.md`.
 
