@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -219,9 +220,100 @@ func TestSQLiteRepository_UpsertDevicesKeepsHostname(t *testing.T) {
 	assert.Equal(t, "plc-line3", got[0].Hostname, "insert")
 
 	got[0].Hostname = "plc-line3b"
-	got[0].TenantID = "t" // GetDevices does not load the tenant
+	require.Equal(t, "t", got[0].TenantID)
 	require.NoError(t, repo.UpsertDevices([]*model.Device{got[0]}))
 	single, err := repo.GetDevice("t", "10.0.0.1")
 	require.NoError(t, err)
 	assert.Equal(t, "plc-line3b", single.Hostname, "update")
+}
+
+func TestSQLiteRepository_GetDevicesLoadsTenantID(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	dev := &model.Device{
+		TenantID: "acme", Address: "10.0.0.2", AddressType: "IP", AddressScope: "IPv4",
+		FirstSeen: time.Now(), LastSeen: time.Now(),
+		MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
+		VLANSet: model.NewVLANSet(),
+	}
+	require.NoError(t, repo.UpsertDevices([]*model.Device{dev}))
+
+	got, err := repo.GetDevices("acme", nil)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "acme", got[0].TenantID)
+
+	// Round trip: a device read back and saved again must keep its tenant.
+	require.NoError(t, repo.UpsertDevices(got))
+	single, err := repo.GetDevice("acme", "10.0.0.2")
+	require.NoError(t, err)
+	assert.Equal(t, "acme", single.TenantID)
+}
+
+func TestSQLiteRepository_UpsertDevicesSeparatesTenants(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	mk := func(tenant, host string) *model.Device {
+		return &model.Device{
+			TenantID: tenant, Address: "10.0.0.3", AddressType: "IP", AddressScope: "IPv4", Hostname: host,
+			FirstSeen: time.Now(), LastSeen: time.Now(),
+			MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
+			VLANSet: model.NewVLANSet(),
+		}
+	}
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("a", "host-a")}))
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("b", "host-b")}))
+
+	a, err := repo.GetDevices("a", nil)
+	require.NoError(t, err)
+	require.Len(t, a, 1)
+	assert.Equal(t, "host-a", a[0].Hostname)
+	b, err := repo.GetDevices("b", nil)
+	require.NoError(t, err)
+	require.Len(t, b, 1)
+	assert.Equal(t, "host-b", b[0].Hostname)
+
+	// Same tenant still updates in place.
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("a", "host-a2")}))
+	a, _ = repo.GetDevices("a", nil)
+	require.Len(t, a, 1)
+	assert.Equal(t, "host-a2", a[0].Hostname)
+}
+
+func TestSQLiteRepository_FlowsLinkToTheirTenantsDevices(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	devs := map[string]map[string]int64{}
+	for _, tenant := range []string{"a", "b"} {
+		devs[tenant] = map[string]int64{}
+		var batch []*model.Device
+		for _, addr := range []string{"10.0.0.1", "10.0.0.2"} {
+			d := vlanTestDevice(addr)
+			d.TenantID = tenant
+			batch = append(batch, d)
+		}
+		require.NoError(t, repo.UpsertDevices(batch))
+		for _, d := range batch {
+			devs[tenant][d.Address] = d.ID
+		}
+	}
+	require.NotEqual(t, devs["a"]["10.0.0.1"], devs["b"]["10.0.0.1"])
+
+	mk := func(tenant string, port int) *model.Flow {
+		return &model.Flow{
+			TenantID: tenant, SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"),
+			SrcPort: port, DstPort: 80, Protocol: "tcp", PacketCountOut: 1,
+			FirstSeen: time.Now(), LastSeen: time.Now(), MinPacketSize: 60, MaxPacketSize: 60,
+			SourcePorts:      model.SetFromSlice([]string{fmt.Sprint(port)}),
+			DestinationPorts: model.SetFromSlice([]string{"80"}),
+		}
+	}
+	// AddFlow for tenant b, AddFlows (batch) for tenant a.
+	require.NoError(t, repo.AddFlow(mk("b", 40001)))
+	require.NoError(t, repo.AddFlows([]*model.Flow{mk("a", 40002)}))
+
+	for _, tenant := range []string{"a", "b"} {
+		flows, err := repo.GetFlows(tenant, nil)
+		require.NoError(t, err)
+		require.Len(t, flows, 1, tenant)
+		assert.Equal(t, devs[tenant]["10.0.0.1"], flows[0].SourceDeviceID, "tenant %s source", tenant)
+		assert.Equal(t, devs[tenant]["10.0.0.2"], flows[0].DestinationDeviceID, "tenant %s destination", tenant)
+	}
 }

@@ -576,3 +576,15 @@ func TestEveryRegisteredProtocolHasASwitch(t *testing.T) {
 		assert.False(t, kept, "%s is dropped from the labeler registry", p.Name)
 	}
 }
+
+func TestCollectProtocolUsageStats_UndeterminedDirectionIsValidRole(t *testing.T) {
+	p := NewIndustrialProtocolParser()
+	for _, dir := range []string{"bidirectional", ""} {
+		stats, err := p.CollectProtocolUsageStats("10.0.0.9", []IndustrialProtocolInfo{
+			{Protocol: "enip", Port: 50000, Direction: dir, Timestamp: time.Now()},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "both", stats.CommunicationRole, "direction %q", dir)
+		assert.NoError(t, stats.Validate(), "direction %q", dir)
+	}
+}

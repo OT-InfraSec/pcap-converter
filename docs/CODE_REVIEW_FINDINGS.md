@@ -104,25 +104,31 @@ State at the time of writing: PR #13, head `f77086c`.
 
 ### Found while working on later items (not from the original review)
 
-21. **OPEN: `GetDevices` does not load `tenant_id`.** The list query selects no
+21. **FIXED: `GetDevices` did not load `tenant_id`.** The list query selects no
     tenant column, so a device read back from it and saved with `UpsertDevices`
     is written with an empty tenant and then no longer matches
     `GetDevice(tenant, address)`. `NewGopacketParser` loads existing devices
     this way, so a re-import into a multi-tenant database may blank tenants.
     Not verified end to end; a round-trip test showed the effect on the
     repository (`sqlite_repository_vlan_test.go`, comment in
-    `TestSQLiteRepository_UpsertDevicesKeepsHostname`). *Fix:* select
-    `tenant_id` in `GetDevices` and add a test.
+    `TestSQLiteRepository_UpsertDevicesKeepsHostname`). *Fixed:* `GetDevices`
+    selects `tenant_id`; `TestSQLiteRepository_GetDevicesLoadsTenantID`.
+    `UpsertDevices` also matched devices by address only, so two tenants
+    sharing an IP overwrote each other; it now matches on tenant too
+    (`TestSQLiteRepository_UpsertDevicesSeparatesTenants`). `AddFlow`,
+    `AddFlows` and `UpsertFlow` now resolve flow device IDs within the flow's
+    tenant too (`TestSQLiteRepository_FlowsLinkToTheirTenantsDevices`).
 22. **FIXED: `UpsertDevices` and `GetDevices` ignored `devices.hostname`.**
     The column existed and `AddDevice` wrote it, but the batch path the parser
     uses did not, so hostnames could never be stored. Fixed with the DHCP and
     LLMNR change (`dde3792`). `AddDevices` (batch insert) still does not write
     it; it is not on the parser's path, so left as is.
-23. **OPEN: "invalid communication role" on off-port industrial traffic.**
+23. **FIXED: "invalid communication role" on off-port industrial traffic.**
     `CollectProtocolUsageStats` rejects direction "unknown". DNP3 now sets the
     direction from the link DIR bit; EtherNet/IP and S7 found off their usual
-    ports can still hit it and fail the import. From the handoff notes, not
-    reproduced in this session.
+    ports could still hit it and fail the import. *Fixed:* an undetermined
+    direction ("bidirectional" or empty) now yields role "both"
+    (`TestCollectProtocolUsageStats_UndeterminedDirectionIsValidRole`).
 24. **OPEN: baseline test failures** in `internal/iec62443` (see 20) are not in
     CI (`ci.yml` leaves the package out).
 
