@@ -247,3 +247,32 @@ func TestSQLiteRepository_GetDevicesLoadsTenantID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "acme", single.TenantID)
 }
+
+func TestSQLiteRepository_UpsertDevicesSeparatesTenants(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	mk := func(tenant, host string) *model.Device {
+		return &model.Device{
+			TenantID: tenant, Address: "10.0.0.3", AddressType: "IP", AddressScope: "IPv4", Hostname: host,
+			FirstSeen: time.Now(), LastSeen: time.Now(),
+			MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
+			VLANSet: model.NewVLANSet(),
+		}
+	}
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("a", "host-a")}))
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("b", "host-b")}))
+
+	a, err := repo.GetDevices("a", nil)
+	require.NoError(t, err)
+	require.Len(t, a, 1)
+	assert.Equal(t, "host-a", a[0].Hostname)
+	b, err := repo.GetDevices("b", nil)
+	require.NoError(t, err)
+	require.Len(t, b, 1)
+	assert.Equal(t, "host-b", b[0].Hostname)
+
+	// Same tenant still updates in place.
+	require.NoError(t, repo.UpsertDevices([]*model.Device{mk("a", "host-a2")}))
+	a, _ = repo.GetDevices("a", nil)
+	require.Len(t, a, 1)
+	assert.Equal(t, "host-a2", a[0].Hostname)
+}

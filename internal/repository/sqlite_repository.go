@@ -1527,7 +1527,9 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	}
 	defer updateStmt.Close()
 
-	checkStmt, err := tx.Prepare(`SELECT id FROM devices WHERE address = ?;`)
+	// Match on tenant too, or two tenants sharing an IP overwrite each other.
+	// COALESCE keeps rows written with a NULL tenant matching the empty tenant.
+	checkStmt, err := tx.Prepare(`SELECT id FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1540,7 +1542,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 		// Check if device exists
 		var deviceID int64
-		err = checkStmt.QueryRow(device.Address).Scan(&deviceID)
+		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID)
 
 		if err == nil {
 			// Device exists, update it

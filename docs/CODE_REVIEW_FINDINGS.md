@@ -113,7 +113,10 @@ State at the time of writing: PR #13, head `f77086c`.
     repository (`sqlite_repository_vlan_test.go`, comment in
     `TestSQLiteRepository_UpsertDevicesKeepsHostname`). *Fixed:* `GetDevices`
     selects `tenant_id`; `TestSQLiteRepository_GetDevicesLoadsTenantID`.
-    (`UpsertDevices` still looks devices up by address only, not tenant.)
+    `UpsertDevices` also matched devices by address only, so two tenants
+    sharing an IP overwrote each other; it now matches on tenant too
+    (`TestSQLiteRepository_UpsertDevicesSeparatesTenants`). `AddFlow` and the
+    batch flow insert still resolve device IDs by address only.
 22. **FIXED: `UpsertDevices` and `GetDevices` ignored `devices.hostname`.**
     The column existed and `AddDevice` wrote it, but the batch path the parser
     uses did not, so hostnames could never be stored. Fixed with the DHCP and
