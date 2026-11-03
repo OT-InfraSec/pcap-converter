@@ -115,8 +115,9 @@ State at the time of writing: PR #13, head `f77086c`.
     selects `tenant_id`; `TestSQLiteRepository_GetDevicesLoadsTenantID`.
     `UpsertDevices` also matched devices by address only, so two tenants
     sharing an IP overwrote each other; it now matches on tenant too
-    (`TestSQLiteRepository_UpsertDevicesSeparatesTenants`). `AddFlow` and the
-    batch flow insert still resolve device IDs by address only.
+    (`TestSQLiteRepository_UpsertDevicesSeparatesTenants`). `AddFlow`,
+    `AddFlows` and `UpsertFlow` now resolve flow device IDs within the flow's
+    tenant too (`TestSQLiteRepository_FlowsLinkToTheirTenantsDevices`).
 22. **FIXED: `UpsertDevices` and `GetDevices` ignored `devices.hostname`.**
     The column existed and `AddDevice` wrote it, but the batch path the parser
     uses did not, so hostnames could never be stored. Fixed with the DHCP and

@@ -584,12 +584,12 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 		return errors.New("invalid destination address")
 	}
 
-	srcDevice, err := r.GetDeviceForAddress(srcAddress)
+	srcDevice, err := r.getDeviceForTenantAddress(flow.TenantID, srcAddress)
 	if err != nil {
 		return fmt.Errorf("flow source device %s: %w", srcAddress, err)
 	}
 
-	destDevice, err := r.GetDeviceForAddress(destAddress)
+	destDevice, err := r.getDeviceForTenantAddress(flow.TenantID, destAddress)
 	if err != nil {
 		return fmt.Errorf("flow destination device %s: %w", destAddress, err)
 	}
@@ -1035,6 +1035,36 @@ func (r *SQLiteRepository) GetDeviceForAddress(address string) (*model2.Device, 
 	return &device, nil
 }
 
+// getDeviceForTenantAddress is GetDeviceForAddress restricted to one tenant, so
+// flows link to their own tenant's devices when tenants share an IP.
+func (r *SQLiteRepository) getDeviceForTenantAddress(tenantID, address string) (*model2.Device, error) {
+	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, vlans FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?`
+	row := r.db.QueryRow(query, address, tenantID)
+
+	var device model2.Device
+	var firstSeenStr, lastSeenStr, macAddressesStr string
+	var vlansStr sql.NullString
+
+	if err := row.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+		&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &vlansStr); err != nil {
+		return nil, err
+	}
+
+	device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
+	device.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeenStr)
+
+	device.MACAddressSet = model2.NewMACAddressSet()
+	device.VLANSet = model2.VLANSetFromString(vlansStr.String)
+
+	for _, mac := range strings.Split(macAddressesStr, ",") {
+		if mac != "" {
+			device.MACAddressSet.Add(mac)
+		}
+	}
+
+	return &device, nil
+}
+
 func (r *SQLiteRepository) Commit() error {
 	// No-op for now (autocommit)
 	return nil
@@ -1149,9 +1179,9 @@ func (r *SQLiteRepository) AddFlows(flows []*model2.Flow) error {
 
 	stmt, err := tx.Prepare(`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id, source_device_id, destination_device_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
-	SELECT id FROM devices WHERE address = ?
+	SELECT id FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?
 	), (
-	SELECT id FROM devices WHERE address = ?
+	SELECT id FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?
 	));`)
 	if err != nil {
 		return err
@@ -1195,7 +1225,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (
 			intPtrToArg(flow.VlanID),
 			intPtrToArg(flow.VlanInnerID),
 			ipToString(flow.SrcIP),
+			flow.TenantID,
 			ipToString(flow.DstIP),
+			flow.TenantID,
 		)
 		if err != nil {
 			return err
@@ -1653,13 +1685,13 @@ func (r *SQLiteRepository) UpdateFlow(flow *model2.Flow) error {
 		return errors.New("invalid destination address")
 	}
 
-	srcDevice, err := r.GetDeviceForAddress(srcAddress)
+	srcDevice, err := r.getDeviceForTenantAddress(flow.TenantID, srcAddress)
 	if err != nil {
 		log.Printf("Error getting source device for address %s: %v", srcAddress, err)
 		return err
 	}
 
-	destDevice, err := r.GetDeviceForAddress(destAddress)
+	destDevice, err := r.getDeviceForTenantAddress(flow.TenantID, destAddress)
 	if err != nil {
 		log.Printf("Error getting destination device for address %s: %v", destAddress, err)
 		return err
