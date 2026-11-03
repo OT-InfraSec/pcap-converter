@@ -557,6 +557,7 @@ func (p *IndustrialProtocolParserImpl) CollectProtocolUsageStats(deviceID string
 	ports := make(map[uint16]bool)
 	hasInbound := false
 	hasOutbound := false
+	hasUndetermined := false
 
 	for _, protocol := range protocols {
 		protocolCounts[protocol.Protocol]++
@@ -566,6 +567,9 @@ func (p *IndustrialProtocolParserImpl) CollectProtocolUsageStats(deviceID string
 			hasInbound = true
 		} else if protocol.Direction == "outbound" {
 			hasOutbound = true
+		} else {
+			// Off the protocol's usual port the side is unknown ("bidirectional" or empty).
+			hasUndetermined = true
 		}
 
 		if protocol.Timestamp.Before(stats.FirstSeen) {
@@ -592,6 +596,11 @@ func (p *IndustrialProtocolParserImpl) CollectProtocolUsageStats(deviceID string
 		stats.CommunicationRole = "server"
 	} else if hasOutbound {
 		stats.CommunicationRole = "client"
+	} else if hasUndetermined {
+		// The model accepts only client/server/both. "both" is the honest value
+		// when we saw the protocol but cannot tell which side the device played;
+		// "unknown" would fail validation and abort the batch save.
+		stats.CommunicationRole = "both"
 	}
 
 	// Convert ports to slice

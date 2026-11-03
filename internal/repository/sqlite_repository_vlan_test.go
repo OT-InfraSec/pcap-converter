@@ -219,9 +219,31 @@ func TestSQLiteRepository_UpsertDevicesKeepsHostname(t *testing.T) {
 	assert.Equal(t, "plc-line3", got[0].Hostname, "insert")
 
 	got[0].Hostname = "plc-line3b"
-	got[0].TenantID = "t" // GetDevices does not load the tenant
+	require.Equal(t, "t", got[0].TenantID)
 	require.NoError(t, repo.UpsertDevices([]*model.Device{got[0]}))
 	single, err := repo.GetDevice("t", "10.0.0.1")
 	require.NoError(t, err)
 	assert.Equal(t, "plc-line3b", single.Hostname, "update")
+}
+
+func TestSQLiteRepository_GetDevicesLoadsTenantID(t *testing.T) {
+	repo := newVLANTestRepo(t)
+	dev := &model.Device{
+		TenantID: "acme", Address: "10.0.0.2", AddressType: "IP", AddressScope: "IPv4",
+		FirstSeen: time.Now(), LastSeen: time.Now(),
+		MACAddressSet: model.NewMACAddressSet(), ProtocolList: model.NewSet(), DNSNames: model.NewSet(),
+		VLANSet: model.NewVLANSet(),
+	}
+	require.NoError(t, repo.UpsertDevices([]*model.Device{dev}))
+
+	got, err := repo.GetDevices("acme", nil)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "acme", got[0].TenantID)
+
+	// Round trip: a device read back and saved again must keep its tenant.
+	require.NoError(t, repo.UpsertDevices(got))
+	single, err := repo.GetDevice("acme", "10.0.0.2")
+	require.NoError(t, err)
+	assert.Equal(t, "acme", single.TenantID)
 }

@@ -513,7 +513,7 @@ func (r *SQLiteRepository) GetDevice(tenantID, address string) (*model2.Device, 
 }
 
 func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interface{}) ([]*model2.Device, error) {
-	query := `SELECT id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname FROM devices WHERE tenant_id = ?`
+	query := `SELECT id, tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname FROM devices WHERE tenant_id = ?`
 	params := []interface{}{tenantID}
 
 	if len(filters) > 0 {
@@ -532,13 +532,14 @@ func (r *SQLiteRepository) GetDevices(tenantID string, filters map[string]interf
 	var devices []*model2.Device
 	for rows.Next() {
 		var firstSeenStr, lastSeenStr, macAddressesStr string
-		var vlansStr, hostname sql.NullString
+		var vlansStr, hostname, tenant sql.NullString
 		var device model2.Device
 
-		if err := rows.Scan(&device.ID, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
+		if err := rows.Scan(&device.ID, &tenant, &device.Address, &device.AddressType, &firstSeenStr, &lastSeenStr,
 			&device.AddressSubType, &device.AddressScope, &macAddressesStr, &device.AdditionalData, &device.IsOnlyDestination, &vlansStr, &hostname); err != nil {
 			return nil, err
 		}
+		device.TenantID = tenant.String
 		device.Hostname = hostname.String
 
 		device.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeenStr)
