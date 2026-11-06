@@ -1531,11 +1531,26 @@ func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
 	if err == nil && existingDevice != nil {
 		// Device exists, update it
 		device.ID = existingDevice.ID
+		device.VLANSet = mergeVLANSets(existingDevice.VLANSet, device.VLANSet)
 		return r.UpdateDevice(device)
 	}
 
 	// Device doesn't exist or there was an error retrieving it, insert it
 	return r.AddDevice(device)
+}
+
+// mergeVLANSets returns the union of a stored and an incoming VLAN set. A device
+// value built without VLAN information carries an empty set, so an upsert must
+// not replace the VLANs already recorded for the address.
+func mergeVLANSets(stored, incoming *model2.VLANSet) *model2.VLANSet {
+	merged := model2.NewVLANSet()
+	for _, token := range stored.List() {
+		merged.AddToken(token)
+	}
+	for _, token := range incoming.List() {
+		merged.AddToken(token)
+	}
+	return merged
 }
 
 // UpsertDevices inserts multiple devices in a single transaction, updating existing ones.
@@ -1561,7 +1576,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 	// Match on tenant too, or two tenants sharing an IP overwrite each other.
 	// COALESCE keeps rows written with a NULL tenant matching the empty tenant.
-	checkStmt, err := tx.Prepare(`SELECT id FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
+	checkStmt, err := tx.Prepare(`SELECT id, vlans FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1574,7 +1589,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 		// Check if device exists
 		var deviceID int64
-		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID)
+		var storedVLANs sql.NullString
+		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID, &storedVLANs)
 
 		if err == nil {
 			// Device exists, update it
@@ -1582,6 +1598,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 			if device.MACAddressSet != nil {
 				macs = device.MACAddressSet.ToString()
 			}
+			device.VLANSet = mergeVLANSets(model2.VLANSetFromString(storedVLANs.String), device.VLANSet)
 
 			_, err = updateStmt.Exec(
 				device.TenantID,
