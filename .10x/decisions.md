@@ -44,6 +44,13 @@ Started: 2026-10-20
 - **Trade-offs accepted:** visualizer joins by address lists and picks the latest row; flapping values create extra rows (capped at 100k).
 - **Impacts:** repository interface and mocks, visualizer (new table, `advertised` kind, `cdp` label).
 
+### 2026-11-06 — User: VLAN open decisions (gaps G4, G5)
+- **Decision:** (G4) Confirmed: VID 0 counts as untagged (NULL), and the `devices.vlans` token format `untagged` / `N` / `N.M`, comma-joined and sorted, stays as written in the cycle 1 design. (G5) No size cap on `devices.vlans` for now. The size is bounded by the distinct VLAN combinations per IP.
+- **Why:** G4: the VID 0 rule was already decided in `user-decisions.md` A2; the user confirmed the token format in the same reply. G5: the user judged the limit adequate for now.
+- **Alternatives considered:** G5: a cap like `subnets` (100,000) with a drop-and-count policy.
+- **Trade-offs accepted:** G5: a QinQ-heavy or hostile capture can produce a long string that is loaded on every `GetDevice` and `GetDevices`. Revisit if a benchmark or a real capture shows a problem.
+- **Impacts:** Visualizer must still confirm the token contract ([docs/VLAN_VISUALIZER_CHECKLIST.md](../docs/VLAN_VISUALIZER_CHECKLIST.md)). Converter: no code change. Design note on size added.
+
 ### 2026-10-20 — 10x-team: User decision log written
 - **Decision:** All user decisions of cycles 2 and 3, with rejected alternatives and assumed reasons, are recorded in `user-decisions.md`.
 - **Why:** User asked for every decision, its alternatives and why they were declined to be documented. Reasons are inferred, not stated by the user, and are labelled as such.
