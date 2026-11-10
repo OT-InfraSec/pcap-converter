@@ -20,6 +20,23 @@ import argparse, collections, ipaddress, json, os, re, subprocess, sys, tempfile
 
 LIMIT = 5
 
+
+def tshark_pdml(pcap, display_filter):
+    """tshark's PDML for the packets matching display_filter.
+
+    Out-of-order TCP segments are reassembled (the demo captures contain some;
+    without it tshark drops a PDU and the comparison reports a false
+    difference). Releases without that preference reject it, so fail with
+    tshark's own message instead of comparing against a degraded reference."""
+    cmd = ["tshark", "-o", "tcp.reassemble_out_of_order:TRUE", "-r", pcap, "-Y", display_filter, "-T", "pdml"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        ver = subprocess.run(["tshark", "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
+        sys.exit("tshark exited %d (%s): %s\nThe reference needs a tshark that has the "
+                 "tcp.reassemble_out_of_order preference." % (r.returncode, ver[0] if ver else "unknown version", r.stderr.strip()))
+    return r.stdout
+
+
 def norm_ip(ip):
     """Suricata prints IPv6 expanded, we print it compressed."""
     try:
