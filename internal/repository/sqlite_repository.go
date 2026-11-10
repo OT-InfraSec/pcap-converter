@@ -600,8 +600,15 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 
 	// AddFlow: include bidirectional columns
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
+	// A preassigned id (set by the flow manager, which packets already reference) is kept;
+	// NULL lets SQLite assign one.
+	var flowIDArg interface{}
+	if flow.ID > 0 {
+		flowIDArg = flow.ID
+	}
 	result, err := r.db.Exec(
-		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO flows (id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		flowIDArg,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
 		ipToString(flow.DstIP),
@@ -631,6 +638,38 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	flow.ID, err = result.LastInsertId()
 	if err != nil {
 		return fmt.Errorf("last insert id for flow: %w", err)
+	}
+	return nil
+}
+
+// MaxFlowID returns the highest flow id in the database (0 if there are no flows).
+func (r *SQLiteRepository) MaxFlowID() (int64, error) {
+	var id sql.NullInt64
+	if err := r.db.QueryRow("SELECT MAX(id) FROM flows").Scan(&id); err != nil {
+		return 0, err
+	}
+	return id.Int64, nil
+}
+
+// relinkPackets points the packets listed in refs at flowID. It is only needed when a flow
+// was merged into an existing database row whose id differs from the one the packets carry.
+func (r *SQLiteRepository) relinkPackets(flowID int64, refs []int64) error {
+	const chunk = 500
+	for i := 0; i < len(refs); i += chunk {
+		end := i + chunk
+		if end > len(refs) {
+			end = len(refs)
+		}
+		args := make([]interface{}, 0, end-i+1)
+		args = append(args, flowID)
+		placeholders := make([]string, 0, end-i)
+		for _, id := range refs[i:end] {
+			args = append(args, id)
+			placeholders = append(placeholders, "?")
+		}
+		if _, err := r.db.Exec("UPDATE packets SET flow_id = ? WHERE id IN ("+strings.Join(placeholders, ",")+")", args...); err != nil {
+			return fmt.Errorf("relink packets to flow %d: %w", flowID, err)
+		}
 	}
 	return nil
 }
@@ -2353,6 +2392,12 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	}
 
 	if existingFlow != nil {
+		// Packets of this flow were stored with flow.ID; point them at the row they merge into.
+		if flow.ID > 0 && flow.ID != existingFlow.ID {
+			if err := r.relinkPackets(existingFlow.ID, flow.PacketRefs); err != nil {
+				return err
+			}
+		}
 		// Update existing flow
 		return r.updateBidirectionalFlow(existingFlow, flow, isReversed)
 	} else {
@@ -2370,6 +2415,7 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 			DstPort:          flow.DstPort,
 			FirstSeen:        flow.FirstSeen,
 			LastSeen:         flow.LastSeen,
+			ID:               flow.ID,
 			PacketRefs:       make([]int64, len(flow.PacketRefs)),
 			MinPacketSize:    flow.MinPacketSize,
 			MaxPacketSize:    flow.MaxPacketSize,
