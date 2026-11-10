@@ -20,6 +20,34 @@ import argparse, collections, ipaddress, json, os, re, subprocess, sys, tempfile
 
 LIMIT = 5
 
+
+def tshark_pdml(pcap, display_filter, reassemble_out_of_order=True):
+    """tshark's PDML for the packets matching display_filter.
+
+    The capture is fed through stdin rather than named with -r <path>: on the CI
+    runner tshark failed with "You don't have permission to read the file" for a
+    file the runner user had just written, and stdin does not depend on how
+    tshark may open paths.
+
+    Out-of-order TCP segments are reassembled (the demo captures contain some;
+    without it tshark drops a PDU and the comparison reports a false
+    difference). Releases without that preference reject it, so fail with
+    tshark's own message instead of comparing against a degraded reference."""
+    cmd = ["tshark"]
+    if reassemble_out_of_order:
+        cmd += ["-o", "tcp.reassemble_out_of_order:TRUE"]
+    cmd += ["-r", "-", "-Y", display_filter, "-T", "pdml"]
+    with open(pcap, "rb") as f:
+        r = subprocess.run(cmd, stdin=f, capture_output=True, text=True)
+    if r.returncode != 0:
+        ver = subprocess.run(["tshark", "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
+        st = os.stat(pcap)
+        sys.exit("tshark exited %d (%s): %s\n(capture %s: mode %o, uid %d; we run as uid %d)"
+                 % (r.returncode, ver[0] if ver else "unknown version", r.stderr.strip(),
+                    pcap, st.st_mode & 0o7777, st.st_uid, os.geteuid()))
+    return r.stdout
+
+
 def norm_ip(ip):
     """Suricata prints IPv6 expanded, we print it compressed."""
     try:

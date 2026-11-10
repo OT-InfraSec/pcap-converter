@@ -198,6 +198,9 @@ func TestDefaultDeviceManager_UpdateDeviceWithIndustrialInfo(t *testing.T) {
 
 	dm.UpdateDeviceWithIndustrialInfo(deviceIP, protocolInfo, false)
 
+	// AdditionalData is rebuilt when the device is read, not on every update
+	device = dm.GetDevice(deviceIP, "IP")
+
 	// Verify industrial info was added
 	var additionalData map[string]interface{}
 	err := json.Unmarshal([]byte(device.AdditionalData), &additionalData)

@@ -27,8 +27,7 @@ def num(s):
 
 
 def packets(pcap):
-    cmd = ["tshark", "-o", "tcp.reassemble_out_of_order:TRUE", "-r", pcap, "-Y", "dnp3", "-T", "pdml"]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    out = cm.tshark_pdml(pcap, "dnp3")
     for _, pk in ET.iterparse(io.StringIO(out), events=("end",)):
         if pk.tag != "packet":
             continue

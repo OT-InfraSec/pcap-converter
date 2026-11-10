@@ -207,6 +207,7 @@ type hostEvidenceStore struct {
 	dhcp  map[string]*dhcpClientEvidence // by MAC; the latest non-empty value of each field
 	macIP map[string]string              // MAC -> the latest address bound to it
 	llmnr map[string]map[string]struct{} // IP -> names its responder gave
+	mdns  map[string]map[string]struct{} // IP -> names mDNS A/AAAA records gave
 
 	identity map[string]*hostIdentity // IP -> NetBIOS and SMB identity, see host_identity.go
 }
@@ -216,6 +217,7 @@ func newHostEvidenceStore() *hostEvidenceStore {
 		dhcp:  make(map[string]*dhcpClientEvidence),
 		macIP: make(map[string]string),
 		llmnr: make(map[string]map[string]struct{}),
+		mdns:  make(map[string]map[string]struct{}),
 
 		identity: make(map[string]*hostIdentity),
 	}
@@ -249,17 +251,28 @@ func (s *hostEvidenceStore) observeDHCP(e dhcpClientEvidence) {
 
 func (s *hostEvidenceStore) observeLLMNR(hosts []llmnrHost) {
 	for _, h := range hosts {
-		names, ok := s.llmnr[h.IP]
-		if !ok {
-			if len(s.llmnr) >= maxHostEvidence {
-				continue
-			}
-			names = make(map[string]struct{})
-			s.llmnr[h.IP] = names
+		observeName(s.llmnr, h.IP, h.Name)
+	}
+}
+
+// observeMDNS records the name an mDNS A or AAAA record gives for an address.
+// The address in the record is not necessarily a packet endpoint, and the
+// device may not exist yet, so the name is applied once at the end, like LLMNR.
+func (s *hostEvidenceStore) observeMDNS(ip, name string) {
+	observeName(s.mdns, ip, name)
+}
+
+func observeName(byIP map[string]map[string]struct{}, ip, name string) {
+	names, ok := byIP[ip]
+	if !ok {
+		if len(byIP) >= maxHostEvidence {
+			return
 		}
-		if len(names) < 16 { // a responder with more names than this is noise
-			names[h.Name] = struct{}{}
-		}
+		names = make(map[string]struct{})
+		byIP[ip] = names
+	}
+	if len(names) < 16 { // a responder with more names than this is noise
+		names[name] = struct{}{}
 	}
 }
 
@@ -303,15 +316,15 @@ func (p *GopacketParser) applyHostEvidence() {
 			log.Debug().Err(err).Str("ip", dev.Address).Msg("DHCP evidence not stored")
 		}
 	}
-	for ip, names := range s.llmnr {
-		sorted := make([]string, 0, len(names))
-		for n := range names {
-			sorted = append(sorted, n)
-		}
-		sort.Strings(sorted)
-		for _, n := range sorted {
-			if err := p.AssociateDNSNameToIP(ip, n); err != nil {
-				log.Debug().Err(err).Str("ip", ip).Msg("LLMNR name not stored")
+	for _, byIP := range []map[string]map[string]struct{}{s.llmnr, s.mdns} {
+		for ip, names := range byIP {
+			sorted := make([]string, 0, len(names))
+			for n := range names {
+				sorted = append(sorted, n)
+			}
+			sort.Strings(sorted)
+			if err := p.associateDNSNames(ip, sorted...); err != nil {
+				log.Debug().Err(err).Str("ip", ip).Msg("host name not stored")
 			}
 		}
 	}

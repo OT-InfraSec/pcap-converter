@@ -37,8 +37,7 @@ def hostlike(ip):
 
 
 def tshark_facts(pcap):
-    out = subprocess.run(["tshark", "-r", pcap, "-Y", "nbns || smb2 || nbss", "-T", "pdml"],
-                         check=True, capture_output=True, text=True).stdout
+    out = cm.tshark_pdml(pcap, "nbns || smb2 || nbss", reassemble_out_of_order=False)
     facts = set()
     for _, pk in ET.iterparse(io.StringIO(out), events=("end",)):
         if pk.tag != "packet":

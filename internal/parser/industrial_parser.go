@@ -545,11 +545,17 @@ func (p *IndustrialProtocolParserImpl) CollectProtocolUsageStats(deviceID string
 	}
 
 	stats := &model.ProtocolUsageStats{
-		DeviceID:          deviceID,
-		FirstSeen:         time.Now(),
-		LastSeen:          time.Now(),
+		DeviceID: deviceID,
+		// Seeded from the capture's own timestamp: seeding with the wall clock
+		// pinned LastSeen to "now" for any capture from the past.
+		FirstSeen:         protocols[0].Timestamp,
+		LastSeen:          protocols[0].Timestamp,
 		CommunicationRole: "unknown",
 		PortsUsed:         make([]uint16, 0),
+	}
+
+	if stats.FirstSeen.IsZero() {
+		stats.FirstSeen, stats.LastSeen = time.Now(), time.Now()
 	}
 
 	// Determine primary protocol and role
@@ -898,28 +904,40 @@ func (p *IndustrialProtocolParserImpl) parseCIFSBrowser(packet gopacket.Packet, 
 		Direction:      p.determineDirection(packet),
 	}
 
-	// Try to extract CIFS Browser specific data
-	// Check for CIFS Browser Announcement layer (the most common message type)
-	if announcementLayer := packet.Layer(lib_layers.LayerTypeCIFSBrowser); announcementLayer != nil {
-		if announcement, ok := announcementLayer.(*lib_layers.CIFSBrowserAnnouncement); ok {
-			info.Confidence = 1
+	// All CIFS Browser message types share LayerTypeCIFSBrowser, so the layer is
+	// not always an Announcement (elections, backup list requests, ... are
+	// ordinary traffic on UDP 138). Only announcements carry host identity.
+	switch msg := packet.Layer(lib_layers.LayerTypeCIFSBrowser).(type) {
+	case *lib_layers.CIFSBrowserAnnouncement:
+		info.Confidence = 1
 
-			// We can't directly use the iec62443 package functions here (would create circular dependency)
-			// Instead, extract basic information
-			info.DeviceIdentity["server_name"] = announcement.ServerName
-			info.DeviceIdentity["is_workstation"] = announcement.ServerTypeFlags.IsWorkstation
-			info.DeviceIdentity["is_server"] = announcement.ServerTypeFlags.IsServer
-			info.DeviceIdentity["is_printer"] = announcement.ServerTypeFlags.IsPrintQueueServer
-			info.DeviceIdentity["is_domain_controller"] = announcement.ServerTypeFlags.IsDomainController
-			info.DeviceIdentity["is_apple"] = announcement.ServerTypeFlags.IsAppleServer
+		// We can't directly use the iec62443 package functions here (would create circular dependency)
+		// Instead, extract basic information
+		info.DeviceIdentity["server_name"] = msg.ServerName
+		info.DeviceIdentity["is_workstation"] = msg.ServerTypeFlags.IsWorkstation
+		info.DeviceIdentity["is_server"] = msg.ServerTypeFlags.IsServer
+		info.DeviceIdentity["is_printer"] = msg.ServerTypeFlags.IsPrintQueueServer
+		info.DeviceIdentity["is_domain_controller"] = msg.ServerTypeFlags.IsDomainController
+		info.DeviceIdentity["is_apple"] = msg.ServerTypeFlags.IsAppleServer
 
-			info.AdditionalData["command"] = announcement.Command.String()
-			info.AdditionalData["os_version"] = fmt.Sprintf("%d.%d", announcement.OSMajorVersion, announcement.OSMinorVersion)
-		} else {
-			fmt.Println("Failed to cast CIFS Browser layer to Announcement")
-		}
-	} else {
-		fmt.Println("CIFS Browser layer not found in packet")
+		info.AdditionalData["command"] = msg.Command.String()
+		info.AdditionalData["os_version"] = fmt.Sprintf("%d.%d", msg.OSMajorVersion, msg.OSMinorVersion)
+	case *lib_layers.CIFSBrowserRequestAnnounce:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserElectionRequest:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserBackupListRequest:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserBackupListResponse:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserMasterAnnouncement:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserResetBrowserState:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.CIFSBrowserBecomeBackupMsg:
+		info.AdditionalData["command"] = msg.Command.String()
+	case *lib_layers.GenericCIFSBrowser:
+		info.AdditionalData["command"] = msg.Command.String()
 	}
 
 	// Determine port direction

@@ -36,8 +36,7 @@ def packets(pcap):
     """Yield (src, dst, sport, dport, cotp_fields, [s7comm field dicts]) per
     packet from tshark's PDML, one dict per S7 PDU in order."""
     import xml.etree.ElementTree as ET
-    cmd = ["tshark", "-o", "tcp.reassemble_out_of_order:TRUE", "-r", pcap, "-Y", "s7comm or cotp.type == 0x0e or cotp.type == 0x0d", "-T", "pdml"]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    out = cm.tshark_pdml(pcap, "s7comm or cotp.type == 0x0e or cotp.type == 0x0d")
     for _, pk in ET.iterparse(__import__("io").StringIO(out), events=("end",)):
         if pk.tag != "packet":
             continue

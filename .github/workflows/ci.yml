@@ -41,6 +41,9 @@ jobs:
           python-version: '3.12'
       - name: Install tshark
         run: |
+          # The distribution's tshark predates tcp.reassemble_out_of_order, which the
+          # comparison scripts need (the demo captures hold out-of-order segments).
+          sudo add-apt-repository -y ppa:wireshark-dev/stable
           sudo DEBIAN_FRONTEND=noninteractive apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
           tshark --version | head -1
