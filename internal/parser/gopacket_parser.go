@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,7 @@ type GopacketParser struct {
 	httpRingBuffer *helper2.RingBuffer[*liblayers.HTTP]
 
 	// Collect protocol usage stats during parsing to defer DB writes
-	protocolUsageStats []*model2.ProtocolUsageStats
+	protocolUsageStats map[string]*model2.ProtocolUsageStats // device IP + protocol -> aggregate, see recordProtocolUsage
 
 	// Frames in which a decoder failed (including recovered panics): their packet row is
 	// kept, but the data of the failing layer and everything above it is lost.
@@ -126,7 +127,7 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 		hostEvidence:       newHostEvidenceStore(),
 		ssdpQueries:        make(map[string]*SSDPQuery),
 		httpRingBuffer:     helper2.NewRingBuffer[*liblayers.HTTP](100), // Adjust size as needed
-		protocolUsageStats: make([]*model2.ProtocolUsageStats, 0),       // Collect stats for deferred writing
+		protocolUsageStats: make(map[string]*model2.ProtocolUsageStats), // Collect stats for deferred writing
 		repo:               repo,
 		industrialParser:   NewIndustrialProtocolParser(),
 		connLabeler:        newConnectionLabeler(labelerRegistry(DefaultIndustrialParserConfig())),
@@ -1334,19 +1335,17 @@ func (p *GopacketParser) ParseFile() error {
 				switch answer.Type {
 				case layers.DNSTypeA:
 					if answer.IP != nil {
-						answerData["ip"] = answer.IP.String()
-						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
-						if err != nil {
-							log.Error().Msg("Failed to associate ip with DNS name")
-						}
+						ipStr := answer.IP.String()
+						answerData["ip"] = ipStr
+						// Applied after all devices exist; see observeMDNS.
+						p.evidence().observeMDNS(ipStr, string(answer.Name))
 					}
 				case layers.DNSTypeAAAA:
 					if answer.IP != nil {
-						answerData["ip"] = answer.IP.String()
-						err = p.AssociateDNSNameToIP(answerData["ip"].(string), answerData["name"].(string))
-						if err != nil {
-							log.Error().Msg("Failed to associate ip with DNS name")
-						}
+						ipStr := answer.IP.String()
+						answerData["ip"] = ipStr
+						// Applied after all devices exist; see observeMDNS.
+						p.evidence().observeMDNS(ipStr, string(answer.Name))
 					}
 				case layers.DNSTypePTR:
 					if answer.PTR != nil {
@@ -1517,21 +1516,13 @@ func (p *GopacketParser) ParseFile() error {
 				if srcIP != "" {
 					p.deviceManager.UpdateDeviceWithIndustrialInfo(srcIP, protocolInfo, false)
 
-					// Collect protocol usage statistics for source device (defer DB write)
-					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(srcIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
-						// Append to deferred stats list instead of writing immediately
-						p.protocolUsageStats = append(p.protocolUsageStats, stats)
-					}
+					p.recordProtocolUsage(srcIP, protocolInfo, false)
 				}
 				// Update destination device with industrial protocol info
 				if dstIP != "" {
 					p.deviceManager.UpdateDeviceWithIndustrialInfo(dstIP, protocolInfo, true)
 
-					// Collect protocol usage statistics for destination device (defer DB write)
-					if stats, statsErr := p.industrialParser.CollectProtocolUsageStats(dstIP, []model2.IndustrialProtocolInfo{protocolInfo}); statsErr == nil && stats != nil {
-						// Append to deferred stats list instead of writing immediately
-						p.protocolUsageStats = append(p.protocolUsageStats, stats)
-					}
+					p.recordProtocolUsage(dstIP, protocolInfo, true)
 				}
 			}
 
@@ -1712,7 +1703,11 @@ func (p *GopacketParser) ParseFile() error {
 
 	// Save all collected protocol usage statistics in batch (deferred from main loop)
 	if len(p.protocolUsageStats) > 0 {
-		if err = p.repo.SaveProtocolUsageStatsMultiple(p.protocolUsageStats); err != nil {
+		statsBatch := make([]*model2.ProtocolUsageStats, 0, len(p.protocolUsageStats))
+		for _, st := range p.protocolUsageStats {
+			statsBatch = append(statsBatch, st)
+		}
+		if err = p.repo.SaveProtocolUsageStatsMultiple(statsBatch); err != nil {
 			return fmt.Errorf("failed to save protocol usage stats: %w", err)
 		}
 	}
@@ -1943,38 +1938,57 @@ func (p *GopacketParser) analyzeAndSaveCommunicationPatterns() error {
 	return nil
 }
 
+// AssociateDNSNameToIP records dnsName in the device's "dnsNames" additional data.
 func (p *GopacketParser) AssociateDNSNameToIP(ip string, dnsName string) error {
+	return p.associateDNSNames(ip, dnsName)
+}
+
+// associateDNSNames adds names to a device's "dnsNames" with one JSON round
+// trip, and none when every name is already there.
+func (p *GopacketParser) associateDNSNames(ip string, names ...string) error {
 	device := p.deviceManager.GetDevice(ip, "IP")
 	if device == nil {
 		return fmt.Errorf("device not found for IP %s", ip)
 	}
 
-	additionalDataMap := make(map[string]interface{}, 0)
+	additionalDataMap := make(map[string]interface{})
 	if len(device.AdditionalData) > 0 {
-		err := json.Unmarshal([]byte(device.AdditionalData), &additionalDataMap)
-		if err != nil {
+		if err := json.Unmarshal([]byte(device.AdditionalData), &additionalDataMap); err != nil {
 			return fmt.Errorf("failed to unmarshal additional data for device %d: %w", device.ID, err)
 		}
 	}
 
-	// Associate DNS name with the device
-	dnsNameMap, ok := additionalDataMap["dnsNames"]
-	dnsNameSet := model2.NewSet()
-	if !ok {
-		dnsNameSet.Add(dnsName)
-	} else {
-		for _, existingDNSName := range dnsNameMap.([]interface{}) {
-			dnsNameSet.Add(existingDNSName.(string))
+	known := make(map[string]struct{})
+	var merged []string
+	if existing, ok := additionalDataMap["dnsNames"].([]interface{}); ok {
+		for _, v := range existing {
+			if name, ok := v.(string); ok {
+				if _, dup := known[name]; !dup {
+					known[name] = struct{}{}
+					merged = append(merged, name)
+				}
+			}
 		}
-		dnsNameSet.Add(dnsName)
 	}
-	additionalDataMap["dnsNames"] = dnsNameSet.List()
+	changed := false
+	for _, name := range names {
+		if _, dup := known[name]; !dup {
+			known[name] = struct{}{}
+			merged = append(merged, name)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	slices.Sort(merged)
+	additionalDataMap["dnsNames"] = merged
 	additionalDataJSON, err := json.Marshal(additionalDataMap)
 	if err != nil {
 		return fmt.Errorf("failed to marshal additional data for device %d: %w", device.ID, err)
 	}
 	device.AdditionalData = string(additionalDataJSON)
-
 	return nil
 }
 
@@ -2064,4 +2078,44 @@ func extractVLANTag(packet gopacket.Packet) model2.VLANTag {
 // least one answer. Only those are recorded in the dns_queries table.
 func dnsAnswered(d *layers.DNS) bool {
 	return d.ResponseCode == layers.DNSResponseCodeNoErr && len(d.Answers) > 0
+}
+
+// recordProtocolUsage folds one industrial-protocol packet into the running
+// statistics of (device, protocol). Keeping one aggregate per pair, instead of
+// one record per packet, bounds memory by devices x protocols rather than by
+// packet count; the database write stays deferred to the end of ParseFile.
+func (p *GopacketParser) recordProtocolUsage(deviceIP string, info model2.IndustrialProtocolInfo, incoming bool) {
+	one, err := p.industrialParser.CollectProtocolUsageStats(deviceIP, []model2.IndustrialProtocolInfo{info})
+	if err != nil || one == nil {
+		return
+	}
+	one.TenantID = p.TenantID
+	if incoming {
+		one.PacketCountIn = 1
+	} else {
+		one.PacketCountOut = 1
+	}
+
+	key := deviceIP + "\x00" + one.Protocol
+	agg, ok := p.protocolUsageStats[key]
+	if !ok {
+		p.protocolUsageStats[key] = one
+		return
+	}
+	agg.PacketCountIn += one.PacketCountIn
+	agg.PacketCountOut += one.PacketCountOut
+	if one.FirstSeen.Before(agg.FirstSeen) {
+		agg.FirstSeen = one.FirstSeen
+	}
+	if one.LastSeen.After(agg.LastSeen) {
+		agg.LastSeen = one.LastSeen
+	}
+	if agg.CommunicationRole != one.CommunicationRole {
+		agg.CommunicationRole = "both"
+	}
+	for _, port := range one.PortsUsed {
+		if !slices.Contains(agg.PortsUsed, port) {
+			agg.PortsUsed = append(agg.PortsUsed, port)
+		}
+	}
 }

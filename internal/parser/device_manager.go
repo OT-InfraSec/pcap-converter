@@ -2,6 +2,7 @@ package parser
 
 import (
 	"encoding/json"
+	"maps"
 	"time"
 
 	helper "github.com/InfraSecConsult/pcap-importer-go/lib/helper"
@@ -34,7 +35,13 @@ type DeviceManager interface {
 
 // DefaultDeviceManager implements DeviceManager
 type DefaultDeviceManager struct {
-	devices       map[string]*model.Device
+	devices map[string]*model.Device
+	// industrial holds each device's "industrial_protocols" additional-data entry
+	// as a live map. Updating it per packet is a map write; the device's JSON is
+	// rebuilt only when someone reads the device (see materialize), not once per
+	// packet.
+	industrial    map[string]map[string]interface{}
+	dirty         map[string]struct{} // device keys whose AdditionalData lags behind industrial
 	deviceCounter int64
 	tenantID      string
 }
@@ -43,6 +50,8 @@ type DefaultDeviceManager struct {
 func NewDefaultDeviceManager(tenantID string, initialCounter int64) *DefaultDeviceManager {
 	return &DefaultDeviceManager{
 		devices:       make(map[string]*model.Device),
+		industrial:    make(map[string]map[string]interface{}),
+		dirty:         make(map[string]struct{}),
 		deviceCounter: initialCounter,
 		tenantID:      tenantID,
 	}
@@ -85,6 +94,7 @@ func (dm *DefaultDeviceManager) UpsertDevice(address, addressType string, timest
 		}
 
 		if additionalData != "" {
+			dm.materialize(devKey)
 			// Merge additional data if it exists
 			if dev.AdditionalData != "" {
 				// Parse existing additional data
@@ -141,11 +151,39 @@ func (dm *DefaultDeviceManager) RecordVLAN(address, addressType string, vlan mod
 // GetDevice retrieves a device by address and type
 func (dm *DefaultDeviceManager) GetDevice(address, addressType string) *model.Device {
 	devKey := addressType + ":" + address
+	dm.materialize(devKey)
 	return dm.devices[devKey]
+}
+
+// materialize writes a device's live industrial-protocol data into its
+// AdditionalData JSON. Callers that read AdditionalData get it through
+// GetDevice or GetAllDevices, which call this.
+func (dm *DefaultDeviceManager) materialize(devKey string) {
+	if _, ok := dm.dirty[devKey]; !ok {
+		return
+	}
+	delete(dm.dirty, devKey)
+	device := dm.devices[devKey]
+	if device == nil {
+		return
+	}
+	additionalData := make(map[string]interface{})
+	if device.AdditionalData != "" {
+		if err := json.Unmarshal([]byte(device.AdditionalData), &additionalData); err != nil || additionalData == nil {
+			additionalData = make(map[string]interface{})
+		}
+	}
+	additionalData["industrial_protocols"] = dm.industrial[devKey]
+	if jsonData, err := json.Marshal(additionalData); err == nil {
+		device.AdditionalData = string(jsonData)
+	}
 }
 
 // GetAllDevices returns all tracked devices
 func (dm *DefaultDeviceManager) GetAllDevices() []*model.Device {
+	for key := range dm.dirty {
+		dm.materialize(key)
+	}
 	devices := make([]*model.Device, 0, len(dm.devices))
 	for _, device := range dm.devices {
 		devices = append(devices, device)
@@ -162,109 +200,76 @@ func (dm *DefaultDeviceManager) UpdateDeviceWithIndustrialInfo(deviceIP string, 
 		return
 	}
 
-	// Create or update additional data with industrial protocol information
-	var additionalData map[string]interface{}
-	if device.AdditionalData != "" {
-		json.Unmarshal([]byte(device.AdditionalData), &additionalData)
-	} else {
-		additionalData = make(map[string]interface{})
+	industrialProtocols, ok := dm.industrial[deviceKey]
+	if !ok {
+		// First update for this device: pick up what an earlier run stored.
+		industrialProtocols = make(map[string]interface{})
+		if device.AdditionalData != "" {
+			var stored map[string]interface{}
+			if json.Unmarshal([]byte(device.AdditionalData), &stored) == nil {
+				if m, ok := stored["industrial_protocols"].(map[string]interface{}); ok {
+					industrialProtocols = m
+				}
+			}
+		}
+		dm.industrial[deviceKey] = industrialProtocols
 	}
 
-	// Add industrial protocol information
-	if additionalData["industrial_protocols"] == nil {
-		additionalData["industrial_protocols"] = make(map[string]interface{})
-	}
-
-	industrialProtocols := additionalData["industrial_protocols"].(map[string]interface{})
-
-	// Store protocol-specific information with enhanced data
-	protocolData := map[string]interface{}{
-		"protocol":         protocolInfo.Protocol,
-		"port":             protocolInfo.Port,
-		"direction":        protocolInfo.Direction,
-		"service_type":     protocolInfo.ServiceType,
-		"message_type":     protocolInfo.MessageType,
-		"is_real_time":     protocolInfo.IsRealTimeData,
-		"is_discovery":     protocolInfo.IsDiscovery,
-		"is_configuration": protocolInfo.IsConfiguration,
-		"confidence":       protocolInfo.Confidence,
-		"last_seen":        protocolInfo.Timestamp,
-		"is_destination":   isDestination,
-	}
-
-	// Add device identity information if available
-	if protocolInfo.DeviceIdentity != nil {
-		protocolData["device_identity"] = protocolInfo.DeviceIdentity
-	}
-
-	// Add security information if available
-	if protocolInfo.SecurityInfo != nil {
-		protocolData["security_info"] = protocolInfo.SecurityInfo
-	}
-
-	// Add additional protocol-specific data
-	if protocolInfo.AdditionalData != nil {
-		protocolData["additional_data"] = protocolInfo.AdditionalData
-	}
-
-	// Update or merge protocol data (handle multiple packets of same protocol)
 	protocolKey := protocolInfo.Protocol
-	if existingProto, exists := industrialProtocols[protocolKey]; exists {
-		// Merge with existing protocol data
-		existingProtoMap := existingProto.(map[string]interface{})
-
-		// Update timestamps to latest
+	existingProtoMap, _ := industrialProtocols[protocolKey].(map[string]interface{})
+	if existingProtoMap == nil {
+		// New protocol data. The info's maps are copied: they also belong to the
+		// packet record and must not change when later packets merge into this.
+		protocolData := map[string]interface{}{
+			"protocol":         protocolInfo.Protocol,
+			"port":             protocolInfo.Port,
+			"direction":        protocolInfo.Direction,
+			"service_type":     protocolInfo.ServiceType,
+			"message_type":     protocolInfo.MessageType,
+			"is_real_time":     protocolInfo.IsRealTimeData,
+			"is_discovery":     protocolInfo.IsDiscovery,
+			"is_configuration": protocolInfo.IsConfiguration,
+			"confidence":       protocolInfo.Confidence,
+			"last_seen":        protocolInfo.Timestamp,
+			"is_destination":   isDestination,
+		}
+		if protocolInfo.DeviceIdentity != nil {
+			protocolData["device_identity"] = maps.Clone(protocolInfo.DeviceIdentity)
+		}
+		if protocolInfo.SecurityInfo != nil {
+			protocolData["security_info"] = maps.Clone(protocolInfo.SecurityInfo)
+		}
+		if protocolInfo.AdditionalData != nil {
+			protocolData["additional_data"] = maps.Clone(protocolInfo.AdditionalData)
+		}
+		industrialProtocols[protocolKey] = protocolData
+	} else {
+		// Merge with existing protocol data (multiple packets of the same protocol)
 		existingProtoMap["last_seen"] = protocolInfo.Timestamp
 
 		// Update confidence if higher
 		if existingConf, ok := existingProtoMap["confidence"].(float64); ok {
-			if float64(protocolInfo.Confidence) > existingConf {
+			if protocolInfo.Confidence > existingConf {
 				existingProtoMap["confidence"] = protocolInfo.Confidence
 			}
 		}
 
-		// Merge device identity if provided
-		if protocolInfo.DeviceIdentity != nil {
-			if existingIdentity, ok := existingProtoMap["device_identity"].(map[string]interface{}); ok {
-				for k, v := range protocolInfo.DeviceIdentity {
-					existingIdentity[k] = v
-				}
+		mergeInto := func(key string, src map[string]interface{}) {
+			if src == nil {
+				return
+			}
+			if existing, ok := existingProtoMap[key].(map[string]interface{}); ok {
+				maps.Copy(existing, src)
 			} else {
-				existingProtoMap["device_identity"] = protocolInfo.DeviceIdentity
+				existingProtoMap[key] = maps.Clone(src)
 			}
 		}
-
-		// Merge security info if provided
-		if protocolInfo.SecurityInfo != nil {
-			if existingSecurity, ok := existingProtoMap["security_info"].(map[string]interface{}); ok {
-				for k, v := range protocolInfo.SecurityInfo {
-					existingSecurity[k] = v
-				}
-			} else {
-				existingProtoMap["security_info"] = protocolInfo.SecurityInfo
-			}
-		}
-
-		// Merge additional data if provided
-		if protocolInfo.AdditionalData != nil {
-			if existingAdditional, ok := existingProtoMap["additional_data"].(map[string]interface{}); ok {
-				for k, v := range protocolInfo.AdditionalData {
-					existingAdditional[k] = v
-				}
-			} else {
-				existingProtoMap["additional_data"] = protocolInfo.AdditionalData
-			}
-		}
-	} else {
-		// New protocol data
-		industrialProtocols[protocolKey] = protocolData
+		mergeInto("device_identity", protocolInfo.DeviceIdentity)
+		mergeInto("security_info", protocolInfo.SecurityInfo)
+		mergeInto("additional_data", protocolInfo.AdditionalData)
 	}
 
-	// Update device additional data
-	if jsonData, err := json.Marshal(additionalData); err == nil {
-		device.AdditionalData = string(jsonData)
-		dm.devices[deviceKey] = device
-	}
+	dm.dirty[deviceKey] = struct{}{}
 }
 
 // GetDeviceCounter returns the current device counter value
@@ -275,4 +280,6 @@ func (dm *DefaultDeviceManager) GetDeviceCounter() int64 {
 // Clear removes all devices from tracking
 func (dm *DefaultDeviceManager) Clear() {
 	dm.devices = make(map[string]*model.Device)
+	dm.industrial = make(map[string]map[string]interface{})
+	dm.dirty = make(map[string]struct{})
 }
