@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -428,7 +429,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.AddressScope,
 		macAddressesList,
 		device.AdditionalData,
-		sliceToJSON(device.ProtocolList.List()),
+		protocolListJSON(device.ProtocolList),
 		sliceToJSON(device.DNSNames.List()),
 		device.Hostname,
 		device.DeviceType,
@@ -600,8 +601,15 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 
 	// AddFlow: include bidirectional columns
 	packetRefsJSON, _ := json.Marshal(flow.PacketRefs)
+	// A preassigned id (set by the flow manager, which packets already reference) is kept;
+	// NULL lets SQLite assign one.
+	var flowIDArg interface{}
+	if flow.ID > 0 {
+		flowIDArg = flow.ID
+	}
 	result, err := r.db.Exec(
-		`INSERT INTO flows (tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO flows (id, tenant_id, src_ip, dst_ip, src_port, dst_port, protocol, packet_count_out, byte_count_out, packet_count_in, byte_count_in, first_seen, last_seen, duration, source_device_id, destination_device_id, min_packet_size, max_packet_size, packet_refs, source_ports, destination_ports, vlan_id, vlan_inner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		flowIDArg,
 		flow.TenantID,
 		ipToString(flow.SrcIP),
 		ipToString(flow.DstIP),
@@ -631,6 +639,38 @@ func (r *SQLiteRepository) AddFlow(flow *model2.Flow) error {
 	flow.ID, err = result.LastInsertId()
 	if err != nil {
 		return fmt.Errorf("last insert id for flow: %w", err)
+	}
+	return nil
+}
+
+// MaxFlowID returns the highest flow id in the database (0 if there are no flows).
+func (r *SQLiteRepository) MaxFlowID() (int64, error) {
+	var id sql.NullInt64
+	if err := r.db.QueryRow("SELECT MAX(id) FROM flows").Scan(&id); err != nil {
+		return 0, err
+	}
+	return id.Int64, nil
+}
+
+// relinkPackets points the packets listed in refs at flowID. It is only needed when a flow
+// was merged into an existing database row whose id differs from the one the packets carry.
+func (r *SQLiteRepository) relinkPackets(flowID int64, refs []int64) error {
+	const chunk = 500
+	for i := 0; i < len(refs); i += chunk {
+		end := i + chunk
+		if end > len(refs) {
+			end = len(refs)
+		}
+		args := make([]interface{}, 0, end-i+1)
+		args = append(args, flowID)
+		placeholders := make([]string, 0, end-i)
+		for _, id := range refs[i:end] {
+			args = append(args, id)
+			placeholders = append(placeholders, "?")
+		}
+		if _, err := r.db.Exec("UPDATE packets SET flow_id = ? WHERE id IN ("+strings.Join(placeholders, ",")+")", args...); err != nil {
+			return fmt.Errorf("relink packets to flow %d: %w", flowID, err)
+		}
 	}
 	return nil
 }
@@ -1346,7 +1386,7 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, vlans = ? WHERE id = ?;`,
+		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, vlans = ?, is_external = ?, protocol_list = ? WHERE id = ?;`,
 		device.TenantID,
 		device.Address,
 		device.AddressType,
@@ -1357,6 +1397,8 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 		macAddresses,
 		device.AdditionalData,
 		device.VLANSet.ToString(),
+		device.IsExternal,
+		protocolListJSON(device.ProtocolList),
 		device.ID,
 	)
 	return err
@@ -1532,11 +1574,34 @@ func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
 		// Device exists, update it
 		device.ID = existingDevice.ID
 		device.VLANSet = mergeVLANSets(existingDevice.VLANSet, device.VLANSet)
+		device.ProtocolList = mergeProtocolLists(existingDevice.ProtocolList.List(), device.ProtocolList)
 		return r.UpdateDevice(device)
 	}
 
 	// Device doesn't exist or there was an error retrieving it, insert it
 	return r.AddDevice(device)
+}
+
+// mergeProtocolLists returns the sorted union of a stored and an incoming
+// protocol list, so re-importing a capture never drops protocols recorded by an
+// earlier import. The incoming set may be nil.
+func mergeProtocolLists(stored []string, incoming *model2.Set) *model2.Set {
+	merged := model2.SetFromSlice(stored)
+	if incoming != nil {
+		merged.AddAll(incoming.List()...)
+	}
+	return merged
+}
+
+// protocolListJSON encodes a protocol set for the protocol_list column. A nil
+// set is stored as an empty value, not a panic.
+func protocolListJSON(set *model2.Set) string {
+	if set == nil {
+		return ""
+	}
+	list := set.List()
+	slices.Sort(list)
+	return sliceToJSON(list)
 }
 
 // mergeVLANSets returns the union of a stored and an incoming VLAN set. A device
@@ -1562,13 +1627,13 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname, is_external, protocol_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ?, hostname = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ?, hostname = ?, is_external = ?, protocol_list = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1576,7 +1641,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 	// Match on tenant too, or two tenants sharing an IP overwrite each other.
 	// COALESCE keeps rows written with a NULL tenant matching the empty tenant.
-	checkStmt, err := tx.Prepare(`SELECT id, vlans FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
+	checkStmt, err := tx.Prepare(`SELECT id, vlans, protocol_list FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1589,8 +1654,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 		// Check if device exists
 		var deviceID int64
-		var storedVLANs sql.NullString
-		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID, &storedVLANs)
+		var storedVLANs, storedProtocols sql.NullString
+		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID, &storedVLANs, &storedProtocols)
 
 		if err == nil {
 			// Device exists, update it
@@ -1599,6 +1664,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				macs = device.MACAddressSet.ToString()
 			}
 			device.VLANSet = mergeVLANSets(model2.VLANSetFromString(storedVLANs.String), device.VLANSet)
+			device.ProtocolList = mergeProtocolLists(jsonArrayToSlice(storedProtocols.String), device.ProtocolList)
 
 			_, err = updateStmt.Exec(
 				device.TenantID,
@@ -1612,6 +1678,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
 				device.Hostname,
+				device.IsExternal,
+				protocolListJSON(device.ProtocolList),
 				deviceID,
 			)
 			if err != nil {
@@ -1638,6 +1706,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
 				device.Hostname,
+				device.IsExternal,
+				protocolListJSON(device.ProtocolList),
 			)
 			if err != nil {
 				return err
@@ -2353,6 +2423,12 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 	}
 
 	if existingFlow != nil {
+		// Packets of this flow were stored with flow.ID; point them at the row they merge into.
+		if flow.ID > 0 && flow.ID != existingFlow.ID {
+			if err := r.relinkPackets(existingFlow.ID, flow.PacketRefs); err != nil {
+				return err
+			}
+		}
 		// Update existing flow
 		return r.updateBidirectionalFlow(existingFlow, flow, isReversed)
 	} else {
@@ -2370,6 +2446,7 @@ func (r *SQLiteRepository) UpsertFlow(flow *model2.Flow) error {
 			DstPort:          flow.DstPort,
 			FirstSeen:        flow.FirstSeen,
 			LastSeen:         flow.LastSeen,
+			ID:               flow.ID,
 			PacketRefs:       make([]int64, len(flow.PacketRefs)),
 			MinPacketSize:    flow.MinPacketSize,
 			MaxPacketSize:    flow.MaxPacketSize,

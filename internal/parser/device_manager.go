@@ -17,6 +17,10 @@ type DeviceManager interface {
 	// RecordVLAN adds the VLAN a device was seen in; unknown devices are ignored
 	RecordVLAN(address, addressType string, vlan model.VLANTag)
 
+	// RecordProtocol adds a highest-level protocol the device took part in;
+	// unknown devices and empty names are ignored
+	RecordProtocol(address, addressType, protocol string)
+
 	// GetDevice retrieves a device by address and type
 	GetDevice(address, addressType string) *model.Device
 
@@ -83,7 +87,9 @@ func (dm *DefaultDeviceManager) UpsertDevice(address, addressType string, timest
 			MACAddressSet:     macAddressSet,
 			AdditionalData:    additionalData,
 			IsOnlyDestination: isDestination,
+			IsExternal:        helper.IsExternalAddress(address),
 			VLANSet:           model.NewVLANSet(),
+			ProtocolList:      model.NewSet(),
 		}
 		dm.devices[devKey] = dev
 		dm.deviceCounter++
@@ -146,6 +152,23 @@ func (dm *DefaultDeviceManager) RecordVLAN(address, addressType string, vlan mod
 		dev.VLANSet = model.NewVLANSet()
 	}
 	dev.VLANSet.AddTag(vlan)
+}
+
+// RecordProtocol adds protocol to the device's protocol list (the protocol_list
+// column). The caller passes the highest-level protocol of a packet, see
+// HighestProtocol; the set keeps one entry per distinct name.
+func (dm *DefaultDeviceManager) RecordProtocol(address, addressType, protocol string) {
+	if protocol == "" {
+		return
+	}
+	dev, exists := dm.devices[addressType+":"+address]
+	if !exists {
+		return
+	}
+	if dev.ProtocolList == nil {
+		dev.ProtocolList = model.NewSet()
+	}
+	dev.ProtocolList.Add(protocol)
 }
 
 // GetDevice retrieves a device by address and type

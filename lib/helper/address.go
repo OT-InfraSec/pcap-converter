@@ -55,6 +55,25 @@ func GetAddressScope(address string, addressType string) string {
 	return ""
 }
 
+// IsExternalAddress reports whether address is a routable (public) IP address.
+// Private (RFC 1918 and IPv6 ULA), loopback, link-local, multicast, unspecified
+// and broadcast addresses are not external. Anything that is not an IP (a MAC
+// address, an empty string) is not external either: the flag is only a claim
+// about addresses that can be located outside the monitored network.
+func IsExternalAddress(address string) bool {
+	ip := net.ParseIP(address)
+	if ip == nil {
+		return false
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() ||
+		ip.Equal(net.IPv4bcast) {
+		return false
+	}
+	return true
+}
+
 func GetAddressScopeCombined(address string, macAddressSet *model.MACAddressSet) string {
 	if macAddressSet.Contains("ff:ff:ff:ff:ff:ff") {
 		return "broadcast"

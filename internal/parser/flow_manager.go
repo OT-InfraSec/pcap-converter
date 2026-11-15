@@ -31,7 +31,14 @@ type DefaultFlowManager struct {
 	flows             map[string]*model.Flow
 	flowCanonicalizer helper.FlowCanonicalizer
 	tenantID          string
+	// lastFlowID is the last database id handed out. Flows get their id when they are
+	// created so each packet can carry its flow_id when it is stored, instead of linking
+	// packets to flows afterwards with one UPDATE over the whole packets table.
+	lastFlowID int64
 }
+
+// SetLastFlowID sets the last flow id already used in the database; new flows get ids above it.
+func (fm *DefaultFlowManager) SetLastFlowID(id int64) { fm.lastFlowID = id }
 
 // NewDefaultFlowManager creates a new flow manager with canonicalization
 func NewDefaultFlowManager(tenantID string, flowCanonicalizer helper.FlowCanonicalizer) *DefaultFlowManager {
@@ -73,6 +80,8 @@ func (fm *DefaultFlowManager) UpdateFlow(src, dst, protocol string, srcPort, dst
 		// Create new flow in canonical direction
 		flow = fm.createNewFlow(canonicalSrc, canonicalDst, protocol, srcPort, dstPort, vlan,
 			packetSize, timestamp, packetID, sourcePortsSet, destinationPortsSet, isReversed)
+		fm.lastFlowID++
+		flow.ID = fm.lastFlowID
 		fm.flows[flowKey] = flow
 	} else {
 		// Update existing flow

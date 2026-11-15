@@ -112,6 +112,11 @@ func NewGopacketParser(pcapFile string, repo repository.Repository, tenantID str
 
 	// Create managers
 	flowManager := NewDefaultFlowManager(tenantID, helper2.NewFlowCanonicalizer())
+	if m, ok := repo.(interface{ MaxFlowID() (int64, error) }); ok {
+		if maxID, err := m.MaxFlowID(); err == nil {
+			flowManager.SetLastFlowID(maxID)
+		}
+	}
 	deviceManager := NewDefaultDeviceManager(tenantID, initialDeviceCounter)
 	serviceManager := NewDefaultServiceManager(tenantID)
 
@@ -1489,10 +1494,6 @@ func (p *GopacketParser) ParseFile() error {
 			VlanInnerID: vlan.Inner,
 		}
 
-		// Send the packet to the batch processing goroutine
-		packetChan <- modelPacket
-		packetsQueued++
-
 		// Device extraction and storage - optimized with cached values
 		// Handle MAC addresses
 		if srcMAC != "" && srcIP != "" && !arpProbe {
@@ -1552,6 +1553,16 @@ func (p *GopacketParser) ParseFile() error {
 			flowProto = label
 		}
 
+		// Both endpoints took part in this packet's highest-level protocol.
+		if highest := HighestProtocol(flowProto, protocols); highest != "" {
+			if srcIP != "" {
+				p.deviceManager.RecordProtocol(srcIP, "IP", highest)
+			}
+			if dstIP != "" {
+				p.deviceManager.RecordProtocol(dstIP, "IP", highest)
+			}
+		}
+
 		// Flow extraction and storage
 		if srcIP != "" && dstIP != "" && flowProto != "" && !arpRequest {
 			var source, destination string
@@ -1560,8 +1571,15 @@ func (p *GopacketParser) ParseFile() error {
 			destination = dstIP
 
 			// Always update flow - let FlowManager handle canonicalization
-			p.flowManager.UpdateFlow(source, destination, flowProto, srcPort, dstPort, vlan, timestamp, length, packetID)
+			if flow, _ := p.flowManager.UpdateFlow(source, destination, flowProto, srcPort, dstPort, vlan, timestamp, length, packetID); flow != nil {
+				modelPacket.FlowID = flow.ID
+			}
 		}
+
+		// Send the packet to the batch processing goroutine. This happens after flow
+		// extraction so the packet is stored with its flow_id and is not touched again.
+		packetChan <- modelPacket
+		packetsQueued++
 
 		packetID++
 	}
@@ -1657,12 +1675,8 @@ func (p *GopacketParser) ParseFile() error {
 		}
 	}
 
-	// Link packets to their flows now that all flows have been saved with database IDs
-	updatedCount, err := p.repo.LinkPacketsToFlows(p.TenantID)
-	if err != nil {
-		return fmt.Errorf("failed to link packets to flows: %w", err)
-	}
-	log.Debug().Msgf("Linked %d packets to flows\n", updatedCount)
+	// Packets already carry their flow_id (assigned when the flow was created), so the old
+	// LinkPacketsToFlows pass, one correlated UPDATE over all packets, is no longer needed.
 
 	// Batch process services
 	serviceBatch := make([]*model2.Service, 0, maxBatchSize)
