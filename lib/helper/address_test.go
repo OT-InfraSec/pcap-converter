@@ -387,3 +387,29 @@ func TestGetAddressScope_EdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestIsExternalAddress(t *testing.T) {
+	tests := map[string]bool{
+		"8.8.8.8":              true,
+		"93.184.216.34":        true,
+		"2001:4860:4860::8888": true,
+		"10.1.2.3":             false,
+		"172.16.0.1":           false,
+		"192.168.1.1":          false,
+		"127.0.0.1":            false,
+		"169.254.10.10":        false,
+		"224.0.0.251":          false,
+		"255.255.255.255":      false,
+		"0.0.0.0":              false,
+		"::1":                  false,
+		"fe80::1":              false,
+		"fd00::1":              false, // ULA
+		"ff02::fb":             false,
+		"ff:ff:ff:ff:ff:ff":    false, // MAC, not an IP
+		"":                     false,
+		"not-an-ip":            false,
+	}
+	for addr, want := range tests {
+		assert.Equal(t, want, IsExternalAddress(addr), addr)
+	}
+}

@@ -1553,6 +1553,16 @@ func (p *GopacketParser) ParseFile() error {
 			flowProto = label
 		}
 
+		// Both endpoints took part in this packet's highest-level protocol.
+		if highest := HighestProtocol(flowProto, protocols); highest != "" {
+			if srcIP != "" {
+				p.deviceManager.RecordProtocol(srcIP, "IP", highest)
+			}
+			if dstIP != "" {
+				p.deviceManager.RecordProtocol(dstIP, "IP", highest)
+			}
+		}
+
 		// Flow extraction and storage
 		if srcIP != "" && dstIP != "" && flowProto != "" && !arpRequest {
 			var source, destination string

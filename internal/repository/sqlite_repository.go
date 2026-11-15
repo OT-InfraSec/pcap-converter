@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -428,7 +429,7 @@ func (r *SQLiteRepository) AddDevice(device *model2.Device) error {
 		device.AddressScope,
 		macAddressesList,
 		device.AdditionalData,
-		sliceToJSON(device.ProtocolList.List()),
+		protocolListJSON(device.ProtocolList),
 		sliceToJSON(device.DNSNames.List()),
 		device.Hostname,
 		device.DeviceType,
@@ -1385,7 +1386,7 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 	}
 
 	_, err := r.db.Exec(
-		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, vlans = ? WHERE id = ?;`,
+		`UPDATE devices SET tenant_id = ?, address = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, vlans = ?, is_external = ?, protocol_list = ? WHERE id = ?;`,
 		device.TenantID,
 		device.Address,
 		device.AddressType,
@@ -1396,6 +1397,8 @@ func (r *SQLiteRepository) UpdateDevice(device *model2.Device) error {
 		macAddresses,
 		device.AdditionalData,
 		device.VLANSet.ToString(),
+		device.IsExternal,
+		protocolListJSON(device.ProtocolList),
 		device.ID,
 	)
 	return err
@@ -1571,11 +1574,34 @@ func (r *SQLiteRepository) UpsertDevice(device *model2.Device) error {
 		// Device exists, update it
 		device.ID = existingDevice.ID
 		device.VLANSet = mergeVLANSets(existingDevice.VLANSet, device.VLANSet)
+		device.ProtocolList = mergeProtocolLists(existingDevice.ProtocolList.List(), device.ProtocolList)
 		return r.UpdateDevice(device)
 	}
 
 	// Device doesn't exist or there was an error retrieving it, insert it
 	return r.AddDevice(device)
+}
+
+// mergeProtocolLists returns the sorted union of a stored and an incoming
+// protocol list, so re-importing a capture never drops protocols recorded by an
+// earlier import. The incoming set may be nil.
+func mergeProtocolLists(stored []string, incoming *model2.Set) *model2.Set {
+	merged := model2.SetFromSlice(stored)
+	if incoming != nil {
+		merged.AddAll(incoming.List()...)
+	}
+	return merged
+}
+
+// protocolListJSON encodes a protocol set for the protocol_list column. A nil
+// set is stored as an empty value, not a panic.
+func protocolListJSON(set *model2.Set) string {
+	if set == nil {
+		return ""
+	}
+	list := set.List()
+	slices.Sort(list)
+	return sliceToJSON(list)
 }
 
 // mergeVLANSets returns the union of a stored and an incoming VLAN set. A device
@@ -1601,13 +1627,13 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 	defer tx.Rollback()
 
 	// Prepare statements
-	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
+	insertStmt, err := tx.Prepare(`INSERT INTO devices (tenant_id, address, address_type, first_seen, last_seen, address_sub_type, address_scope, mac_addresses, additional_data, is_only_destination, vlans, hostname, is_external, protocol_list) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return err
 	}
 	defer insertStmt.Close()
 
-	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ?, hostname = ? WHERE id = ?;`)
+	updateStmt, err := tx.Prepare(`UPDATE devices SET tenant_id = ?, address_type = ?, first_seen = ?, last_seen = ?, address_sub_type = ?, address_scope = ?, mac_addresses = ?, additional_data = ?, is_only_destination = ?, vlans = ?, hostname = ?, is_external = ?, protocol_list = ? WHERE id = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1615,7 +1641,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 	// Match on tenant too, or two tenants sharing an IP overwrite each other.
 	// COALESCE keeps rows written with a NULL tenant matching the empty tenant.
-	checkStmt, err := tx.Prepare(`SELECT id, vlans FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
+	checkStmt, err := tx.Prepare(`SELECT id, vlans, protocol_list FROM devices WHERE address = ? AND COALESCE(tenant_id, '') = ?;`)
 	if err != nil {
 		return err
 	}
@@ -1628,8 +1654,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 
 		// Check if device exists
 		var deviceID int64
-		var storedVLANs sql.NullString
-		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID, &storedVLANs)
+		var storedVLANs, storedProtocols sql.NullString
+		err = checkStmt.QueryRow(device.Address, device.TenantID).Scan(&deviceID, &storedVLANs, &storedProtocols)
 
 		if err == nil {
 			// Device exists, update it
@@ -1638,6 +1664,7 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				macs = device.MACAddressSet.ToString()
 			}
 			device.VLANSet = mergeVLANSets(model2.VLANSetFromString(storedVLANs.String), device.VLANSet)
+			device.ProtocolList = mergeProtocolLists(jsonArrayToSlice(storedProtocols.String), device.ProtocolList)
 
 			_, err = updateStmt.Exec(
 				device.TenantID,
@@ -1651,6 +1678,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
 				device.Hostname,
+				device.IsExternal,
+				protocolListJSON(device.ProtocolList),
 				deviceID,
 			)
 			if err != nil {
@@ -1677,6 +1706,8 @@ func (r *SQLiteRepository) UpsertDevices(devices []*model2.Device) error {
 				device.IsOnlyDestination,
 				device.VLANSet.ToString(),
 				device.Hostname,
+				device.IsExternal,
+				protocolListJSON(device.ProtocolList),
 			)
 			if err != nil {
 				return err

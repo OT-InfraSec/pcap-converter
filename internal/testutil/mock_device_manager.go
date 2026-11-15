@@ -74,6 +74,8 @@ func (m *MockDeviceManager) RecordVLAN(address, addressType string, vlan model.V
 	}
 }
 
+func (m *MockDeviceManager) RecordProtocol(address, addressType, protocol string) {}
+
 func (m *MockDeviceManager) GetDevice(address, addressType string) *model.Device {
 	m.GetDeviceCalls = append(m.GetDeviceCalls, MockDeviceManagerGetDeviceCall{
 		Address: address, AddressType: addressType,
